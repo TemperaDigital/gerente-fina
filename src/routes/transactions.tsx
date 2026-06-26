@@ -253,7 +253,14 @@ function TransactionsPage() {
         </header>
 
         <div className="space-y-4">
-          <ReviewQueue groups={review} onDiscard={(id) => discardMut.mutate(id)} />
+          <ReviewQueue
+            groups={review}
+            onDiscard={(id) => discardMut.mutate(id)}
+            onMerge={(keep_id, absorb_ids) =>
+              mergeMut.mutate({ keep_id, absorb_ids })
+            }
+          />
+
 
           <FiltersBar
             value={filters}
