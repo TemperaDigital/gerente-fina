@@ -67,7 +67,7 @@ function SettingsComponent() {
       {/* BLOCO 1: SEGURANÇA E GOVERNANÇA DE DADOS */}
       <div className="bg-white/[0.02] border border-white/[0.06] backdrop-blur-xl rounded-2xl p-6 shadow-2xl space-y-6">
         <h2 className="text-base font-bold text-zinc-200 flex items-center gap-2 border-b border-zinc-900 pb-3">
-          <Shield className="w-4 h-4 text-indigo-400" /> Governança e Portabilidade de Dados[cite: 2]
+          <Shield className="w-4 h-4 text-indigo-400" /> Governança e Portabilidade de Dados
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -75,17 +75,17 @@ function SettingsComponent() {
           <div className="bg-zinc-900/40 p-4 rounded-xl border border-zinc-900 flex flex-col justify-between space-y-3">
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                <Download className="w-4 h-4 text-zinc-400" /> Exportar Dados Contábeis[cite: 2]
+                <Download className="w-4 h-4 text-zinc-400" /> Exportar Dados Contábeis
               </h3>
               <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
-                Baixe instantaneamente um relatório compilado de todas as suas contas, cartões e lançamentos históricos em formatos portáveis JSON e CSV para auditorias externas[cite: 2].
+                Baixe instantaneamente um relatório compilado de todas as suas contas, cartões e lançamentos históricos em formatos portáveis JSON e CSV para auditorias externas.
               </p>
             </div>
             <button 
               onClick={handleExportData}
               className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-colors"
             >
-              Exportar Agora (JSON/CSV)[cite: 2]
+              Exportar Agora (JSON/CSV)
             </button>
           </div>
 
@@ -93,18 +93,18 @@ function SettingsComponent() {
           <div className="bg-zinc-900/40 p-4 rounded-xl border border-zinc-900 flex flex-col justify-between space-y-3">
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                <Upload className="w-4 h-4 text-zinc-400" /> Backup Local de Segurança[cite: 2]
+                <Upload className="w-4 h-4 text-zinc-400" /> Backup Local de Segurança
               </h3>
               <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
-                Gere um arquivo físico criptografado contendo a maquete completa do seu patrimônio atual ou carregue um arquivo existente para reverter o estado do sistema[cite: 2].
+                Gere um arquivo físico criptografado contendo a maquete completa do seu patrimônio atual ou carregue um arquivo existente para reverter o estado do sistema.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={handleRestore} className="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold rounded-xl border border-zinc-800 transition-colors">
-                Restaurar Backup[cite: 2]
+                Restaurar Backup
               </button>
               <button onClick={handleBackup} className="py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-md transition-colors">
-                Fazer Backup[cite: 2]
+                Fazer Backup
               </button>
             </div>
           </div>
@@ -135,7 +135,7 @@ function SettingsComponent() {
           <div>
             <h2 className="text-base font-bold text-white">Zona de Perigo Crítico</h2>
             <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-              A exclusão da conta é um processo irreversível. Ao confirmar, todos os seus dados contábeis, chaves de criptografia e histórico do Open Finance associados no Supabase serão apagados permanentemente de forma imediata[cite: 2].
+              A exclusão da conta é um processo irreversível. Ao confirmar, todos os seus dados contábeis, chaves de criptografia e histórico do Open Finance associados no Supabase serão apagados permanentemente de forma imediata.
             </p>
           </div>
         </div>
@@ -144,7 +144,7 @@ function SettingsComponent() {
             onClick={() => { setShowDeleteModal(true); setConfirmText(''); }}
             className="bg-rose-600/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
           >
-            <Trash2 className="w-4 h-4" /> Excluir Conta do Sistema[cite: 2]
+            <Trash2 className="w-4 h-4" /> Excluir Conta do Sistema
           </button>
         </div>
       </div>
@@ -157,9 +157,9 @@ function SettingsComponent() {
               <div className="w-12 h-12 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full flex items-center justify-center mx-auto mb-2">
                 <ShieldAlert className="w-6 h-6 animate-pulse" />
               </div>
-              <h3 className="text-lg font-bold text-white">Dupla Confirmação Exigida[cite: 2]</h3>
+              <h3 className="text-lg font-bold text-white">Dupla Confirmação Exigida</h3>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                Para prosseguir com a deleção e expurgar seus dados do banco, digite a frase abaixo no campo de segurança:[cite: 2]
+                Para prosseguir com a deleção e expurgar seus dados do banco, digite a frase abaixo no campo de segurança:
               </p>
               <p className="text-xs font-mono font-bold bg-zinc-950 p-2 rounded text-rose-400 tracking-wider">
                 excluir definitivamente
@@ -178,14 +178,14 @@ function SettingsComponent() {
 
             <div className="flex space-x-3 pt-2">
               <button onClick={() => setShowDeleteModal(false)} className="w-full py-2 bg-zinc-800 text-zinc-400 text-xs font-semibold rounded-xl">
-                Cancelar e Proteger Conta[cite: 2]
+                Cancelar e Proteger Conta
               </button>
               <button 
                 onClick={handleDeleteAccount}
                 disabled={confirmText.toLowerCase() !== 'excluir definitivamente'}
                 className="w-full py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-30 text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-950/50 transition-colors"
               >
-                Sim, Apagar Tudo[cite: 2]
+                Sim, Apagar Tudo
               </button>
             </div>
           </div>
