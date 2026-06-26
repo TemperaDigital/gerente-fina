@@ -243,7 +243,7 @@ function DashboardPage() {
           <CreditCardsWidget invoices={invoices} />
         </section>
       </div>
-    </div>
+    </AppShell>
   );
 }
 
