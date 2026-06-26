@@ -691,11 +691,19 @@ export const mergeDuplicateTransactions = createServerFn({ method: "POST" })
       absorbed.find((a) => a.source && a.source !== "manual") ??
       absorbed[0];
 
+    // Ordem crítica: DELETE primeiro libera o índice UNIQUE parcial em
+    // (user_id, dedup_hash), evitando conflito quando o keeper for
+    // re-hasheado pelo trigger ao receber source='import'/'pluggy'.
+    const { error: dErr } = await sb
+      .from("transactions")
+      .delete()
+      .in("id", data.absorb_ids);
+    if (dErr) throw new Error(`Falha ao remover duplicatas: ${dErr.message}`);
+
+    // Patch: preserva amarração do Open Finance (external_id) e marca source
+    // como o do donor (que dispara a re-geração do dedup_hash via trigger).
     const patch: Record<string, string | null> = {};
-    if (donor.dedup_hash && !keeperBefore.dedup_hash)
-      patch.dedup_hash = donor.dedup_hash;
-    if (donor.source && donor.source !== "manual")
-      patch.source = donor.source;
+    if (donor.source && donor.source !== "manual") patch.source = donor.source;
     if (donor.external_id && !keeperBefore.external_id)
       patch.external_id = donor.external_id;
 
@@ -704,24 +712,12 @@ export const mergeDuplicateTransactions = createServerFn({ method: "POST" })
         .from("transactions")
         .update(patch)
         .eq("id", data.keep_id);
-      if (uErr) throw new Error(`Falha ao absorver metadados: ${uErr.message}`);
-    }
-
-    const { error: dErr } = await sb
-      .from("transactions")
-      .delete()
-      .in("id", data.absorb_ids);
-
-    if (dErr) {
-      await sb
-        .from("transactions")
-        .update({
-          dedup_hash: keeperBefore.dedup_hash,
-          source: keeperBefore.source,
-          external_id: keeperBefore.external_id,
-        })
-        .eq("id", data.keep_id);
-      throw new Error(`Falha ao remover duplicatas: ${dErr.message}`);
+      if (uErr) {
+        // Não há rollback dos deletes; logamos via warning no retorno.
+        throw new Error(
+          `Duplicatas removidas, mas falha ao absorver metadados: ${uErr.message}`,
+        );
+      }
     }
 
     return { ok: true, kept_id: data.keep_id, absorbed_count: absorbed.length };
