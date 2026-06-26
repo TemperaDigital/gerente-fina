@@ -62,6 +62,7 @@ function BudgetsComponent() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* BLOCO DE LIMITES */}
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
             <h2 className="text-lg font-bold text-zinc-200 flex items-center gap-2">
@@ -110,6 +111,7 @@ function BudgetsComponent() {
           </div>
         </div>
 
+        {/* BLOCO DE METAS */}
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
             <h2 className="text-lg font-bold text-zinc-200 flex items-center gap-2">
@@ -156,6 +158,7 @@ function BudgetsComponent() {
         </div>
       </div>
 
+      {/* MODAL FORMULÁRIO */}
       {showModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-zinc-900 border border-white/[0.08] max-w-sm w-full rounded-2xl p-6 space-y-4 shadow-2xl">
