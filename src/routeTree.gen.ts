@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as CreditCardsRouteImport } from './routes/credit-cards'
+import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TransactionsNewRouteImport } from './routes/transactions.new'
 import { Route as TransactionsEditIdRouteImport } from './routes/transactions.edit.$id'
@@ -23,6 +25,16 @@ const TransactionsRoute = TransactionsRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CreditCardsRoute = CreditCardsRouteImport.update({
+  id: '/credit-cards',
+  path: '/credit-cards',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountsRoute = AccountsRouteImport.update({
+  id: '/accounts',
+  path: '/accounts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -43,6 +55,8 @@ const TransactionsEditIdRoute = TransactionsEditIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/accounts': typeof AccountsRoute
+  '/credit-cards': typeof CreditCardsRoute
   '/dashboard': typeof DashboardRoute
   '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
@@ -50,6 +64,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/accounts': typeof AccountsRoute
+  '/credit-cards': typeof CreditCardsRoute
   '/dashboard': typeof DashboardRoute
   '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
@@ -58,6 +74,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/accounts': typeof AccountsRoute
+  '/credit-cards': typeof CreditCardsRoute
   '/dashboard': typeof DashboardRoute
   '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
@@ -67,6 +85,8 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/accounts'
+    | '/credit-cards'
     | '/dashboard'
     | '/transactions'
     | '/transactions/new'
@@ -74,6 +94,8 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/accounts'
+    | '/credit-cards'
     | '/dashboard'
     | '/transactions'
     | '/transactions/new'
@@ -81,6 +103,8 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/accounts'
+    | '/credit-cards'
     | '/dashboard'
     | '/transactions'
     | '/transactions/new'
@@ -89,6 +113,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccountsRoute: typeof AccountsRoute
+  CreditCardsRoute: typeof CreditCardsRoute
   DashboardRoute: typeof DashboardRoute
   TransactionsRoute: typeof TransactionsRouteWithChildren
 }
@@ -107,6 +133,20 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/credit-cards': {
+      id: '/credit-cards'
+      path: '/credit-cards'
+      fullPath: '/credit-cards'
+      preLoaderRoute: typeof CreditCardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/accounts': {
+      id: '/accounts'
+      path: '/accounts'
+      fullPath: '/accounts'
+      preLoaderRoute: typeof AccountsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -149,6 +189,8 @@ const TransactionsRouteWithChildren = TransactionsRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccountsRoute: AccountsRoute,
+  CreditCardsRoute: CreditCardsRoute,
   DashboardRoute: DashboardRoute,
   TransactionsRoute: TransactionsRouteWithChildren,
 }
