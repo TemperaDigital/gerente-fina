@@ -27,6 +27,7 @@ import {
   formatBRL,
 } from "@/components/dashboard/primitives";
 import { CreditCardsWidget } from "@/components/dashboard/credit-cards-widget";
+import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -110,18 +111,8 @@ function DashboardPage() {
     navigate({ search: (prev: DashboardSearch) => ({ ...prev, month: next }) });
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-zinc-950 text-foreground">
-      {/* Glow de fundo (ambiente ZimaOS) */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10"
-        style={{
-          background:
-            "radial-gradient(800px 500px at 15% -10%, rgba(99,102,241,0.18), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,0.14), transparent 60%), radial-gradient(900px 600px at 50% 110%, rgba(16,185,129,0.10), transparent 60%)",
-        }}
-      />
-
-      <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <AppShell>
+      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
         {/* Header */}
         <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -252,7 +243,7 @@ function DashboardPage() {
           <CreditCardsWidget invoices={invoices} />
         </section>
       </div>
-    </div>
+    </AppShell>
   );
 }
 
