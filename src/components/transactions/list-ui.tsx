@@ -3,6 +3,7 @@
  * Visual: vidro fosco / ZimaOS. Headless — recebe DTOs prontos.
  */
 import { useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftRight,
   ArrowDownCircle,
