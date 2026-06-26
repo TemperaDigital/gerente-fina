@@ -24,6 +24,7 @@ import {
   GlassCard,
   GooglePeriodPicker,
 } from "@/components/dashboard/primitives";
+import { AppShell } from "@/components/app-shell";
 import {
   FiltersBar,
   ReviewQueue,
