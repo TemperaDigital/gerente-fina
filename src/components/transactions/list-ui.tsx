@@ -3,6 +3,7 @@
  * Visual: vidro fosco / ZimaOS. Headless — recebe DTOs prontos.
  */
 import { useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftRight,
   ArrowDownCircle,
@@ -284,68 +285,75 @@ function TransactionRow({ it }: { it: TransactionListItemDTO }) {
       : "text-violet-300";
 
   return (
-    <li className="grid grid-cols-[auto_1fr_auto] items-center gap-4 px-5 py-3 transition-colors hover:bg-white/[0.04]">
-      <div
-        className={cn(
-          "flex size-9 items-center justify-center rounded-xl border border-white/5",
-          "bg-gradient-to-br from-white/[0.06] to-white/[0.02]",
-        )}
+    <li>
+      <Link
+        to="/transactions/edit/$id"
+        params={{ id: it.id }}
+        className="grid grid-cols-[auto_1fr_auto] items-center gap-4 px-5 py-3 transition-colors hover:bg-white/[0.04]"
       >
-        <Icon className={cn("size-4", meta.color)} />
-      </div>
-
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="truncate text-sm font-medium text-foreground">
-            {it.description || meta.label}
-          </span>
-          {it.installment_progress && (
-            <Badge
-              variant="outline"
-              className="gap-1 border-amber-400/30 bg-amber-400/10 px-1.5 py-0 text-[10px] font-semibold text-amber-300"
-            >
-              <Layers className="size-3" /> {it.installment_progress}
-            </Badge>
+        <div
+          className={cn(
+            "flex size-9 items-center justify-center rounded-xl border border-white/5",
+            "bg-gradient-to-br from-white/[0.06] to-white/[0.02]",
           )}
-          {it.recurrence_id && (
-            <Badge
-              variant="outline"
-              className="gap-1 border-sky-400/30 bg-sky-400/10 px-1.5 py-0 text-[10px] font-semibold text-sky-300"
-            >
-              <Repeat className="size-3" /> Recorrente
-            </Badge>
-          )}
-          {it.kind === "transfer" && it.transfer_counterpart_name && (
-            <Badge
-              variant="outline"
-              className="border-sky-400/30 bg-sky-400/10 px-1.5 py-0 text-[10px] font-semibold text-sky-300"
-            >
-              🔁 {it.type === "debit" ? "Para" : "De"}:{" "}
-              {it.transfer_counterpart_name}
-            </Badge>
-          )}
-          {it.kind === "invoice_payment" && (
-            <Badge
-              variant="outline"
-              className="border-violet-400/30 bg-violet-400/10 px-1.5 py-0 text-[10px] font-semibold text-violet-300"
-            >
-              Fatura
-            </Badge>
-          )}
+        >
+          <Icon className={cn("size-4", meta.color)} />
         </div>
-        <div className="mt-0.5 truncate text-xs text-foreground/50">
-          {it.account_name ?? "—"}
-          {it.category_name ? ` · ${it.category_name}` : ""}
-        </div>
-      </div>
 
-      <div className={cn("text-right text-sm font-semibold tabular-nums", amountColor)}>
-        {amountSign}
-        {formatBRL(it.amount)}
-      </div>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-medium text-foreground">
+              {it.description || meta.label}
+            </span>
+            {it.installment_progress && (
+              <Badge
+                variant="outline"
+                className="gap-1 border-amber-400/30 bg-amber-400/10 px-1.5 py-0 text-[10px] font-semibold text-amber-300"
+              >
+                <Layers className="size-3" /> {it.installment_progress}
+              </Badge>
+            )}
+            {it.recurrence_id && (
+              <Badge
+                variant="outline"
+                className="gap-1 border-sky-400/30 bg-sky-400/10 px-1.5 py-0 text-[10px] font-semibold text-sky-300"
+              >
+                <Repeat className="size-3" /> Recorrente
+              </Badge>
+            )}
+            {it.kind === "transfer" && it.transfer_counterpart_name && (
+              <Badge
+                variant="outline"
+                className="border-sky-400/30 bg-sky-400/10 px-1.5 py-0 text-[10px] font-semibold text-sky-300"
+              >
+                🔁 {it.type === "debit" ? "Para" : "De"}:{" "}
+                {it.transfer_counterpart_name}
+              </Badge>
+            )}
+            {it.kind === "invoice_payment" && (
+              <Badge
+                variant="outline"
+                className="border-violet-400/30 bg-violet-400/10 px-1.5 py-0 text-[10px] font-semibold text-violet-300"
+              >
+                Fatura
+              </Badge>
+            )}
+          </div>
+          <div className="mt-0.5 truncate text-xs text-foreground/50">
+            {it.account_name ?? "—"}
+            {it.category_name ? ` · ${it.category_name}` : ""}
+          </div>
+        </div>
+
+        <div className={cn("text-right text-sm font-semibold tabular-nums", amountColor)}>
+          {amountSign}
+          {formatBRL(it.amount)}
+        </div>
+      </Link>
     </li>
   );
 }
+
 
 // ---------------------------------------------------------------------------
 // Review Queue (fila de conciliação)
