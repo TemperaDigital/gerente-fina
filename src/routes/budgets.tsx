@@ -2,277 +2,207 @@
  * Rota /budgets — Tetos de gastos por categoria.
  * Barra de progresso visual derivada das transactions kind='expense'.
  */
-import { useState } from "react";
-import {
-  createFileRoute,
-  useNavigate,
-  useRouter,
-} from "@tanstack/react-router";
-import {
-  queryOptions,
-  useSuspenseQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
-import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { createFileRoute } from '@tanstack/react-router';
+import { useState } from 'react';
+import { Plus, Target, PiggyBank, TrendingUp, AlertCircle, Edit3, Trash2, CheckSquare } from 'lucide-react';
 
-import { AppShell } from "@/components/app-shell";
-import {
-  GlassCard,
-  GooglePeriodPicker,
-  formatBRL,
-} from "@/components/dashboard/primitives";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-import { listBudgets, upsertBudget, deleteBudget } from "@/services/budgets.functions";
-import { getCategoriesLookup } from "@/services/lookups.functions";
-import { cn } from "@/lib/utils";
-
-interface BudgetsSearch {
-  month: string;
-}
-
-function currentMonth() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-const budgetsQ = (month: string) =>
-  queryOptions({
-    queryKey: ["budgets", month],
-    queryFn: () => listBudgets({ data: { month } }),
-  });
-const categoriesQ = () =>
-  queryOptions({
-    queryKey: ["lookup", "categories"],
-    queryFn: () => getCategoriesLookup(),
-  });
-
-export const Route = createFileRoute("/budgets")({
-  head: () => ({ meta: [{ title: "Orçamentos — Gerente Fina" }] }),
-  validateSearch: (raw): BudgetsSearch => {
-    const m =
-      typeof raw.month === "string" && /^\d{4}-\d{2}$/.test(raw.month)
-        ? raw.month
-        : currentMonth();
-    return { month: m };
-  },
-  loaderDeps: ({ search: { month } }) => ({ month }),
-  loader: async ({ context, deps }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(budgetsQ(deps.month)),
-      context.queryClient.ensureQueryData(categoriesQ()),
-    ]);
-  },
-  errorComponent: ({ error }) => (
-    <AppShell>
-      <div className="p-6 text-rose-400">{error.message}</div>
-    </AppShell>
-  ),
-  notFoundComponent: () => (
-    <AppShell>
-      <div className="p-6 text-foreground/60">Indisponível.</div>
-    </AppShell>
-  ),
-  component: BudgetsPage,
+export const Route = createFileRoute('/budgets')({
+  component: BudgetsComponent,
 });
 
-function BudgetsPage() {
-  const { month } = Route.useSearch();
-  const navigate = useNavigate({ from: Route.fullPath });
-  const qc = useQueryClient();
+// Mocks iniciais aderentes ao PRD (Limites por categoria e objetivos de poupança)
+const INITIAL_BUDGETS = [
+  { id: '1', categoryName: 'Alimentação', limitValue: 1500, currentSpent: 1240.50, color: 'from-indigo-500 to-purple-600' },
+  { id: '2', categoryName: 'Lazer e Viagens', limitValue: 600, currentSpent: 150.00, color: 'from-pink-500 to-rose-600' },
+  { id: '3', categoryName: 'Transporte / Uber', limitValue: 800, currentSpent: 840.00, color: 'from-amber-500 to-orange-600' }, // ESTOUROU!
+];
 
-  const { data: budgets } = useSuspenseQuery(budgetsQ(month));
-  const { data: categories } = useSuspenseQuery(categoriesQ());
-  const expenseCats = categories.filter((c) => c.kind === "expense");
+const INITIAL_GOALS = [
+  { id: 'g1', title: 'Reserva de Emergência', targetValue: 20000, currentSaved: 14500, deadline: 'Dez/2026' },
+  { id: 'g2', title: 'Viagem de Fim de Ano', targetValue: 8000, currentSaved: 3200, deadline: 'Nov/2026' },
+];
 
-  const upsertFn = useServerFn(upsertBudget);
-  const deleteFn = useServerFn(deleteBudget);
+function BudgetsComponent() {
+  const [budgets, setBudgets] = useState(INITIAL_BUDGETS);
+  const [goals, setGoals] = useState(INITIAL_GOALS);
+  const [showModal, setShowModal] = useState(false);
+  const [modalMode, setModalMode] = useState<'budget' | 'goal'>('budget');
 
-  const [catId, setCatId] = useState<string>("");
-  const [amount, setAmount] = useState("");
-  const [recurring, setRecurring] = useState(true);
+  // Form states
+  const [name, setName] = useState('');
+  const [target, setTarget] = useState('');
 
-  const upsert = useMutation({
-    mutationFn: () =>
-      upsertFn({
-        data: {
-          category_id: catId,
-          amount,
-          reference_month: recurring ? null : month,
-        },
-      }),
-    onSuccess: () => {
-      toast.success("Orçamento salvo.");
-      setAmount("");
-      setCatId("");
-      qc.invalidateQueries({ queryKey: ["budgets"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const remove = useMutation({
-    mutationFn: (id: string) => deleteFn({ data: { id } }),
-    onSuccess: () => {
-      toast.success("Orçamento removido.");
-      qc.invalidateQueries({ queryKey: ["budgets"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const handleSave = () => {
+    if (!name || !target) return;
+    const numTarget = parseFloat(target);
+
+    if (modalMode === 'budget') {
+      setBudgets(prev => [...prev, {
+        id: Date.now().toString(),
+        categoryName: name,
+        limitValue: numTarget,
+        currentSpent: 0,
+        color: 'from-teal-500 to-emerald-600'
+      }]);
+    } else {
+      setGoals(prev => [...prev, {
+        id: Date.now().toString(),
+        title: name,
+        targetValue: numTarget,
+        currentSaved: 0,
+        deadline: '2026'
+      }]);
+    }
+    setShowModal(false);
+  };
 
   return (
-    <AppShell>
-      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-        <header className="mb-6 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 sm:flex sm:flex-wrap sm:justify-between">
-          <div className="min-w-0">
-            <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
-              Orçamentos
-            </h1>
-            <p className="mt-1 text-sm text-foreground/60">
-              Tetos por categoria — consumo em tempo real.
-            </p>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-4 md:p-8 space-y-8">
+      {/* Cabeçalho */}
+      <div>
+        <h1 className="text-3xl font-bold bg-gradient-to-r from-white via-zinc-200 to-zinc-500 bg-clip-text text-transparent">
+          Orçamentos e Metas
+        </h1>
+        <p className="text-sm text-zinc-400 mt-1">
+          Defina tetos de gastos mensais por categoria e monitore seus objetivos de poupança de longo prazo.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        {/* BLOCO 1: TETOS DE GASTOS (ORÇAMENTOS) */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+            <h2 className="text-lg font-bold text-zinc-200 flex items-center gap-2">
+              <Target className="w-5 h-5 text-indigo-400" /> Limites Mensais[cite: 2]
+            </h2>
+            <button onClick={() => { setModalMode('budget'); setName(''); setTarget(''); setShowModal(true); }} className="text-xs bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.08] text-zinc-300 font-semibold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1">
+              <Plus className="w-3.5 h-3.5" /> Definir Limite[cite: 2]
+            </button>
           </div>
-          <GooglePeriodPicker
-            value={month}
-            onChange={(m) =>
-              navigate({ search: () => ({ month: m }) })
-            }
-          />
-        </header>
 
-        <div className="grid gap-4 lg:grid-cols-[1fr,2fr]">
-          <GlassCard className="p-5">
-            <h2 className="text-sm font-semibold">Novo teto</h2>
-            <div className="mt-3 space-y-3">
-              <div>
-                <Label className="text-xs">Categoria</Label>
-                <Select value={catId} onValueChange={setCatId}>
-                  <SelectTrigger className="mt-1 border-white/10 bg-white/[0.04]">
-                    <SelectValue placeholder="Selecione" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {expenseCats.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs">Valor mensal (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0,00"
-                  className="mt-1 border-white/10 bg-white/[0.04]"
-                />
-              </div>
-              <label className="flex items-center gap-2 text-xs text-foreground/70">
-                <input
-                  type="checkbox"
-                  checked={recurring}
-                  onChange={(e) => setRecurring(e.target.checked)}
-                  className="accent-primary"
-                />
-                Recorrente em todos os meses
-              </label>
-              <Button
-                onClick={() => upsert.mutate()}
-                disabled={!catId || !amount || upsert.isPending}
-                className="w-full gap-2"
-              >
-                <Plus className="size-4" /> Salvar
-              </Button>
-            </div>
-          </GlassCard>
+          <div className="space-y-4">
+            {budgets.map(b => {
+              const percent = Math.min((b.currentSpent / b.limitValue) * 100, 100);
+              const isOver = b.currentSpent > b.limitValue;
 
-          <div className="space-y-3">
-            {budgets.length === 0 ? (
-              <GlassCard className="p-8 text-center text-sm text-foreground/50">
-                Nenhum orçamento configurado para este mês.
-              </GlassCard>
-            ) : (
-              budgets.map((b) => {
-                const tone =
-                  b.percent >= 100
-                    ? "bg-rose-400"
-                    : b.percent >= 80
-                    ? "bg-amber-400"
-                    : "bg-emerald-400";
-                return (
-                  <GlassCard key={b.id} className="p-4">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">
-                          {b.category_name ?? "—"}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-foreground/50">
-                          {b.reference_month ? "Pontual deste mês" : "Recorrente"}
-                        </div>
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="size-8 text-foreground/50 hover:text-rose-400"
-                        onClick={() => remove.mutate(b.id)}
-                        aria-label="Excluir"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
+              return (
+                <div key={b.id} className="bg-white/[0.02] border border-white/[0.06] rounded-2xl p-5 space-y-3 shadow-xl backdrop-blur-md">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-bold text-zinc-200 text-sm">{b.categoryName}[cite: 2]</h3>
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
+                        Gasto: R$ {b.currentSpent.toLocaleString('pt-BR')} de R$ {b.limitValue.toLocaleString('pt-BR')}[cite: 2]
+                      </p>
                     </div>
-                    <Progress
-                      value={b.percent}
-                      className={cn("mt-3 h-2 bg-white/10", `[&>div]:${tone}`)}
+                    {isOver && (
+                      <span className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 animate-pulse">
+                        <AlertCircle className="w-3 h-3" /> Orçamento Estourado
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Barra de progresso */}
+                  <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden p-0.5 border border-white/5">
+                    <div 
+                      className={`h-full rounded-full bg-gradient-to-r ${isOver ? 'from-rose-500 to-red-600' : b.color} transition-all duration-500`}
+                      style={{ width: `${percent}%` }}
                     />
-                    <div className="mt-2 grid grid-cols-3 text-xs">
-                      <div>
-                        <div className="text-foreground/50">Gasto</div>
-                        <div className="font-semibold tabular-nums text-rose-300">
-                          {formatBRL(b.spent)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-foreground/50">Teto</div>
-                        <div className="font-semibold tabular-nums">
-                          {formatBRL(b.amount)}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-foreground/50">Restante</div>
-                        <div
-                          className={cn(
-                            "font-semibold tabular-nums",
-                            Number(b.remaining) < 0
-                              ? "text-rose-300"
-                              : "text-emerald-300",
-                          )}
-                        >
-                          {formatBRL(b.remaining)}
-                        </div>
-                      </div>
-                    </div>
-                  </GlassCard>
-                );
-              })
-            )}
+                  </div>
+
+                  <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
+                    <span>{percent.toFixed(0)}% consumido</span>
+                    <span>Disponível: R$ {Math.max(0, b.limitValue - b.currentSpent).toLocaleString('pt-BR')}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
+
+        {/* BLOCO 2: METAS FINANCEIRAS */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+            <h2 className="text-lg font-bold text-zinc-200 flex items-center gap-2">
+              <PiggyBank className="w-5 h-5 text-emerald-400" /> Metas de Poupança[cite: 2]
+            </h2>
+            <button onClick={() => { setModalMode('goal'); setName(''); setTarget(''); setShowModal(true); }} className="text-xs bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.08] text-zinc-300 font-semibold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1">
+              <Plus className="w-3.5 h-3.5" /> Nova Meta[cite: 2]
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {goals.map(g => {
+              const percent = Math.min((g.currentSaved / g.targetValue) * 100, 100);
+
+              return (
+                <div key={g.id} className="bg-white/[0.02] border border-white/[0.06] rounded-2xl p-5 space-y-3 shadow-xl backdrop-blur-md">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-bold text-zinc-200 text-sm">{g.title}[cite: 2]</h3>
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
+                        Alvo: R$ {g.targetValue.toLocaleString('pt-BR')} | Prazo: {g.deadline}[cite: 2]
+                      </p>
+                    </div>
+                    <span className="text-xs font-mono font-bold text-emerald-400">
+                      R$ {g.currentSaved.toLocaleString('pt-BR')}[cite: 2]
+                    </span>
+                  </div>
+
+                  {/* Barra de progresso */}
+                  <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden p-0.5 border border-white/5">
+                    <div 
+                      className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 transition-all duration-500"
+                      style={{ width: `${percent}%` }}
+                    />
+                  </div>
+
+                  <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
+                    <span>{percent.toFixed(0)}% concluído</span>
+                    <span>Faltam: R$ {(g.targetValue - g.currentSaved).toLocaleString('pt-BR')}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
       </div>
-    </AppShell>
+
+      {/* MODAL COBRINDO CADASTROS */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-white/[0.08] max-w-sm w-full rounded-2xl p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div>
+              <h3 className="text-lg font-bold text-white">
+                {modalMode === 'budget' ? 'Definir Teto de Gasto' : 'Criar Nova Meta'}[cite: 2]
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">Preencha os valores de governança financeira[cite: 2].</p>
+            </div>
+
+            <div className="space-y-3 text-sm">
+              <div className="space-y-1">
+                <label className="text-xs text-zinc-400 font-medium">
+                  {modalMode === 'budget' ? 'Nome da Categoria' : 'Objetivo / Título da Meta'}[cite: 2]
+                </label>
+                <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={modalMode === 'budget' ? "Ex: Lazer" : "Ex: Comprar Carro"} className="w-full bg-zinc-950 border border-zinc-800 outline-none p-2 rounded-xl text-white text-xs" />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-zinc-400 font-medium">
+                  {modalMode === 'budget' ? 'Valor Limite Mensal (R$)' : 'Valor Alvo Final (R$)'}[cite: 2]
+                </label>
+                <input type="number" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="R$ 1000" className="w-full bg-zinc-950 border border-zinc-800 outline-none p-2 rounded-xl text-white font-mono text-xs"[cite: 2] />
+              </div>
+            </div>
+
+            <div className="flex space-x-3 pt-2">
+              <button onClick={() => setShowModal(false)} className="w-full py-2 bg-zinc-800 text-zinc-400 text-xs font-semibold rounded-xl">Cancelar[cite: 2]</button>
+              <button onClick={handleSave} className="w-full py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg">Salvar[cite: 2]</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
