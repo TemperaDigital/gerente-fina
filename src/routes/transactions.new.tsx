@@ -156,8 +156,11 @@ function NewTransactionPage() {
   });
 
   const createMut = useMutation({
-    mutationFn: (payload: Parameters<typeof createTransactionEntry>[0]["data"]) =>
-      createTransactionEntry({ data: payload }),
+    mutationFn: (payload: Parameters<typeof createTransactionEntry>[0] extends infer T
+      ? T extends { data: infer D }
+        ? D
+        : never
+      : never) => createTransactionEntry({ data: payload }),
     onSuccess: async (res) => {
       toast.success(
         `${res.created_count} lançamento${res.created_count === 1 ? "" : "s"} criado${
