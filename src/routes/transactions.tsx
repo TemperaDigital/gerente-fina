@@ -35,6 +35,7 @@ import {
   getTransactionsList,
   getReviewQueue,
   discardTransaction,
+  mergeDuplicateTransactions,
 } from "@/services/transactions.functions";
 import {
   getAccountsLookup,
@@ -181,11 +182,26 @@ function TransactionsPage() {
 
   const discardMut = useMutation({
     mutationFn: (id: string) => discardTransaction({ data: { id } }),
-    onSuccess: async () => {
-      toast.success("Lançamento descartado.");
+    onSuccess: async (_d, _v, ctx) => {
+      const desc = (ctx as { description?: string } | undefined)?.description;
+      toast.success(
+        desc ? `Lançamento "${desc}" descartado.` : "Lançamento descartado.",
+      );
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
     },
     onError: (e: Error) => toast.error(`Falha ao descartar: ${e.message}`),
+  });
+
+  const mergeMut = useMutation({
+    mutationFn: (v: { keep_id: string; absorb_ids: string[] }) =>
+      mergeDuplicateTransactions({ data: v }),
+    onSuccess: async (res) => {
+      toast.success(
+        `Mesclagem concluída: ${res.absorbed_count} duplicata(s) absorvida(s).`,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    },
+    onError: (e: Error) => toast.error(`Falha ao mesclar: ${e.message}`),
   });
 
   return (
@@ -237,7 +253,14 @@ function TransactionsPage() {
         </header>
 
         <div className="space-y-4">
-          <ReviewQueue groups={review} onDiscard={(id) => discardMut.mutate(id)} />
+          <ReviewQueue
+            groups={review}
+            onDiscard={(id) => discardMut.mutate(id)}
+            onMerge={(keep_id, absorb_ids) =>
+              mergeMut.mutate({ keep_id, absorb_ids })
+            }
+          />
+
 
           <FiltersBar
             value={filters}

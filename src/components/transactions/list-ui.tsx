@@ -25,6 +25,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { GlassCard, formatBRL } from "@/components/dashboard/primitives";
@@ -343,9 +353,11 @@ function TransactionRow({ it }: { it: TransactionListItemDTO }) {
 export function ReviewQueue({
   groups,
   onDiscard,
+  onMerge,
 }: {
   groups: ReviewGroupDTO[];
-  onDiscard: (id: string) => void;
+  onDiscard: (id: string, description: string) => void;
+  onMerge: (keepId: string, absorbIds: string[]) => void;
 }) {
   if (groups.length === 0) {
     return (
@@ -384,55 +396,109 @@ export function ReviewQueue({
             key={g.dedup_hash}
             className="rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-3"
           >
-            <div className="mb-2 text-[10px] font-mono uppercase tracking-wider text-amber-300/70">
-              hash {g.dedup_hash.slice(0, 12)}…
+            <div className="mb-2 flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-amber-300/70">
+              <span>hash {g.dedup_hash.slice(0, 12)}…</span>
+              <span className="text-amber-300/50">
+                Escolha qual lançamento manter — os demais serão absorvidos.
+              </span>
             </div>
             <ul className="space-y-2">
-              {g.items.map((it) => (
-                <li
-                  key={it.id}
-                  className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.04] px-3 py-2"
-                >
-                  <div className="min-w-0 text-xs">
-                    <div className="truncate font-medium text-foreground">
-                      {it.description ?? "—"}
+              {g.items.map((it) => {
+                const others = g.items.filter((x) => x.id !== it.id).map((x) => x.id);
+                return (
+                  <li
+                    key={it.id}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.04] px-3 py-2"
+                  >
+                    <div className="min-w-0 text-xs">
+                      <div className="truncate font-medium text-foreground">
+                        {it.description ?? "—"}
+                      </div>
+                      <div className="text-foreground/50">
+                        {formatBR(it.occurred_on)} · {it.account_name ?? "—"} ·{" "}
+                        {formatBRL(it.amount)}
+                        {it.source && (
+                          <span className="ml-2 rounded bg-white/5 px-1 py-px text-[10px] uppercase tracking-wider text-foreground/60">
+                            {it.source}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-foreground/50">
-                      {formatBR(it.occurred_on)} · {it.account_name ?? "—"} ·{" "}
-                      {formatBRL(it.amount)}
+                    <div className="flex shrink-0 gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 text-xs text-emerald-400 hover:bg-emerald-400/10"
+                        onClick={() => onMerge(it.id, others)}
+                        title="Manter este e absorver os demais"
+                      >
+                        <Merge className="size-3.5" /> Manter este
+                      </Button>
+                      <DiscardButton
+                        description={it.description ?? "lançamento sem descrição"}
+                        onConfirm={() =>
+                          onDiscard(it.id, it.description ?? "lançamento")
+                        }
+                      />
                     </div>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 gap-1 text-xs text-emerald-400 hover:bg-emerald-400/10"
-                    >
-                      <CheckCircle2 className="size-3.5" /> Aprovar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 gap-1 text-xs text-sky-300 hover:bg-sky-400/10"
-                    >
-                      <Merge className="size-3.5" /> Mesclar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 gap-1 text-xs text-rose-400 hover:bg-rose-400/10"
-                      onClick={() => onDiscard(it.id)}
-                    >
-                      <Trash2 className="size-3.5" /> Descartar
-                    </Button>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           </li>
         ))}
       </ul>
     </GlassCard>
+  );
+}
+
+function DiscardButton({
+  description,
+  onConfirm,
+}: {
+  description: string;
+  onConfirm: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1 text-xs text-rose-400 hover:bg-rose-400/10"
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 className="size-3.5" /> Descartar
+      </Button>
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Descartar lançamento?</AlertDialogTitle>
+            <AlertDialogDescription className="text-foreground/60">
+              Você está prestes a remover permanentemente o lançamento{" "}
+              <span className="font-semibold text-foreground">
+                "{description}"
+              </span>
+              . Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-white/10 bg-white/[0.04] hover:bg-white/10">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-rose-500 text-white hover:bg-rose-600"
+              onClick={() => {
+                onConfirm();
+                setOpen(false);
+              }}
+            >
+              Descartar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

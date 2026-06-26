@@ -643,3 +643,82 @@ export const discardTransaction = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+// ---------------------------------------------------------------------------
+// mergeDuplicateTransactions — fluxo "Mesclar" da fila de conciliação
+//
+// `keep_id` permanece e ABSORVE `dedup_hash`, `source` e `external_id` do
+// primeiro item de `absorb_ids` que possuir tais metadados (preservando a
+// amarração do Open Finance). Os itens absorvidos são REMOVIDOS para evitar
+// duplicidade de saldo. Em caso de falha no delete, revertemos o keeper.
+// ---------------------------------------------------------------------------
+export const mergeDuplicateTransactions = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        keep_id: z.string().uuid(),
+        absorb_ids: z.array(z.string().uuid()).min(1).max(20),
+      })
+      .refine((v) => !v.absorb_ids.includes(v.keep_id), {
+        message: "keep_id não pode estar em absorb_ids",
+        path: ["absorb_ids"],
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    const { data: keeperBefore, error: kErr } = await sb
+      .from("transactions")
+      .select("id, dedup_hash, source, external_id")
+      .eq("id", data.keep_id)
+      .maybeSingle();
+    if (kErr) throw new Error(kErr.message);
+    if (!keeperBefore) throw new Error("Transação a preservar não encontrada.");
+
+    const { data: absorbed, error: aErr } = await sb
+      .from("transactions")
+      .select("id, dedup_hash, source, external_id")
+      .in("id", data.absorb_ids);
+    if (aErr) throw new Error(aErr.message);
+    if (!absorbed || absorbed.length === 0) {
+      throw new Error("Itens a absorver não encontrados.");
+    }
+
+    const donor =
+      absorbed.find((a) => a.dedup_hash) ??
+      absorbed.find((a) => a.source && a.source !== "manual") ??
+      absorbed[0];
+
+    // Ordem crítica: DELETE primeiro libera o índice UNIQUE parcial em
+    // (user_id, dedup_hash), evitando conflito quando o keeper for
+    // re-hasheado pelo trigger ao receber source='import'/'pluggy'.
+    const { error: dErr } = await sb
+      .from("transactions")
+      .delete()
+      .in("id", data.absorb_ids);
+    if (dErr) throw new Error(`Falha ao remover duplicatas: ${dErr.message}`);
+
+    // Patch: preserva amarração do Open Finance (external_id) e marca source
+    // como o do donor (que dispara a re-geração do dedup_hash via trigger).
+    const patch: Record<string, string | null> = {};
+    if (donor.source && donor.source !== "manual") patch.source = donor.source;
+    if (donor.external_id && !keeperBefore.external_id)
+      patch.external_id = donor.external_id;
+
+    if (Object.keys(patch).length > 0) {
+      const { error: uErr } = await sb
+        .from("transactions")
+        .update(patch)
+        .eq("id", data.keep_id);
+      if (uErr) {
+        // Não há rollback dos deletes; logamos via warning no retorno.
+        throw new Error(
+          `Duplicatas removidas, mas falha ao absorver metadados: ${uErr.message}`,
+        );
+      }
+    }
+
+    return { ok: true, kept_id: data.keep_id, absorbed_count: absorbed.length };
+  });
