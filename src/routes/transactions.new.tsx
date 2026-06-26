@@ -155,12 +155,26 @@ function NewTransactionPage() {
     enabled: kind === "invoice_payment",
   });
 
+  type CreatePayload = {
+    kind: TxKind;
+    amount: string;
+    occurred_on: string;
+    description: string;
+    notes?: string;
+    account_id: string;
+    category_id?: string;
+    counterpart_account_id?: string;
+    paid_invoice_id?: string;
+    installment?: { count: number };
+    recurrence?: {
+      frequency: "daily" | "weekly" | "monthly" | "yearly";
+      interval_count: number;
+      end_on?: string;
+    };
+  };
   const createMut = useMutation({
-    mutationFn: (payload: Parameters<typeof createTransactionEntry>[0] extends infer T
-      ? T extends { data: infer D }
-        ? D
-        : never
-      : never) => createTransactionEntry({ data: payload }),
+    mutationFn: (payload: CreatePayload) =>
+      createTransactionEntry({ data: payload }),
     onSuccess: async (res) => {
       toast.success(
         `${res.created_count} lançamento${res.created_count === 1 ? "" : "s"} criado${
