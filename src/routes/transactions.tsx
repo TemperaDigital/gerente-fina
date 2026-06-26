@@ -35,6 +35,7 @@ import {
   getTransactionsList,
   getReviewQueue,
   discardTransaction,
+  mergeDuplicateTransactions,
 } from "@/services/transactions.functions";
 import {
   getAccountsLookup,
