@@ -10,8 +10,12 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TransactionsRouteImport } from './routes/transactions'
+import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as InstallmentsRouteImport } from './routes/installments'
+import { Route as ForecastRouteImport } from './routes/forecast'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CreditCardsRouteImport } from './routes/credit-cards'
+import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TransactionsNewRouteImport } from './routes/transactions.new'
@@ -22,6 +26,21 @@ const TransactionsRoute = TransactionsRouteImport.update({
   path: '/transactions',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InstallmentsRoute = InstallmentsRouteImport.update({
+  id: '/installments',
+  path: '/installments',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForecastRoute = ForecastRouteImport.update({
+  id: '/forecast',
+  path: '/forecast',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -30,6 +49,11 @@ const DashboardRoute = DashboardRouteImport.update({
 const CreditCardsRoute = CreditCardsRouteImport.update({
   id: '/credit-cards',
   path: '/credit-cards',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BudgetsRoute = BudgetsRouteImport.update({
+  id: '/budgets',
+  path: '/budgets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountsRoute = AccountsRouteImport.update({
@@ -56,8 +80,12 @@ const TransactionsEditIdRoute = TransactionsEditIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/budgets': typeof BudgetsRoute
   '/credit-cards': typeof CreditCardsRoute
   '/dashboard': typeof DashboardRoute
+  '/forecast': typeof ForecastRoute
+  '/installments': typeof InstallmentsRoute
+  '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
   '/transactions/edit/$id': typeof TransactionsEditIdRoute
@@ -65,8 +93,12 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/budgets': typeof BudgetsRoute
   '/credit-cards': typeof CreditCardsRoute
   '/dashboard': typeof DashboardRoute
+  '/forecast': typeof ForecastRoute
+  '/installments': typeof InstallmentsRoute
+  '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
   '/transactions/edit/$id': typeof TransactionsEditIdRoute
@@ -75,8 +107,12 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/budgets': typeof BudgetsRoute
   '/credit-cards': typeof CreditCardsRoute
   '/dashboard': typeof DashboardRoute
+  '/forecast': typeof ForecastRoute
+  '/installments': typeof InstallmentsRoute
+  '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
   '/transactions/edit/$id': typeof TransactionsEditIdRoute
@@ -86,8 +122,12 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/accounts'
+    | '/budgets'
     | '/credit-cards'
     | '/dashboard'
+    | '/forecast'
+    | '/installments'
+    | '/settings'
     | '/transactions'
     | '/transactions/new'
     | '/transactions/edit/$id'
@@ -95,8 +135,12 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/accounts'
+    | '/budgets'
     | '/credit-cards'
     | '/dashboard'
+    | '/forecast'
+    | '/installments'
+    | '/settings'
     | '/transactions'
     | '/transactions/new'
     | '/transactions/edit/$id'
@@ -104,8 +148,12 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/accounts'
+    | '/budgets'
     | '/credit-cards'
     | '/dashboard'
+    | '/forecast'
+    | '/installments'
+    | '/settings'
     | '/transactions'
     | '/transactions/new'
     | '/transactions/edit/$id'
@@ -114,8 +162,12 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsRoute: typeof AccountsRoute
+  BudgetsRoute: typeof BudgetsRoute
   CreditCardsRoute: typeof CreditCardsRoute
   DashboardRoute: typeof DashboardRoute
+  ForecastRoute: typeof ForecastRoute
+  InstallmentsRoute: typeof InstallmentsRoute
+  SettingsRoute: typeof SettingsRoute
   TransactionsRoute: typeof TransactionsRouteWithChildren
 }
 
@@ -126,6 +178,27 @@ declare module '@tanstack/react-router' {
       path: '/transactions'
       fullPath: '/transactions'
       preLoaderRoute: typeof TransactionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/installments': {
+      id: '/installments'
+      path: '/installments'
+      fullPath: '/installments'
+      preLoaderRoute: typeof InstallmentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forecast': {
+      id: '/forecast'
+      path: '/forecast'
+      fullPath: '/forecast'
+      preLoaderRoute: typeof ForecastRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -140,6 +213,13 @@ declare module '@tanstack/react-router' {
       path: '/credit-cards'
       fullPath: '/credit-cards'
       preLoaderRoute: typeof CreditCardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/budgets': {
+      id: '/budgets'
+      path: '/budgets'
+      fullPath: '/budgets'
+      preLoaderRoute: typeof BudgetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/accounts': {
@@ -190,8 +270,12 @@ const TransactionsRouteWithChildren = TransactionsRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsRoute: AccountsRoute,
+  BudgetsRoute: BudgetsRoute,
   CreditCardsRoute: CreditCardsRoute,
   DashboardRoute: DashboardRoute,
+  ForecastRoute: ForecastRoute,
+  InstallmentsRoute: InstallmentsRoute,
+  SettingsRoute: SettingsRoute,
   TransactionsRoute: TransactionsRouteWithChildren,
 }
 export const routeTree = rootRouteImport

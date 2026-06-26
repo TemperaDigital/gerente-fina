@@ -42,6 +42,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { GlassCard, formatBRL } from "@/components/dashboard/primitives";
+import { AppShell } from "@/components/app-shell";
 import {
   AccountForm,
   type AccountFormPayload,
@@ -139,17 +140,8 @@ function CreditCardsPage() {
   });
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-zinc-950 text-foreground">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10"
-        style={{
-          background:
-            "radial-gradient(800px 500px at 15% -10%, rgba(168,85,247,0.16), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(244,114,182,0.12), transparent 60%)",
-        }}
-      />
-
-      <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+    <AppShell>
+      <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div className="flex items-center gap-3">
             <Button
