@@ -722,3 +722,134 @@ export const mergeDuplicateTransactions = createServerFn({ method: "POST" })
 
     return { ok: true, kept_id: data.keep_id, absorbed_count: absorbed.length };
   });
+
+// ---------------------------------------------------------------------------
+// getTransactionById — usado pela tela de edição
+// ---------------------------------------------------------------------------
+export interface TransactionDetailDTO {
+  id: string;
+  account_id: string;
+  account_name: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  kind: TransactionKind;
+  type: TransactionType;
+  amount: string;
+  description: string | null;
+  notes: string | null;
+  occurred_on: string;
+  transfer_id: string | null;
+  invoice_id: string | null;
+  paid_invoice_id: string | null;
+  recurrence_id: string | null;
+  source: string | null;
+  has_installment_link: boolean;
+}
+
+export const getTransactionById = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) =>
+    z.object({ id: z.string().uuid() }).parse(input),
+  )
+  .handler(async ({ data }): Promise<TransactionDetailDTO> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    const { data: row, error } = await sb
+      .from("transactions")
+      .select(
+        `id, account_id, category_id, kind, type, amount, description, notes,
+         occurred_on, transfer_id, invoice_id, paid_invoice_id, recurrence_id,
+         source,
+         accounts:account_id ( name ),
+         categories:category_id ( name )`,
+      )
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("Lançamento não encontrado.");
+
+    const { count: instCount } = await sb
+      .from("installment_items")
+      .select("id", { count: "exact", head: true })
+      .eq("transaction_id", data.id);
+
+    const r = row as unknown as {
+      id: string;
+      account_id: string;
+      category_id: string | null;
+      kind: TransactionKind;
+      type: TransactionType;
+      amount: string;
+      description: string | null;
+      notes: string | null;
+      occurred_on: string;
+      transfer_id: string | null;
+      invoice_id: string | null;
+      paid_invoice_id: string | null;
+      recurrence_id: string | null;
+      source: string | null;
+      accounts?: { name?: string | null } | null;
+      categories?: { name?: string | null } | null;
+    };
+
+    return {
+      id: r.id,
+      account_id: r.account_id,
+      account_name: r.accounts?.name ?? null,
+      category_id: r.category_id,
+      category_name: r.categories?.name ?? null,
+      kind: r.kind,
+      type: r.type,
+      amount: r.amount,
+      description: r.description,
+      notes: r.notes,
+      occurred_on: r.occurred_on,
+      transfer_id: r.transfer_id,
+      invoice_id: r.invoice_id,
+      paid_invoice_id: r.paid_invoice_id,
+      recurrence_id: r.recurrence_id,
+      source: r.source,
+      has_installment_link: (instCount ?? 0) > 0,
+    };
+  });
+
+// ---------------------------------------------------------------------------
+// updateTransactionEntry — RETIFICAÇÃO de atributos.
+//
+// Regra constitucional: edição NUNCA muta estruturas (não converte em
+// parcelamento, não cria recorrência, não muda kind/type). Apenas
+// description, amount, occurred_on, account_id, category_id e notes.
+// ---------------------------------------------------------------------------
+const UpdateTxInput = z.object({
+  id: z.string().uuid(),
+  description: z.string().trim().min(1).max(240),
+  amount: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/, "amount inválido (ex.: 1234.56)"),
+  occurred_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  account_id: z.string().uuid(),
+  category_id: z.string().uuid().optional().nullable(),
+  notes: z.string().max(2000).optional().nullable(),
+});
+
+export const updateTransactionEntry = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => UpdateTxInput.parse(input))
+  .handler(async ({ data }) => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    const { error } = await sb
+      .from("transactions")
+      .update({
+        description: data.description,
+        amount: data.amount,
+        occurred_on: data.occurred_on,
+        account_id: data.account_id,
+        category_id: data.category_id ?? null,
+        notes: data.notes ?? null,
+      })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
