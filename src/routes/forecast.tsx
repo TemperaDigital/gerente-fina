@@ -65,7 +65,7 @@ function ForecastComponent() {
             Previsões de Fluxo de Caixa
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            Projeções automatizadas baseadas em seus parcelamentos, contratos de empréstimos e receitas fixas[cite: 2].
+            Projeções automatizadas baseadas em seus parcelamentos, contratos de empréstimos e receitas fixas.
           </p>
         </div>
 
@@ -75,14 +75,14 @@ function ForecastComponent() {
           className="bg-zinc-900 border border-white/[0.06] hover:bg-white/[0.08] disabled:opacity-50 text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-bold shadow-md transition-all flex items-center justify-center gap-2 self-start sm:self-center font-sans"
         >
           <RefreshCw className={`w-4 h-4 text-indigo-400 ${isRecalculating ? 'animate-spin' : ''}`} />
-          <span>Executar Nova Previsão[cite: 2]</span>
+          <span>Executar Nova Previsão</span>
         </button>
       </div>
 
       {/* BARRA DE FILTRO DE PERÍODO */}
       <div className="bg-white/[0.02] border border-white/[0.04] p-4 rounded-xl flex flex-col sm:flex-row gap-4 items-center justify-between shadow-md">
         <div className="flex items-center space-x-2 text-zinc-400 text-xs font-semibold">
-          <Calendar className="w-4 h-4 text-zinc-500" /> <span>Intervalo de Projeção:[cite: 2]</span>
+          <Calendar className="w-4 h-4 text-zinc-500" /> <span>Intervalo de Projeção:</span>
         </div>
         <div className="flex bg-zinc-900 p-1 rounded-lg border border-zinc-800 w-full sm:w-auto">
           <button 
@@ -95,7 +95,7 @@ function ForecastComponent() {
             onClick={() => setPeriod('6months')}
             className={`flex-1 sm:flex-none px-4 py-1 rounded-md text-xs font-bold transition-all ${period === '6months' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-400'}`}
           >
-            Próximos 6 meses[cite: 2]
+            Próximos 6 meses
           </button>
         </div>
       </div>
@@ -130,7 +130,7 @@ function ForecastComponent() {
       {/* SEÇÃO DO GRÁFICO DE PROJEÇÃO VETORIAL (SVG) */}
       <div className="bg-white/[0.02] border border-white/[0.06] backdrop-blur-xl rounded-2xl p-6 shadow-2xl space-y-4">
         <h2 className="text-base font-bold text-zinc-300 flex items-center gap-2">
-          <LineChart className="w-4 h-4 text-zinc-500" /> Curva Patrimonial de Caixa Futuro[cite: 2]
+          <LineChart className="w-4 h-4 text-zinc-500" /> Curva Patrimonial de Caixa Futuro
         </h2>
 
         {/* Gráfico Inline Customizado Responsivo */}
@@ -182,7 +182,7 @@ function ForecastComponent() {
       {/* TABELA DE PREVISÕES MENSAIS DETALHADA */}
       <div className="bg-white/[0.02] border border-white/[0.06] backdrop-blur-xl rounded-2xl p-6 shadow-2xl space-y-4">
         <h2 className="text-base font-bold text-zinc-300 flex items-center gap-2">
-          <Scale className="w-4 h-4 text-zinc-500" /> Demonstrativo Contábil de Provisões[cite: 2]
+          <Scale className="w-4 h-4 text-zinc-500" /> Demonstrativo Contábil de Provisões
         </h2>
 
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -199,9 +199,9 @@ function ForecastComponent() {
             <tbody className="divide-y divide-zinc-800/50 text-sm font-sans text-zinc-300">
               {currentData.map((row, index) => (
                 <tr key={index} className="hover:bg-white/[0.01] transition-colors">
-                  <td className="p-4 font-semibold text-white">{row.month}[cite: 2]</td>
-                  <td className="p-4 text-right text-emerald-400 font-mono font-medium">R$ {row.income.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}[cite: 2]</td>
-                  <td className="p-4 text-right text-rose-400 font-mono font-medium">R$ {row.expense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}[cite: 2]</td>
+                  <td className="p-4 font-semibold text-white">{row.month}</td>
+                  <td className="p-4 text-right text-emerald-400 font-mono font-medium">R$ {row.income.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                  <td className="p-4 text-right text-rose-400 font-mono font-medium">R$ {row.expense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                   <td className="p-4 text-right text-zinc-300 font-mono">R$ {row.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                   <td className="p-4 text-right text-white font-mono font-bold bg-white/[0.01]">R$ {row.cumulative.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                 </tr>

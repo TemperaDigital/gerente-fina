@@ -11,10 +11,14 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as OpenFinanceRouteImport } from './routes/open-finance'
 import { Route as InstallmentsRouteImport } from './routes/installments'
+import { Route as ImportRouteImport } from './routes/import'
 import { Route as ForecastRouteImport } from './routes/forecast'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CreditCardsRouteImport } from './routes/credit-cards'
+import { Route as ChatRouteImport } from './routes/chat'
+import { Route as CategoriesRouteImport } from './routes/categories'
 import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as IndexRouteImport } from './routes/index'
@@ -31,9 +35,19 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OpenFinanceRoute = OpenFinanceRouteImport.update({
+  id: '/open-finance',
+  path: '/open-finance',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InstallmentsRoute = InstallmentsRouteImport.update({
   id: '/installments',
   path: '/installments',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ImportRoute = ImportRouteImport.update({
+  id: '/import',
+  path: '/import',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ForecastRoute = ForecastRouteImport.update({
@@ -49,6 +63,16 @@ const DashboardRoute = DashboardRouteImport.update({
 const CreditCardsRoute = CreditCardsRouteImport.update({
   id: '/credit-cards',
   path: '/credit-cards',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatRoute = ChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CategoriesRoute = CategoriesRouteImport.update({
+  id: '/categories',
+  path: '/categories',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BudgetsRoute = BudgetsRouteImport.update({
@@ -81,10 +105,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/budgets': typeof BudgetsRoute
+  '/categories': typeof CategoriesRoute
+  '/chat': typeof ChatRoute
   '/credit-cards': typeof CreditCardsRoute
   '/dashboard': typeof DashboardRoute
   '/forecast': typeof ForecastRoute
+  '/import': typeof ImportRoute
   '/installments': typeof InstallmentsRoute
+  '/open-finance': typeof OpenFinanceRoute
   '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
@@ -94,10 +122,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/budgets': typeof BudgetsRoute
+  '/categories': typeof CategoriesRoute
+  '/chat': typeof ChatRoute
   '/credit-cards': typeof CreditCardsRoute
   '/dashboard': typeof DashboardRoute
   '/forecast': typeof ForecastRoute
+  '/import': typeof ImportRoute
   '/installments': typeof InstallmentsRoute
+  '/open-finance': typeof OpenFinanceRoute
   '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
@@ -108,10 +140,14 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/budgets': typeof BudgetsRoute
+  '/categories': typeof CategoriesRoute
+  '/chat': typeof ChatRoute
   '/credit-cards': typeof CreditCardsRoute
   '/dashboard': typeof DashboardRoute
   '/forecast': typeof ForecastRoute
+  '/import': typeof ImportRoute
   '/installments': typeof InstallmentsRoute
+  '/open-finance': typeof OpenFinanceRoute
   '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
@@ -123,10 +159,14 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/budgets'
+    | '/categories'
+    | '/chat'
     | '/credit-cards'
     | '/dashboard'
     | '/forecast'
+    | '/import'
     | '/installments'
+    | '/open-finance'
     | '/settings'
     | '/transactions'
     | '/transactions/new'
@@ -136,10 +176,14 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/budgets'
+    | '/categories'
+    | '/chat'
     | '/credit-cards'
     | '/dashboard'
     | '/forecast'
+    | '/import'
     | '/installments'
+    | '/open-finance'
     | '/settings'
     | '/transactions'
     | '/transactions/new'
@@ -149,10 +193,14 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/budgets'
+    | '/categories'
+    | '/chat'
     | '/credit-cards'
     | '/dashboard'
     | '/forecast'
+    | '/import'
     | '/installments'
+    | '/open-finance'
     | '/settings'
     | '/transactions'
     | '/transactions/new'
@@ -163,10 +211,14 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsRoute: typeof AccountsRoute
   BudgetsRoute: typeof BudgetsRoute
+  CategoriesRoute: typeof CategoriesRoute
+  ChatRoute: typeof ChatRoute
   CreditCardsRoute: typeof CreditCardsRoute
   DashboardRoute: typeof DashboardRoute
   ForecastRoute: typeof ForecastRoute
+  ImportRoute: typeof ImportRoute
   InstallmentsRoute: typeof InstallmentsRoute
+  OpenFinanceRoute: typeof OpenFinanceRoute
   SettingsRoute: typeof SettingsRoute
   TransactionsRoute: typeof TransactionsRouteWithChildren
 }
@@ -187,11 +239,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/open-finance': {
+      id: '/open-finance'
+      path: '/open-finance'
+      fullPath: '/open-finance'
+      preLoaderRoute: typeof OpenFinanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/installments': {
       id: '/installments'
       path: '/installments'
       fullPath: '/installments'
       preLoaderRoute: typeof InstallmentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/import': {
+      id: '/import'
+      path: '/import'
+      fullPath: '/import'
+      preLoaderRoute: typeof ImportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/forecast': {
@@ -213,6 +279,20 @@ declare module '@tanstack/react-router' {
       path: '/credit-cards'
       fullPath: '/credit-cards'
       preLoaderRoute: typeof CreditCardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat': {
+      id: '/chat'
+      path: '/chat'
+      fullPath: '/chat'
+      preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/categories': {
+      id: '/categories'
+      path: '/categories'
+      fullPath: '/categories'
+      preLoaderRoute: typeof CategoriesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/budgets': {
@@ -271,10 +351,14 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsRoute: AccountsRoute,
   BudgetsRoute: BudgetsRoute,
+  CategoriesRoute: CategoriesRoute,
+  ChatRoute: ChatRoute,
   CreditCardsRoute: CreditCardsRoute,
   DashboardRoute: DashboardRoute,
   ForecastRoute: ForecastRoute,
+  ImportRoute: ImportRoute,
   InstallmentsRoute: InstallmentsRoute,
+  OpenFinanceRoute: OpenFinanceRoute,
   SettingsRoute: SettingsRoute,
   TransactionsRoute: TransactionsRouteWithChildren,
 }

@@ -141,12 +141,12 @@ function OpenFinanceComponent() {
               <Shield className="w-4 h-4" /> Como funciona o Open Finance?
             </h2>
             <p className="text-xs text-zinc-400 leading-relaxed">
-              O Gerente FINA não armazena suas senhas bancárias[cite: 2]. A conexão é estabelecida por meio de tokens criptografados seguros e regulamentados pelo Banco Central[cite: 2].
+              O Gerente FINA não armazena suas senhas bancárias. A conexão é estabelecida por meio de tokens criptografados seguros e regulamentados pelo Banco Central.
             </p>
             <div className="space-y-3 pt-2 text-xs">
               <div className="flex items-start space-x-2 text-zinc-300">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
-                <span>Atualização automática diária de saldos e faturas[cite: 2].</span>
+                <span>Atualização automática diária de saldos e faturas.</span>
               </div>
               <div className="flex items-start space-x-2 text-zinc-300">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
@@ -154,7 +154,7 @@ function OpenFinanceComponent() {
               </div>
               <div className="flex items-start space-x-2 text-zinc-300">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
-                <span>Barreira inteligente antifraude que impede lançamentos duplicados[cite: 2].</span>
+                <span>Barreira inteligente antifraude que impede lançamentos duplicados.</span>
               </div>
             </div>
           </div>
