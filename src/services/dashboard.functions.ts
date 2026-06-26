@@ -115,3 +115,55 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
     };
     return summary;
   });
+
+// -----------------------------------------------------------------------------
+// getOpenCreditCardInvoices — widget de cartões no Dashboard
+// -----------------------------------------------------------------------------
+
+export interface OpenInvoiceDTO {
+  invoice_id: string;
+  account_id: string;
+  account_name: string;
+  reference_month: string; // YYYY-MM-01
+  closing_date: string; // YYYY-MM-DD
+  due_date: string; // YYYY-MM-DD
+  total_amount: string; // numeric(14,2)
+  /** True quando a data atual já passou do closing_date → atenção. */
+  past_closing: boolean;
+}
+
+export const getOpenCreditCardInvoices = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    const { data, error } = await sb
+      .from("credit_card_invoices")
+      .select(
+        `id, account_id, reference_month, closing_date, due_date, total_amount,
+         accounts:account_id ( name )`,
+      )
+      .eq("status", "open")
+      .order("due_date", { ascending: true });
+
+    if (error) throw new Error(error.message);
+
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+    const items: OpenInvoiceDTO[] = (data ?? []).map((r) => {
+      const row = r as Record<string, unknown> & {
+        accounts?: { name?: string | null } | null;
+      };
+      const closing_date = row.closing_date as string;
+      return {
+        invoice_id: row.id as string,
+        account_id: row.account_id as string,
+        account_name: row.accounts?.name ?? "Cartão",
+        reference_month: row.reference_month as string,
+        closing_date,
+        due_date: row.due_date as string,
+        total_amount: (row.total_amount as string) ?? "0.00",
+        past_closing: today > closing_date,
+      };
+    });
+    return items;
+  });
