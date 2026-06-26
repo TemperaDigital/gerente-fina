@@ -107,7 +107,7 @@ function DashboardPage() {
   const { data: invoices } = useSuspenseQuery(invoicesQuery());
 
   const setMonth = (next: string) =>
-    navigate({ search: (prev) => ({ ...prev, month: next }) });
+    navigate({ search: (prev: DashboardSearch) => ({ ...prev, month: next }) });
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-zinc-950 text-foreground">
