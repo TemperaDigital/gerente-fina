@@ -27,6 +27,7 @@ import {
   formatBRL,
 } from "@/components/dashboard/primitives";
 import { CreditCardsWidget } from "@/components/dashboard/credit-cards-widget";
+import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
