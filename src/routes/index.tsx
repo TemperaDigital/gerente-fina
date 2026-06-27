@@ -36,10 +36,10 @@ function WelcomeComponent() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col md:flex-row overflow-hidden">
       
-      {/* LADO ESQUERDO: Painel Conceitual Premium (Inspirado na sua foto) */}
+      {/* LADO ESQUERDO: Painel Conceitual Premium */}
       <div className="hidden md:flex md:w-1/2 bg-gradient-to-b from-stone-950 via-zinc-950 to-stone-950 border-r border-white/[0.03] p-16 flex-col justify-between relative overflow-hidden">
         
-        {/* Efeito de Luz de Fundo Simulando a Luminária de Âmbar da Foto */}
+        {/* Efeito de Luz de Fundo Simulando a Luminária de Âmbar */}
         <div className="absolute top-1/2 left-[-10%] w-[500px] h-[500px] bg-amber-600/[0.04] rounded-full blur-[140px] pointer-events-none" />
         <div className="absolute bottom-0 right-0 w-[300px] h-[300px] bg-emerald-700/[0.02] rounded-full blur-[100px] pointer-events-none" />
         
@@ -53,7 +53,7 @@ function WelcomeComponent() {
           </span>
         </div>
 
-        {/* COPY MATADORA DA SUA IMAGEM */}
+        {/* COPY MATADORA */}
         <div className="space-y-8 max-w-lg relative z-10 my-auto">
           <div className="space-y-4">
             <h1 className="text-5xl lg:text-6xl font-serif tracking-wide leading-[1.15] text-stone-100 font-normal">
@@ -61,8 +61,6 @@ function WelcomeComponent() {
               não gosta <br />
               de bagunça.
             </h1>
-            
-            {/* Slogan Secundário com espaçamento largo e tom verde oliva elegante */}
             <p className="text-[11px] font-mono tracking-[0.3em] text-emerald-500/80 font-bold uppercase pt-2">
               Organize. Controle. Multiplique.
             </p>
@@ -87,10 +85,30 @@ function WelcomeComponent() {
           </div>
         </div>
 
-        {/* Rodapé Corporativo Fino */}
-        <p className="text-[10px] text-zinc-700 font-mono tracking-widest relative z-10 uppercase">
-          © 2026 GERENTE FINA CORPORATION.
-        </p>
+        {/* RODAPÉ CORPORATIVO PREMIUM E ASSINATURA DA TEMPERA DIGITAL */}
+        <div className="text-[10px] text-zinc-600 font-mono relative z-10 space-y-1.5 border-t border-white/[0.02] pt-4">
+          <p className="tracking-widest uppercase text-zinc-500 text-[9px]">
+            © 2026 GERENTE FINA CORPORATION. TODOS OS DIREITOS RESERVADOS.
+          </p>
+          <p className="text-zinc-400">
+            Criado por{' '}
+            <span className="text-zinc-200 font-semibold">Alexandre Guerra</span> — CEO da{' '}
+            <a 
+              href="https://temperadigital.fguerra.ia.br/" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="text-amber-500/90 hover:text-amber-400 underline underline-offset-4 transition-colors"
+            >
+              Tempera Digital
+            </a>
+          </p>
+          <p className="text-zinc-500 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px]">
+            <span>Email: <a href="mailto:temperadigital@fguerra.ia.br" className="hover:text-zinc-300 transition-colors">temperadigital@fguerra.ia.br</a></span>
+            <span className="text-zinc-800">|</span>
+            <span>Zap: <a href="https://wa.me/5583988099913" target="_blank" rel="noopener noreferrer" className="hover:text-zinc-300 transition-colors">(83) 98809-9913</a></span>
+          </p>
+        </div>
+
       </div>
 
       {/* LADO DIREITO: Portal de Autenticação Real */}
@@ -184,25 +202,4 @@ function WelcomeComponent() {
               className="py-2 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-2"
             >
               <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
-                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 4.17c.66-.81 1.11-1.93.99-3.06-1 .04-2.21.67-2.93 1.49-.62.69-1.16 1.84-1.01 2.96 1.12.09 2.27-.56 2.95-1.39z"/>
-              </svg>
-              <span>Apple</span>
-            </button>
-          </div>
-
-          <div className="text-center pt-2">
-            <button 
-              type="button"
-              onClick={() => setIsLogin(!isLogin)}
-              className="text-[11px] text-zinc-500 hover:text-zinc-300 font-medium transition-colors underline underline-offset-4"
-            >
-              {isLogin ? 'Não possui uma conta? Cadastre-se' : 'Já tem conta? Faça o Login'}
-            </button>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-  );
-}
+                <path d="M18.71 19.5c-.83 1.24-1.7
