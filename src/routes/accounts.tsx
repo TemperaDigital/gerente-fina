@@ -300,7 +300,7 @@ function AccountsPage() {
           </DialogHeader>
           {editing && (
             <AccountForm
-              initialType={editing.type as "cash" | "bank"}
+              initialType={editing.type as "cash" | "bank" | "credit_card"}
               lockType
               initial={editing}
               submitting={updateMut.isPending}
