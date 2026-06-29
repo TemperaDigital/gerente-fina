@@ -1,10 +1,16 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { Plus, Target, PiggyBank, AlertCircle } from 'lucide-react';
+import { AppShell } from '@/components/app-shell';
 
 export const Route = createFileRoute('/budgets')({
-  component: BudgetsComponent,
+  component: () => (
+    <AppShell>
+      <BudgetsComponent />
+    </AppShell>
+  ),
 });
+
 
 const INITIAL_BUDGETS = [
   { id: '1', categoryName: 'Alimentação', limitValue: 1500, currentSpent: 1240.50, color: 'from-indigo-500 to-purple-600' },
