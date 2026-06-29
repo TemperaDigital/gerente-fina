@@ -6,8 +6,8 @@
  * e renderiza condicionalmente os campos de cartão (limite, fechamento,
  * vencimento) — respeitando a CHECK constraint da tabela `accounts`.
  */
-import { useState } from "react";
-import { Banknote, Landmark, CreditCard } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Banknote, Landmark, CreditCard, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -103,63 +104,70 @@ export function AccountForm({
   const [dueDay, setDueDay] = useState<string>(
     initial?.due_day ? String(initial.due_day) : "",
   );
-  const [error, setError] = useState<string | null>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const isCard = type === "credit_card";
+
+  const errors = useMemo(() => {
+    const e: Partial<Record<"name" | "institution" | "limit" | "closing" | "due", string>> = {};
+    const trimmedName = name.trim();
+    if (!trimmedName) e.name = "Informe um nome para a conta.";
+    else if (trimmedName.length > 60) e.name = "Máximo de 60 caracteres.";
+    if (institution.trim().length > 60) e.institution = "Máximo de 60 caracteres.";
+    if (isCard) {
+      const limit = brlInputToCents(limitStr);
+      if (limit == null) e.limit = "Informe um limite válido (ex.: 5000,00).";
+      else if (limit <= 0) e.limit = "O limite deve ser maior que zero.";
+      const closing = Number(closingDay);
+      if (!closingDay) e.closing = "Selecione o dia de fechamento.";
+      else if (closing < 1 || closing > 31) e.closing = "Dia inválido (1–31).";
+      const due = Number(dueDay);
+      if (!dueDay) e.due = "Selecione o dia de vencimento.";
+      else if (due < 1 || due > 31) e.due = "Dia inválido (1–31).";
+    }
+    return e;
+  }, [name, institution, isCard, limitStr, closingDay, dueDay]);
+
+  const hasErrors = Object.keys(errors).length > 0;
+
+  function show(field: keyof typeof errors) {
+    return (submitAttempted || touched[field]) ? errors[field] : undefined;
+  }
+
+  function markTouched(field: string) {
+    setTouched((t) => (t[field] ? t : { ...t, [field]: true }));
+  }
 
   function changeType(next: AccountFormType) {
     if (lockType || next === type) return;
     setType(next);
-    setError(null);
     if (next !== "credit_card") {
       // Limpa campos exclusivos de cartão para garantir payload com null
       // e respeitar a CHECK constraint da tabela accounts.
       setLimitStr("");
       setClosingDay("");
       setDueDay("");
+      setTouched((t) => ({ ...t, limit: false, closing: false, due: false }));
     }
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    if (!name.trim()) {
-      setError("Informe um nome para a conta.");
-      return;
-    }
-    if (isCard) {
-      const limit = brlInputToCents(limitStr);
-      const closing = Number(closingDay) || null;
-      const due = Number(dueDay) || null;
-      if (limit == null || !closing || !due) {
-        setError(
-          "Cartão exige limite, dia de fechamento e dia de vencimento.",
-        );
-        return;
-      }
-      onSubmit({
-        type,
-        name: name.trim(),
-        institution: institution.trim() || null,
-        color: null,
-        icon: null,
-        credit_limit_cents: limit,
-        closing_day: closing,
-        due_day: due,
-      });
-      return;
-    }
+    setSubmitAttempted(true);
+    if (hasErrors) return;
     onSubmit({
       type,
       name: name.trim(),
       institution: institution.trim() || null,
       color: null,
       icon: null,
-      credit_limit_cents: null,
-      closing_day: null,
-      due_day: null,
+      credit_limit_cents: isCard ? brlInputToCents(limitStr) : null,
+      closing_day: isCard ? Number(closingDay) : null,
+      due_day: isCard ? Number(dueDay) : null,
     });
   }
+
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -189,11 +197,16 @@ export function AccountForm({
         </Field>
       )}
 
-      <Field label="Nome">
+      <Field label="Nome" error={show("name")}>
         <Input
-          className="border-white/10 bg-white/[0.04]"
+          className={cn(
+            "border-white/10 bg-white/[0.04]",
+            show("name") && "border-rose-400/60 focus-visible:ring-rose-400/40",
+          )}
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onBlur={() => markTouched("name")}
+          aria-invalid={!!show("name")}
           placeholder={
             isCard
               ? "Ex.: Nubank Black"
@@ -204,29 +217,50 @@ export function AccountForm({
         />
       </Field>
 
-      <Field label="Instituição (opcional)">
+      <Field label="Instituição (opcional)" error={show("institution")}>
         <Input
-          className="border-white/10 bg-white/[0.04]"
+          className={cn(
+            "border-white/10 bg-white/[0.04]",
+            show("institution") && "border-rose-400/60 focus-visible:ring-rose-400/40",
+          )}
           value={institution}
           onChange={(e) => setInstitution(e.target.value)}
+          onBlur={() => markTouched("institution")}
+          aria-invalid={!!show("institution")}
         />
       </Field>
 
       {isCard && (
         <>
-          <Field label="Limite de Crédito (R$)">
+          <Field label="Limite de Crédito (R$)" error={show("limit")}>
             <Input
               inputMode="decimal"
               placeholder="0,00"
-              className="border-white/10 bg-white/[0.04]"
+              className={cn(
+                "border-white/10 bg-white/[0.04]",
+                show("limit") && "border-rose-400/60 focus-visible:ring-rose-400/40",
+              )}
               value={limitStr}
               onChange={(e) => setLimitStr(e.target.value)}
+              onBlur={() => markTouched("limit")}
+              aria-invalid={!!show("limit")}
             />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Dia de fechamento">
-              <Select value={closingDay} onValueChange={setClosingDay}>
-                <SelectTrigger className="border-white/10 bg-white/[0.04]">
+            <Field label="Dia de fechamento" error={show("closing")}>
+              <Select
+                value={closingDay}
+                onValueChange={(v) => {
+                  setClosingDay(v);
+                  markTouched("closing");
+                }}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "border-white/10 bg-white/[0.04]",
+                    show("closing") && "border-rose-400/60",
+                  )}
+                >
                   <SelectValue placeholder="Dia" />
                 </SelectTrigger>
                 <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
@@ -238,9 +272,20 @@ export function AccountForm({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Dia de vencimento">
-              <Select value={dueDay} onValueChange={setDueDay}>
-                <SelectTrigger className="border-white/10 bg-white/[0.04]">
+            <Field label="Dia de vencimento" error={show("due")}>
+              <Select
+                value={dueDay}
+                onValueChange={(v) => {
+                  setDueDay(v);
+                  markTouched("due");
+                }}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "border-white/10 bg-white/[0.04]",
+                    show("due") && "border-rose-400/60",
+                  )}
+                >
                   <SelectValue placeholder="Dia" />
                 </SelectTrigger>
                 <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
@@ -263,9 +308,10 @@ export function AccountForm({
         </>
       )}
 
-      {error && (
-        <div className="rounded-xl border border-rose-400/30 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
-          {error}
+      {submitAttempted && hasErrors && (
+        <div className="flex items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
+          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          <span>Corrija os campos destacados antes de continuar.</span>
         </div>
       )}
 
@@ -280,8 +326,8 @@ export function AccountForm({
         </Button>
         <Button
           type="submit"
-          disabled={submitting}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
+          disabled={submitting || hasErrors}
+          className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? "Salvando..." : submitLabel}
         </Button>
@@ -290,12 +336,15 @@ export function AccountForm({
   );
 }
 
+
 function Field({
   label,
   children,
+  error,
 }: {
   label: string;
   children: React.ReactNode;
+  error?: string;
 }) {
   return (
     <div className="space-y-1.5">
@@ -303,6 +352,10 @@ function Field({
         {label}
       </Label>
       {children}
+      {error && (
+        <p className="text-[11px] text-rose-300">{error}</p>
+      )}
     </div>
   );
 }
+
