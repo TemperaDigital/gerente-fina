@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as OpenFinanceRouteImport } from './routes/open-finance'
 import { Route as InstallmentsRouteImport } from './routes/installments'
@@ -22,14 +21,10 @@ import { Route as CategoriesRouteImport } from './routes/categories'
 import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as TransactionsIndexRouteImport } from './routes/transactions.index'
 import { Route as TransactionsNewRouteImport } from './routes/transactions.new'
 import { Route as TransactionsEditIdRouteImport } from './routes/transactions.edit.$id'
 
-const TransactionsRoute = TransactionsRouteImport.update({
-  id: '/transactions',
-  path: '/transactions',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -90,15 +85,20 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TransactionsIndexRoute = TransactionsIndexRouteImport.update({
+  id: '/transactions/',
+  path: '/transactions/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TransactionsNewRoute = TransactionsNewRouteImport.update({
-  id: '/new',
-  path: '/new',
-  getParentRoute: () => TransactionsRoute,
+  id: '/transactions/new',
+  path: '/transactions/new',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const TransactionsEditIdRoute = TransactionsEditIdRouteImport.update({
-  id: '/edit/$id',
-  path: '/edit/$id',
-  getParentRoute: () => TransactionsRoute,
+  id: '/transactions/edit/$id',
+  path: '/transactions/edit/$id',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -114,8 +114,8 @@ export interface FileRoutesByFullPath {
   '/installments': typeof InstallmentsRoute
   '/open-finance': typeof OpenFinanceRoute
   '/settings': typeof SettingsRoute
-  '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
+  '/transactions/': typeof TransactionsIndexRoute
   '/transactions/edit/$id': typeof TransactionsEditIdRoute
 }
 export interface FileRoutesByTo {
@@ -131,8 +131,8 @@ export interface FileRoutesByTo {
   '/installments': typeof InstallmentsRoute
   '/open-finance': typeof OpenFinanceRoute
   '/settings': typeof SettingsRoute
-  '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
+  '/transactions': typeof TransactionsIndexRoute
   '/transactions/edit/$id': typeof TransactionsEditIdRoute
 }
 export interface FileRoutesById {
@@ -149,8 +149,8 @@ export interface FileRoutesById {
   '/installments': typeof InstallmentsRoute
   '/open-finance': typeof OpenFinanceRoute
   '/settings': typeof SettingsRoute
-  '/transactions': typeof TransactionsRouteWithChildren
   '/transactions/new': typeof TransactionsNewRoute
+  '/transactions/': typeof TransactionsIndexRoute
   '/transactions/edit/$id': typeof TransactionsEditIdRoute
 }
 export interface FileRouteTypes {
@@ -168,8 +168,8 @@ export interface FileRouteTypes {
     | '/installments'
     | '/open-finance'
     | '/settings'
-    | '/transactions'
     | '/transactions/new'
+    | '/transactions/'
     | '/transactions/edit/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -185,8 +185,8 @@ export interface FileRouteTypes {
     | '/installments'
     | '/open-finance'
     | '/settings'
-    | '/transactions'
     | '/transactions/new'
+    | '/transactions'
     | '/transactions/edit/$id'
   id:
     | '__root__'
@@ -202,8 +202,8 @@ export interface FileRouteTypes {
     | '/installments'
     | '/open-finance'
     | '/settings'
-    | '/transactions'
     | '/transactions/new'
+    | '/transactions/'
     | '/transactions/edit/$id'
   fileRoutesById: FileRoutesById
 }
@@ -220,18 +220,13 @@ export interface RootRouteChildren {
   InstallmentsRoute: typeof InstallmentsRoute
   OpenFinanceRoute: typeof OpenFinanceRoute
   SettingsRoute: typeof SettingsRoute
-  TransactionsRoute: typeof TransactionsRouteWithChildren
+  TransactionsNewRoute: typeof TransactionsNewRoute
+  TransactionsIndexRoute: typeof TransactionsIndexRoute
+  TransactionsEditIdRoute: typeof TransactionsEditIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/transactions': {
-      id: '/transactions'
-      path: '/transactions'
-      fullPath: '/transactions'
-      preLoaderRoute: typeof TransactionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -316,36 +311,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/transactions/': {
+      id: '/transactions/'
+      path: '/transactions'
+      fullPath: '/transactions/'
+      preLoaderRoute: typeof TransactionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/transactions/new': {
       id: '/transactions/new'
-      path: '/new'
+      path: '/transactions/new'
       fullPath: '/transactions/new'
       preLoaderRoute: typeof TransactionsNewRouteImport
-      parentRoute: typeof TransactionsRoute
+      parentRoute: typeof rootRouteImport
     }
     '/transactions/edit/$id': {
       id: '/transactions/edit/$id'
-      path: '/edit/$id'
+      path: '/transactions/edit/$id'
       fullPath: '/transactions/edit/$id'
       preLoaderRoute: typeof TransactionsEditIdRouteImport
-      parentRoute: typeof TransactionsRoute
+      parentRoute: typeof rootRouteImport
     }
   }
 }
-
-interface TransactionsRouteChildren {
-  TransactionsNewRoute: typeof TransactionsNewRoute
-  TransactionsEditIdRoute: typeof TransactionsEditIdRoute
-}
-
-const TransactionsRouteChildren: TransactionsRouteChildren = {
-  TransactionsNewRoute: TransactionsNewRoute,
-  TransactionsEditIdRoute: TransactionsEditIdRoute,
-}
-
-const TransactionsRouteWithChildren = TransactionsRoute._addFileChildren(
-  TransactionsRouteChildren,
-)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -360,18 +348,10 @@ const rootRouteChildren: RootRouteChildren = {
   InstallmentsRoute: InstallmentsRoute,
   OpenFinanceRoute: OpenFinanceRoute,
   SettingsRoute: SettingsRoute,
-  TransactionsRoute: TransactionsRouteWithChildren,
+  TransactionsNewRoute: TransactionsNewRoute,
+  TransactionsIndexRoute: TransactionsIndexRoute,
+  TransactionsEditIdRoute: TransactionsEditIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
