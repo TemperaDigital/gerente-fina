@@ -12,6 +12,7 @@ import {
   Layers,
   Target,
   LineChart,
+  Tags,
   Menu,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -22,6 +23,7 @@ const NAV = [
   { to: "/transactions", label: "Lançamentos", icon: ArrowLeftRight },
   { to: "/accounts", label: "Contas", icon: Wallet },
   { to: "/credit-cards", label: "Cartões", icon: CreditCard },
+  { to: "/categories", label: "Categorias", icon: Tags },
   { to: "/installments", label: "Parcelas & Dívidas", icon: Layers },
   { to: "/budgets", label: "Orçamentos", icon: Target },
   { to: "/forecast", label: "Previsão", icon: LineChart },

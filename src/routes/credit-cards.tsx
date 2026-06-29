@@ -280,7 +280,8 @@ function CreditCardsPage() {
             <DialogTitle>Novo cartão de crédito</DialogTitle>
           </DialogHeader>
           <AccountForm
-            forcedType="credit_card"
+            initialType="credit_card"
+            lockType
             submitting={createMut.isPending}
             submitLabel="Criar cartão"
             onCancel={() => setCreating(false)}
@@ -297,7 +298,8 @@ function CreditCardsPage() {
           </DialogHeader>
           {editing && (
             <AccountForm
-              forcedType="credit_card"
+              initialType="credit_card"
+              lockType
               initial={editing}
               submitting={updateMut.isPending}
               submitLabel="Salvar alterações"

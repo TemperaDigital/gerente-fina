@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -95,7 +96,7 @@ function AccountsPage() {
   const queryClient = useQueryClient();
   const router = useRouter();
 
-  const [creating, setCreating] = useState<null | "cash" | "bank">(null);
+  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AccountWithBalanceDTO | null>(null);
   const [archiving, setArchiving] = useState<AccountWithBalanceDTO | null>(
     null,
@@ -109,12 +110,19 @@ function AccountsPage() {
   }
 
   const createMut = useMutation({
-    mutationFn: (payload: AccountFormPayload & { type: "cash" | "bank" }) =>
+    mutationFn: (payload: AccountFormPayload) =>
       createAccount({ data: payload }),
-    onSuccess: async () => {
-      toast.success("Conta criada.");
-      setCreating(null);
+    onSuccess: async (_res, payload) => {
+      if (payload.type === "credit_card") {
+        toast.success("Cartão criado. Disponível em Cartões.");
+      } else {
+        toast.success("Conta criada.");
+      }
+      setCreating(false);
       await refresh();
+      if (payload.type === "credit_card") {
+        router.navigate({ to: "/credit-cards" });
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -166,19 +174,11 @@ function AccountsPage() {
           </div>
           <div className="flex gap-2">
             <Button
-              variant="ghost"
-              className="h-9 gap-2 rounded-full border border-white/10 bg-white/[0.04] hover:bg-white/10"
-              onClick={() => setCreating("cash")}
-            >
-              <Banknote className="size-4" />
-              Dinheiro
-            </Button>
-            <Button
               className="h-9 gap-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
-              onClick={() => setCreating("bank")}
+              onClick={() => setCreating(true)}
             >
               <Plus className="size-4" />
-              Conta bancária
+              Nova conta
             </Button>
           </div>
         </header>
@@ -257,29 +257,23 @@ function AccountsPage() {
         )}
       </div>
 
-      {/* Create dialog */}
-      <Dialog open={!!creating} onOpenChange={(o) => !o && setCreating(null)}>
+      {/* Create dialog — tipo dinâmico (cash | bank | credit_card) */}
+      <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
           <DialogHeader>
-            <DialogTitle>
-              Nova {creating === "cash" ? "carteira em dinheiro" : "conta bancária"}
-            </DialogTitle>
+            <DialogTitle>Nova conta</DialogTitle>
           </DialogHeader>
-          {creating && (
-            <AccountForm
-              forcedType={creating}
-              submitting={createMut.isPending}
-              submitLabel="Criar conta"
-              onCancel={() => setCreating(null)}
-              onSubmit={(p) =>
-                createMut.mutate({ ...p, type: creating })
-              }
-            />
-          )}
+          <AccountForm
+            initialType="bank"
+            submitting={createMut.isPending}
+            submitLabel="Criar conta"
+            onCancel={() => setCreating(false)}
+            onSubmit={(p) => createMut.mutate(p)}
+          />
         </DialogContent>
       </Dialog>
 
-      {/* Edit dialog */}
+      {/* Edit dialog — tipo travado (conversão de tipo é proibida) */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
           <DialogHeader>
@@ -287,7 +281,8 @@ function AccountsPage() {
           </DialogHeader>
           {editing && (
             <AccountForm
-              forcedType={editing.type as "cash" | "bank"}
+              initialType={editing.type as "cash" | "bank"}
+              lockType
               initial={editing}
               submitting={updateMut.isPending}
               submitLabel="Salvar alterações"

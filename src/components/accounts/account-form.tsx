@@ -1,8 +1,13 @@
 /**
- * Componente compartilhado — formulário de Conta (cash/bank/credit_card).
- * Headless quanto a dados: recebe valores e dispara onSubmit com payload limpo.
+ * Formulário compartilhado de Conta (cash | bank | credit_card).
+ * Headless quanto a dados: emite payload limpo via onSubmit.
+ *
+ * Modo dinâmico (lockType = false): exibe pílulas para alternar o tipo
+ * e renderiza condicionalmente os campos de cartão (limite, fechamento,
+ * vencimento) — respeitando a CHECK constraint da tabela `accounts`.
  */
 import { useState } from "react";
+import { Banknote, Landmark, CreditCard } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -13,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export type AccountFormType = "cash" | "bank" | "credit_card";
 
@@ -28,6 +34,7 @@ export interface AccountFormValues {
 }
 
 export interface AccountFormPayload {
+  type: AccountFormType;
   name: string;
   institution: string | null;
   color: string | null;
@@ -39,7 +46,10 @@ export interface AccountFormPayload {
 
 interface Props {
   initial?: Partial<AccountFormValues>;
-  forcedType: AccountFormType;
+  /** Tipo inicial. Se `lockType` for true, o seletor de tipo não aparece. */
+  initialType: AccountFormType;
+  /** Quando true, o tipo é fixo (uso em /credit-cards e na edição). */
+  lockType?: boolean;
   submitting?: boolean;
   submitLabel: string;
   onSubmit: (payload: AccountFormPayload) => void;
@@ -62,14 +72,26 @@ function centsToBRLInput(cents: number | null | undefined): string {
   return `${inteiro},${frac}`;
 }
 
+const TYPE_OPTIONS: Array<{
+  value: AccountFormType;
+  label: string;
+  Icon: typeof Banknote;
+}> = [
+  { value: "cash", label: "Dinheiro", Icon: Banknote },
+  { value: "bank", label: "Banco", Icon: Landmark },
+  { value: "credit_card", label: "Cartão", Icon: CreditCard },
+];
+
 export function AccountForm({
   initial,
-  forcedType,
+  initialType,
+  lockType = false,
   submitting,
   submitLabel,
   onSubmit,
   onCancel,
 }: Props) {
+  const [type, setType] = useState<AccountFormType>(initialType);
   const [name, setName] = useState(initial?.name ?? "");
   const [institution, setInstitution] = useState(initial?.institution ?? "");
   const [limitStr, setLimitStr] = useState(
@@ -81,32 +103,104 @@ export function AccountForm({
   const [dueDay, setDueDay] = useState<string>(
     initial?.due_day ? String(initial.due_day) : "",
   );
+  const [error, setError] = useState<string | null>(null);
 
-  const isCard = forcedType === "credit_card";
+  const isCard = type === "credit_card";
+
+  function changeType(next: AccountFormType) {
+    if (lockType || next === type) return;
+    setType(next);
+    setError(null);
+    if (next !== "credit_card") {
+      // Limpa campos exclusivos de cartão para garantir payload com null
+      // e respeitar a CHECK constraint da tabela accounts.
+      setLimitStr("");
+      setClosingDay("");
+      setDueDay("");
+    }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
-    const payload: AccountFormPayload = {
+    setError(null);
+    if (!name.trim()) {
+      setError("Informe um nome para a conta.");
+      return;
+    }
+    if (isCard) {
+      const limit = brlInputToCents(limitStr);
+      const closing = Number(closingDay) || null;
+      const due = Number(dueDay) || null;
+      if (limit == null || !closing || !due) {
+        setError(
+          "Cartão exige limite, dia de fechamento e dia de vencimento.",
+        );
+        return;
+      }
+      onSubmit({
+        type,
+        name: name.trim(),
+        institution: institution.trim() || null,
+        color: null,
+        icon: null,
+        credit_limit_cents: limit,
+        closing_day: closing,
+        due_day: due,
+      });
+      return;
+    }
+    onSubmit({
+      type,
       name: name.trim(),
       institution: institution.trim() || null,
       color: null,
       icon: null,
-      credit_limit_cents: isCard ? brlInputToCents(limitStr) : null,
-      closing_day: isCard ? Number(closingDay) || null : null,
-      due_day: isCard ? Number(dueDay) || null : null,
-    };
-    onSubmit(payload);
+      credit_limit_cents: null,
+      closing_day: null,
+      due_day: null,
+    });
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {!lockType && (
+        <Field label="Tipo de conta">
+          <div className="grid grid-cols-3 gap-2">
+            {TYPE_OPTIONS.map(({ value, label, Icon }) => {
+              const active = type === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => changeType(value)}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-1 rounded-xl border px-3 py-3 text-xs transition-colors",
+                    active
+                      ? "border-primary/60 bg-primary/15 text-foreground shadow-inner"
+                      : "border-white/10 bg-white/[0.04] text-foreground/70 hover:bg-white/10",
+                  )}
+                >
+                  <Icon className="size-4" />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+      )}
+
       <Field label="Nome">
         <Input
           className="border-white/10 bg-white/[0.04]"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={isCard ? "Ex.: Nubank Black" : "Ex.: Conta Itaú PF"}
+          placeholder={
+            isCard
+              ? "Ex.: Nubank Black"
+              : type === "cash"
+                ? "Ex.: Carteira"
+                : "Ex.: Conta Itaú PF"
+          }
         />
       </Field>
 
@@ -161,12 +255,18 @@ export function AccountForm({
           </div>
           {closingDay && dueDay && Number(dueDay) > Number(closingDay) && (
             <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
-              Regra do meio do mês ativa: como vencimento ({dueDay}) é maior que
-              fechamento ({closingDay}), faturas vencerão no mesmo mês civil
-              do fechamento.
+              Regra do meio do mês ativa: como vencimento ({dueDay}) é maior
+              que fechamento ({closingDay}), faturas vencerão no mesmo mês
+              civil do fechamento.
             </div>
           )}
         </>
+      )}
+
+      {error && (
+        <div className="rounded-xl border border-rose-400/30 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
+          {error}
+        </div>
       )}
 
       <div className="flex justify-end gap-2 pt-2">
