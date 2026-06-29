@@ -13,7 +13,21 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
-import { Wallet, TrendingUp, TrendingDown, RefreshCcw } from "lucide-react";
+import {
+  Wallet,
+  TrendingUp,
+  TrendingDown,
+  RefreshCcw,
+  Banknote,
+  Landmark,
+  CreditCard,
+} from "lucide-react";
+
+const ACCOUNT_TYPE_META = {
+  cash: { label: "Dinheiro", Icon: Banknote, color: "text-emerald-300" },
+  bank: { label: "Conta Bancária", Icon: Landmark, color: "text-sky-300" },
+  credit_card: { label: "Cartão de Crédito", Icon: CreditCard, color: "text-violet-300" },
+} as const;
 
 import {
   getDashboardSummary,
