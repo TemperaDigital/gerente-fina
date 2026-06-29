@@ -257,29 +257,23 @@ function AccountsPage() {
         )}
       </div>
 
-      {/* Create dialog */}
-      <Dialog open={!!creating} onOpenChange={(o) => !o && setCreating(null)}>
+      {/* Create dialog — tipo dinâmico (cash | bank | credit_card) */}
+      <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
           <DialogHeader>
-            <DialogTitle>
-              Nova {creating === "cash" ? "carteira em dinheiro" : "conta bancária"}
-            </DialogTitle>
+            <DialogTitle>Nova conta</DialogTitle>
           </DialogHeader>
-          {creating && (
-            <AccountForm
-              forcedType={creating}
-              submitting={createMut.isPending}
-              submitLabel="Criar conta"
-              onCancel={() => setCreating(null)}
-              onSubmit={(p) =>
-                createMut.mutate({ ...p, type: creating })
-              }
-            />
-          )}
+          <AccountForm
+            initialType="bank"
+            submitting={createMut.isPending}
+            submitLabel="Criar conta"
+            onCancel={() => setCreating(false)}
+            onSubmit={(p) => createMut.mutate(p)}
+          />
         </DialogContent>
       </Dialog>
 
-      {/* Edit dialog */}
+      {/* Edit dialog — tipo travado (conversão de tipo é proibida) */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
           <DialogHeader>
@@ -287,7 +281,8 @@ function AccountsPage() {
           </DialogHeader>
           {editing && (
             <AccountForm
-              forcedType={editing.type as "cash" | "bank"}
+              initialType={editing.type as "cash" | "bank"}
+              lockType
               initial={editing}
               submitting={updateMut.isPending}
               submitLabel="Salvar alterações"
