@@ -197,11 +197,16 @@ export function AccountForm({
         </Field>
       )}
 
-      <Field label="Nome">
+      <Field label="Nome" error={show("name")}>
         <Input
-          className="border-white/10 bg-white/[0.04]"
+          className={cn(
+            "border-white/10 bg-white/[0.04]",
+            show("name") && "border-rose-400/60 focus-visible:ring-rose-400/40",
+          )}
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onBlur={() => markTouched("name")}
+          aria-invalid={!!show("name")}
           placeholder={
             isCard
               ? "Ex.: Nubank Black"
@@ -212,29 +217,50 @@ export function AccountForm({
         />
       </Field>
 
-      <Field label="Instituição (opcional)">
+      <Field label="Instituição (opcional)" error={show("institution")}>
         <Input
-          className="border-white/10 bg-white/[0.04]"
+          className={cn(
+            "border-white/10 bg-white/[0.04]",
+            show("institution") && "border-rose-400/60 focus-visible:ring-rose-400/40",
+          )}
           value={institution}
           onChange={(e) => setInstitution(e.target.value)}
+          onBlur={() => markTouched("institution")}
+          aria-invalid={!!show("institution")}
         />
       </Field>
 
       {isCard && (
         <>
-          <Field label="Limite de Crédito (R$)">
+          <Field label="Limite de Crédito (R$)" error={show("limit")}>
             <Input
               inputMode="decimal"
               placeholder="0,00"
-              className="border-white/10 bg-white/[0.04]"
+              className={cn(
+                "border-white/10 bg-white/[0.04]",
+                show("limit") && "border-rose-400/60 focus-visible:ring-rose-400/40",
+              )}
               value={limitStr}
               onChange={(e) => setLimitStr(e.target.value)}
+              onBlur={() => markTouched("limit")}
+              aria-invalid={!!show("limit")}
             />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Dia de fechamento">
-              <Select value={closingDay} onValueChange={setClosingDay}>
-                <SelectTrigger className="border-white/10 bg-white/[0.04]">
+            <Field label="Dia de fechamento" error={show("closing")}>
+              <Select
+                value={closingDay}
+                onValueChange={(v) => {
+                  setClosingDay(v);
+                  markTouched("closing");
+                }}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "border-white/10 bg-white/[0.04]",
+                    show("closing") && "border-rose-400/60",
+                  )}
+                >
                   <SelectValue placeholder="Dia" />
                 </SelectTrigger>
                 <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
@@ -246,9 +272,20 @@ export function AccountForm({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Dia de vencimento">
-              <Select value={dueDay} onValueChange={setDueDay}>
-                <SelectTrigger className="border-white/10 bg-white/[0.04]">
+            <Field label="Dia de vencimento" error={show("due")}>
+              <Select
+                value={dueDay}
+                onValueChange={(v) => {
+                  setDueDay(v);
+                  markTouched("due");
+                }}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "border-white/10 bg-white/[0.04]",
+                    show("due") && "border-rose-400/60",
+                  )}
+                >
                   <SelectValue placeholder="Dia" />
                 </SelectTrigger>
                 <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
@@ -271,9 +308,10 @@ export function AccountForm({
         </>
       )}
 
-      {error && (
-        <div className="rounded-xl border border-rose-400/30 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
-          {error}
+      {submitAttempted && hasErrors && (
+        <div className="flex items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
+          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          <span>Corrija os campos destacados antes de continuar.</span>
         </div>
       )}
 
@@ -288,8 +326,8 @@ export function AccountForm({
         </Button>
         <Button
           type="submit"
-          disabled={submitting}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
+          disabled={submitting || hasErrors}
+          className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? "Salvando..." : submitLabel}
         </Button>
@@ -297,6 +335,7 @@ export function AccountForm({
     </form>
   );
 }
+
 
 function Field({
   label,
