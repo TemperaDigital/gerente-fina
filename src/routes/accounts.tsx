@@ -60,11 +60,10 @@ import {
 
 const accountsQuery = () =>
   queryOptions({
-    queryKey: ["accounts", "cash-bank"],
+    queryKey: ["accounts", "all"],
     queryFn: () => listAccounts({ data: {} }),
-    select: (rows: AccountWithBalanceDTO[]) =>
-      rows.filter((a) => a.type === "cash" || a.type === "bank"),
   });
+
 
 export const Route = createFileRoute("/accounts")({
   head: () => ({
