@@ -2,10 +2,16 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useState, useEffect } from 'react';
 import { Plus, Folder, ChevronDown, ChevronRight, Edit2, Trash2, Tag, Layers, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase/client';
+import { AppShell } from '@/components/app-shell';
 
 export const Route = createFileRoute('/categories')({
-  component: CategoriesComponent,
+  component: () => (
+    <AppShell>
+      <CategoriesComponent />
+    </AppShell>
+  ),
 });
+
 
 interface Category {
   id: string;
