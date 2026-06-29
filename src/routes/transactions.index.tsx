@@ -103,7 +103,7 @@ const categoriesQuery = () =>
 // ---------------------------------------------------------------------------
 // Route
 // ---------------------------------------------------------------------------
-export const Route = createFileRoute("/transactions")({
+export const Route = createFileRoute("/transactions/")({
   head: () => ({
     meta: [
       { title: "Livro-Caixa — Gerente Fina" },
