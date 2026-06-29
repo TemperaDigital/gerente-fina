@@ -96,7 +96,7 @@ function AccountsPage() {
   const queryClient = useQueryClient();
   const router = useRouter();
 
-  const [creating, setCreating] = useState<null | "cash" | "bank">(null);
+  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AccountWithBalanceDTO | null>(null);
   const [archiving, setArchiving] = useState<AccountWithBalanceDTO | null>(
     null,
@@ -110,12 +110,19 @@ function AccountsPage() {
   }
 
   const createMut = useMutation({
-    mutationFn: (payload: AccountFormPayload & { type: "cash" | "bank" }) =>
+    mutationFn: (payload: AccountFormPayload) =>
       createAccount({ data: payload }),
-    onSuccess: async () => {
-      toast.success("Conta criada.");
-      setCreating(null);
+    onSuccess: async (_res, payload) => {
+      if (payload.type === "credit_card") {
+        toast.success("Cartão criado. Disponível em Cartões.");
+      } else {
+        toast.success("Conta criada.");
+      }
+      setCreating(false);
       await refresh();
+      if (payload.type === "credit_card") {
+        router.navigate({ to: "/credit-cards" });
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   });
