@@ -104,63 +104,70 @@ export function AccountForm({
   const [dueDay, setDueDay] = useState<string>(
     initial?.due_day ? String(initial.due_day) : "",
   );
-  const [error, setError] = useState<string | null>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const isCard = type === "credit_card";
+
+  const errors = useMemo(() => {
+    const e: Partial<Record<"name" | "institution" | "limit" | "closing" | "due", string>> = {};
+    const trimmedName = name.trim();
+    if (!trimmedName) e.name = "Informe um nome para a conta.";
+    else if (trimmedName.length > 60) e.name = "Máximo de 60 caracteres.";
+    if (institution.trim().length > 60) e.institution = "Máximo de 60 caracteres.";
+    if (isCard) {
+      const limit = brlInputToCents(limitStr);
+      if (limit == null) e.limit = "Informe um limite válido (ex.: 5000,00).";
+      else if (limit <= 0) e.limit = "O limite deve ser maior que zero.";
+      const closing = Number(closingDay);
+      if (!closingDay) e.closing = "Selecione o dia de fechamento.";
+      else if (closing < 1 || closing > 31) e.closing = "Dia inválido (1–31).";
+      const due = Number(dueDay);
+      if (!dueDay) e.due = "Selecione o dia de vencimento.";
+      else if (due < 1 || due > 31) e.due = "Dia inválido (1–31).";
+    }
+    return e;
+  }, [name, institution, isCard, limitStr, closingDay, dueDay]);
+
+  const hasErrors = Object.keys(errors).length > 0;
+
+  function show(field: keyof typeof errors) {
+    return (submitAttempted || touched[field]) ? errors[field] : undefined;
+  }
+
+  function markTouched(field: string) {
+    setTouched((t) => (t[field] ? t : { ...t, [field]: true }));
+  }
 
   function changeType(next: AccountFormType) {
     if (lockType || next === type) return;
     setType(next);
-    setError(null);
     if (next !== "credit_card") {
       // Limpa campos exclusivos de cartão para garantir payload com null
       // e respeitar a CHECK constraint da tabela accounts.
       setLimitStr("");
       setClosingDay("");
       setDueDay("");
+      setTouched((t) => ({ ...t, limit: false, closing: false, due: false }));
     }
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    if (!name.trim()) {
-      setError("Informe um nome para a conta.");
-      return;
-    }
-    if (isCard) {
-      const limit = brlInputToCents(limitStr);
-      const closing = Number(closingDay) || null;
-      const due = Number(dueDay) || null;
-      if (limit == null || !closing || !due) {
-        setError(
-          "Cartão exige limite, dia de fechamento e dia de vencimento.",
-        );
-        return;
-      }
-      onSubmit({
-        type,
-        name: name.trim(),
-        institution: institution.trim() || null,
-        color: null,
-        icon: null,
-        credit_limit_cents: limit,
-        closing_day: closing,
-        due_day: due,
-      });
-      return;
-    }
+    setSubmitAttempted(true);
+    if (hasErrors) return;
     onSubmit({
       type,
       name: name.trim(),
       institution: institution.trim() || null,
       color: null,
       icon: null,
-      credit_limit_cents: null,
-      closing_day: null,
-      due_day: null,
+      credit_limit_cents: isCard ? brlInputToCents(limitStr) : null,
+      closing_day: isCard ? Number(closingDay) : null,
+      due_day: isCard ? Number(dueDay) : null,
     });
   }
+
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
