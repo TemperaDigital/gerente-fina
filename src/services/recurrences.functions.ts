@@ -3,6 +3,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 
 export interface RecurrenceDTO {
   id: string;
@@ -23,18 +24,6 @@ export interface RecurrenceDTO {
   active: boolean;
 }
 
-let cachedUserId: string | null = null;
-async function resolveUserId(): Promise<string> {
-  if (cachedUserId) return cachedUserId;
-  const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
-  const sb = getSupabaseAdmin();
-  const { data, error } = await sb.auth.admin.listUsers({ page: 1, perPage: 1 });
-  if (error) throw new Error(error.message);
-  const u = data.users?.[0];
-  if (!u) throw new Error("Nenhum usuário.");
-  cachedUserId = u.id;
-  return u.id;
-}
 
 export const listRecurrences = createServerFn({ method: "GET" }).handler(
   async (): Promise<RecurrenceDTO[]> => {
@@ -79,7 +68,7 @@ export const createRecurrence = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const userId = await resolveUserId();
+    const userId = await resolveActiveUserId();
     const type = data.kind === "income" ? "credit" : "debit";
     const { error } = await sb.from("recurrences").insert({
       user_id: userId,

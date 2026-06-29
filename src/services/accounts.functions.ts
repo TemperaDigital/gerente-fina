@@ -7,6 +7,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 
 export type AccountType = "cash" | "bank" | "credit_card";
 
@@ -27,18 +28,6 @@ export interface AccountWithBalanceDTO {
   created_at: string;
 }
 
-let cachedUserId: string | null = null;
-async function resolveUserId(): Promise<string> {
-  if (cachedUserId) return cachedUserId;
-  const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
-  const sb = getSupabaseAdmin();
-  const { data, error } = await sb.auth.admin.listUsers({ page: 1, perPage: 1 });
-  if (error) throw new Error(`Falha ao resolver usuário: ${error.message}`);
-  const u = data.users?.[0];
-  if (!u) throw new Error("Nenhum usuário cadastrado em auth.users.");
-  cachedUserId = u.id;
-  return u.id;
-}
 
 // ---------------------------------------------------------------------------
 // listAccounts
@@ -153,7 +142,7 @@ export const createAccount = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const userId = await resolveUserId();
+    const userId = await resolveActiveUserId();
 
     const { data: row, error } = await sb
       .from("accounts")
