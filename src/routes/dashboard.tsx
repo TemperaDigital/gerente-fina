@@ -218,26 +218,32 @@ function DashboardPage() {
               </div>
             ) : (
               <ul className="space-y-2">
-                {summary.accounts.map((a) => (
+                {summary.accounts.map((a) => {
+                  const meta =
+                    ACCOUNT_TYPE_META[a.account_type] ?? ACCOUNT_TYPE_META.bank;
+                  const TypeIcon = meta.Icon;
+                  const isNegative = Number(a.balance) < 0;
+                  return (
                   <li
                     key={a.account_id}
                     className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3 transition-colors hover:bg-white/[0.06]"
                   >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-foreground">
-                        {a.account_name}
-                      </div>
-                      <div className="mt-0.5 text-[11px] uppercase tracking-wider text-foreground/50">
-                        {a.account_type === "cash"
-                          ? "Dinheiro"
-                          : a.account_type === "bank"
-                          ? "Conta Bancária"
-                          : "Cartão de Crédito"}
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] ${meta.color}`}>
+                        <TypeIcon className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-foreground">
+                          {a.account_name}
+                        </div>
+                        <div className="mt-0.5 text-[11px] uppercase tracking-wider text-foreground/50">
+                          {meta.label}
+                        </div>
                       </div>
                     </div>
                     <div
                       className={
-                        a.balance.startsWith("-")
+                        isNegative
                           ? "text-sm font-semibold tabular-nums text-rose-400"
                           : "text-sm font-semibold tabular-nums text-foreground"
                       }
@@ -245,7 +251,8 @@ function DashboardPage() {
                       {formatBRL(a.balance)}
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </GlassCard>
