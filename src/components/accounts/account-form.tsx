@@ -6,8 +6,8 @@
  * e renderiza condicionalmente os campos de cartão (limite, fechamento,
  * vencimento) — respeitando a CHECK constraint da tabela `accounts`.
  */
-import { useState } from "react";
-import { Banknote, Landmark, CreditCard } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Banknote, Landmark, CreditCard, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
