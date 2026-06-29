@@ -185,7 +185,7 @@ function DashboardPage() {
               </div>
               <div
                 className={
-                  summary.net_result.startsWith("-")
+                  Number(summary.net_result) < 0
                     ? "mt-1 text-2xl font-semibold text-rose-400"
                     : "mt-1 text-2xl font-semibold text-emerald-400"
                 }
