@@ -174,19 +174,11 @@ function AccountsPage() {
           </div>
           <div className="flex gap-2">
             <Button
-              variant="ghost"
-              className="h-9 gap-2 rounded-full border border-white/10 bg-white/[0.04] hover:bg-white/10"
-              onClick={() => setCreating("cash")}
-            >
-              <Banknote className="size-4" />
-              Dinheiro
-            </Button>
-            <Button
               className="h-9 gap-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
-              onClick={() => setCreating("bank")}
+              onClick={() => setCreating(true)}
             >
               <Plus className="size-4" />
-              Conta bancária
+              Nova conta
             </Button>
           </div>
         </header>
