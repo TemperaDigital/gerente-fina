@@ -340,9 +340,11 @@ export function AccountForm({
 function Field({
   label,
   children,
+  error,
 }: {
   label: string;
   children: React.ReactNode;
+  error?: string;
 }) {
   return (
     <div className="space-y-1.5">
@@ -350,6 +352,10 @@ function Field({
         {label}
       </Label>
       {children}
+      {error && (
+        <p className="text-[11px] text-rose-300">{error}</p>
+      )}
     </div>
   );
 }
+
