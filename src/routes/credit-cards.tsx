@@ -298,7 +298,8 @@ function CreditCardsPage() {
           </DialogHeader>
           {editing && (
             <AccountForm
-              forcedType="credit_card"
+              initialType="credit_card"
+              lockType
               initial={editing}
               submitting={updateMut.isPending}
               submitLabel="Salvar alterações"
