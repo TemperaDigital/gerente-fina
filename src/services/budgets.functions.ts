@@ -4,6 +4,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 
 export interface BudgetDTO {
   id: string;
@@ -17,18 +18,6 @@ export interface BudgetDTO {
   percent: number;
 }
 
-let cachedUserId: string | null = null;
-async function resolveUserId(): Promise<string> {
-  if (cachedUserId) return cachedUserId;
-  const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
-  const sb = getSupabaseAdmin();
-  const { data, error } = await sb.auth.admin.listUsers({ page: 1, perPage: 1 });
-  if (error) throw new Error(error.message);
-  const u = data.users?.[0];
-  if (!u) throw new Error("Nenhum usuário.");
-  cachedUserId = u.id;
-  return u.id;
-}
 
 const Input = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
@@ -115,7 +104,7 @@ export const upsertBudget = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const userId = await resolveUserId();
+    const userId = await resolveActiveUserId();
     const ref = data.reference_month ? `${data.reference_month}-01` : null;
     const { error } = await sb.from("budgets").upsert(
       {

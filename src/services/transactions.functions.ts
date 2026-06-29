@@ -13,6 +13,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { computeInvoiceDueDate } from "@/lib/finance/invoice-due";
+import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 
 // ---------------------------------------------------------------------------
 // Tipos públicos
@@ -53,19 +54,6 @@ export interface TransactionsListDTO {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-let cachedUserId: string | null = null;
-
-async function resolveUserId(): Promise<string> {
-  if (cachedUserId) return cachedUserId;
-  const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
-  const sb = getSupabaseAdmin();
-  const { data, error } = await sb.auth.admin.listUsers({ page: 1, perPage: 1 });
-  if (error) throw new Error(`Falha ao resolver usuário: ${error.message}`);
-  const u = data.users?.[0];
-  if (!u) throw new Error("Nenhum usuário cadastrado em auth.users.");
-  cachedUserId = u.id;
-  return u.id;
-}
 
 function sanitizeDescription(raw: string | null | undefined): string {
   if (!raw) return "";
@@ -428,7 +416,7 @@ export const createTransactionEntry = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<CreateTransactionResultDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const userId = await resolveUserId();
+    const userId = await resolveActiveUserId();
     const warnings: string[] = [];
 
     // -------- TRANSFER (2 pernas vinculadas por transfer_id) ---------------
