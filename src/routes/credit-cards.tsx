@@ -234,7 +234,7 @@ function CreditCardsPage() {
                       </div>
                       <div
                         className={
-                          c.balance.startsWith("-")
+                          Number(c.balance) < 0
                             ? "mt-1 font-semibold tabular-nums text-rose-400"
                             : "mt-1 font-semibold tabular-nums text-foreground"
                         }
