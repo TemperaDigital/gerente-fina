@@ -13,7 +13,21 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
-import { Wallet, TrendingUp, TrendingDown, RefreshCcw } from "lucide-react";
+import {
+  Wallet,
+  TrendingUp,
+  TrendingDown,
+  RefreshCcw,
+  Banknote,
+  Landmark,
+  CreditCard,
+} from "lucide-react";
+
+const ACCOUNT_TYPE_META = {
+  cash: { label: "Dinheiro", Icon: Banknote, color: "text-emerald-300" },
+  bank: { label: "Conta Bancária", Icon: Landmark, color: "text-sky-300" },
+  credit_card: { label: "Cartão de Crédito", Icon: CreditCard, color: "text-violet-300" },
+} as const;
 
 import {
   getDashboardSummary,
@@ -144,11 +158,7 @@ function DashboardPage() {
             amount={summary.consolidated_balance}
             hint="Soma de todas as contas (cash, banco e cartões)"
             icon={<Wallet className="size-4" />}
-            tone={
-              summary.consolidated_balance.startsWith("-")
-                ? "negative"
-                : "neutral"
-            }
+            tone={Number(summary.consolidated_balance) < 0 ? "negative" : "neutral"}
           />
           <KpiCard
             label="Receitas"
@@ -175,7 +185,7 @@ function DashboardPage() {
               </div>
               <div
                 className={
-                  summary.net_result.startsWith("-")
+                  Number(summary.net_result) < 0
                     ? "mt-1 text-2xl font-semibold text-rose-400"
                     : "mt-1 text-2xl font-semibold text-emerald-400"
                 }
@@ -208,26 +218,32 @@ function DashboardPage() {
               </div>
             ) : (
               <ul className="space-y-2">
-                {summary.accounts.map((a) => (
+                {summary.accounts.map((a) => {
+                  const meta =
+                    ACCOUNT_TYPE_META[a.account_type] ?? ACCOUNT_TYPE_META.bank;
+                  const TypeIcon = meta.Icon;
+                  const isNegative = Number(a.balance) < 0;
+                  return (
                   <li
                     key={a.account_id}
                     className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3 transition-colors hover:bg-white/[0.06]"
                   >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-foreground">
-                        {a.account_name}
-                      </div>
-                      <div className="mt-0.5 text-[11px] uppercase tracking-wider text-foreground/50">
-                        {a.account_type === "cash"
-                          ? "Dinheiro"
-                          : a.account_type === "bank"
-                          ? "Conta Bancária"
-                          : "Cartão de Crédito"}
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] ${meta.color}`}>
+                        <TypeIcon className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-foreground">
+                          {a.account_name}
+                        </div>
+                        <div className="mt-0.5 text-[11px] uppercase tracking-wider text-foreground/50">
+                          {meta.label}
+                        </div>
                       </div>
                     </div>
                     <div
                       className={
-                        a.balance.startsWith("-")
+                        isNegative
                           ? "text-sm font-semibold tabular-nums text-rose-400"
                           : "text-sm font-semibold tabular-nums text-foreground"
                       }
@@ -235,7 +251,8 @@ function DashboardPage() {
                       {formatBRL(a.balance)}
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </GlassCard>
