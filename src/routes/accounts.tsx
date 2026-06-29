@@ -18,11 +18,13 @@ import {
   ArrowLeft,
   Banknote,
   Landmark,
+  CreditCard,
   Plus,
   Archive,
   Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
+
 
 
 import { Button } from "@/components/ui/button";
@@ -58,11 +60,10 @@ import {
 
 const accountsQuery = () =>
   queryOptions({
-    queryKey: ["accounts", "cash-bank"],
+    queryKey: ["accounts", "all"],
     queryFn: () => listAccounts({ data: {} }),
-    select: (rows: AccountWithBalanceDTO[]) =>
-      rows.filter((a) => a.type === "cash" || a.type === "bank"),
   });
+
 
 export const Route = createFileRoute("/accounts")({
   head: () => ({
@@ -186,75 +187,93 @@ function AccountsPage() {
         {accounts.length === 0 ? (
           <GlassCard className="p-10 text-center text-sm text-foreground/60">
             Nenhuma conta cadastrada ainda. Comece adicionando uma conta
-            bancária ou um caixa em dinheiro.
+            bancária, um caixa em dinheiro ou um cartão de crédito.
           </GlassCard>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {accounts.map((a) => (
-              <GlassCard key={a.id} className="p-5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {a.type === "cash" ? (
-                      <Banknote className="size-4 text-emerald-300" />
-                    ) : (
-                      <Landmark className="size-4 text-sky-300" />
-                    )}
-                    <span className="text-[10px] uppercase tracking-wider text-foreground/60">
-                      {a.type === "cash" ? "Dinheiro" : "Conta Bancária"}
-                    </span>
+          <div className="space-y-8">
+            {([
+              { key: "cash", label: "Dinheiro", Icon: Banknote, color: "text-emerald-300" },
+              { key: "bank", label: "Bancos", Icon: Landmark, color: "text-sky-300" },
+              { key: "credit_card", label: "Cartões de Crédito", Icon: CreditCard, color: "text-violet-300" },
+            ] as const).map(({ key, label, Icon, color }) => {
+              const group = accounts.filter((a) => a.type === key);
+              if (group.length === 0) return null;
+              return (
+                <section key={key} className="space-y-3">
+                  <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                    <Icon className={`size-4 ${color}`} />
+                    <h2 className="text-sm font-semibold tracking-tight text-foreground/80">
+                      {label}
+                    </h2>
+                    <span className="text-xs text-foreground/40">({group.length})</span>
                   </div>
-                  <div className="flex gap-1">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
-                      onClick={() => setEditing(a)}
-                      aria-label="Editar"
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
-                      onClick={() => setArchiving(a)}
-                      aria-label="Arquivar"
-                    >
-                      <Archive className="size-3.5" />
-                    </Button>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {group.map((a) => (
+                      <GlassCard key={a.id} className="p-5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Icon className={`size-4 ${color}`} />
+                            <span className="text-[10px] uppercase tracking-wider text-foreground/60">
+                              {label}
+                            </span>
+                          </div>
+                          <div className="flex gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
+                              onClick={() => setEditing(a)}
+                              aria-label="Editar"
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
+                              onClick={() => setArchiving(a)}
+                              aria-label="Arquivar"
+                            >
+                              <Archive className="size-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="mt-3 truncate text-sm font-semibold">
+                          {a.name}
+                        </div>
+                        {a.institution && (
+                          <div className="text-xs text-foreground/50">
+                            {a.institution}
+                          </div>
+                        )}
+                        <div
+                          className={
+                            a.balance.startsWith("-")
+                              ? "mt-3 text-2xl font-semibold tabular-nums text-rose-400"
+                              : "mt-3 text-2xl font-semibold tabular-nums text-foreground"
+                          }
+                        >
+                          {formatBRL(a.balance)}
+                        </div>
+                        <div className="mt-1 text-[11px] text-foreground/50">
+                          {a.transactions_count} lançamento
+                          {a.transactions_count === 1 ? "" : "s"}
+                          {a.last_movement_on
+                            ? ` · último ${a.last_movement_on
+                                .split("-")
+                                .reverse()
+                                .join("/")}`
+                            : ""}
+                        </div>
+                      </GlassCard>
+                    ))}
                   </div>
-                </div>
-                <div className="mt-3 truncate text-sm font-semibold">
-                  {a.name}
-                </div>
-                {a.institution && (
-                  <div className="text-xs text-foreground/50">
-                    {a.institution}
-                  </div>
-                )}
-                <div
-                  className={
-                    a.balance.startsWith("-")
-                      ? "mt-3 text-2xl font-semibold tabular-nums text-rose-400"
-                      : "mt-3 text-2xl font-semibold tabular-nums text-foreground"
-                  }
-                >
-                  {formatBRL(a.balance)}
-                </div>
-                <div className="mt-1 text-[11px] text-foreground/50">
-                  {a.transactions_count} lançamento
-                  {a.transactions_count === 1 ? "" : "s"}
-                  {a.last_movement_on
-                    ? ` · último ${a.last_movement_on
-                        .split("-")
-                        .reverse()
-                        .join("/")}`
-                    : ""}
-                </div>
-              </GlassCard>
-            ))}
+                </section>
+              );
+            })}
           </div>
         )}
+
       </div>
 
       {/* Create dialog — tipo dinâmico (cash | bank | credit_card) */}
@@ -281,7 +300,7 @@ function AccountsPage() {
           </DialogHeader>
           {editing && (
             <AccountForm
-              initialType={editing.type as "cash" | "bank"}
+              initialType={editing.type as "cash" | "bank" | "credit_card"}
               lockType
               initial={editing}
               submitting={updateMut.isPending}

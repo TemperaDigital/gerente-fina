@@ -5,10 +5,16 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { LineChart, Calendar, RefreshCw, ArrowUpRight, ArrowDownRight, Scale, Info } from 'lucide-react';
+import { AppShell } from '@/components/app-shell';
 
 export const Route = createFileRoute('/forecast')({
-  component: ForecastComponent,
+  component: () => (
+    <AppShell>
+      <ForecastComponent />
+    </AppShell>
+  ),
 });
+
 
 // Mock estruturado de projeções mensais para os próximos meses de 2026/2027
 const FORECAST_DATA = {
