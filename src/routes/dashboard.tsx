@@ -158,11 +158,7 @@ function DashboardPage() {
             amount={summary.consolidated_balance}
             hint="Soma de todas as contas (cash, banco e cartões)"
             icon={<Wallet className="size-4" />}
-            tone={
-              summary.consolidated_balance.startsWith("-")
-                ? "negative"
-                : "neutral"
-            }
+            tone={Number(summary.consolidated_balance) < 0 ? "negative" : "neutral"}
           />
           <KpiCard
             label="Receitas"
