@@ -5,10 +5,16 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { Shield, Download, Upload, ShieldAlert, Trash2, CheckCircle2, User, Key, Bell } from 'lucide-react';
+import { AppShell } from '@/components/app-shell';
 
 export const Route = createFileRoute('/settings')({
-  component: SettingsComponent,
+  component: () => (
+    <AppShell>
+      <SettingsComponent />
+    </AppShell>
+  ),
 });
+
 
 function SettingsComponent() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
