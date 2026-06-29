@@ -248,7 +248,7 @@ function AccountsPage() {
                         )}
                         <div
                           className={
-                            a.balance.startsWith("-")
+                            Number(a.balance) < 0
                               ? "mt-3 text-2xl font-semibold tabular-nums text-rose-400"
                               : "mt-3 text-2xl font-semibold tabular-nums text-foreground"
                           }
