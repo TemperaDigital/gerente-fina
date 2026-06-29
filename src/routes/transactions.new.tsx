@@ -7,19 +7,8 @@
  * Recorrência são acordeões inline.
  */
 import { useMemo, useState } from "react";
-import {
-  createFileRoute,
-  Link,
-  useNavigate,
-  useRouter,
-} from "@tanstack/react-router";
-import {
-  queryOptions,
-  useMutation,
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
+import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   ArrowDownCircle,
   ArrowLeftRight,
@@ -37,23 +26,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import {
-  GlassCard,
-  formatBRL,
-} from "@/components/dashboard/primitives";
-import {
-  getAccountsLookup,
-  getCategoriesLookup,
-  type AccountLookupDTO,
-} from "@/services/lookups.functions";
+import { GlassCard, formatBRL } from "@/components/dashboard/primitives";
+import { getAccountsLookup, getCategoriesLookup, type AccountLookupDTO } from "@/services/lookups.functions";
 import { createTransactionEntry } from "@/services/transactions.functions";
 import { projectInvoiceForPurchase } from "@/services/invoice-projection.functions";
 // IMPORTANTE: Trazendo o AppShell para manter o painel lateral fixo
@@ -64,8 +40,7 @@ import { AppShell } from "@/components/app-shell";
 // ---------------------------------------------------------------------------
 type TxKind = "income" | "expense" | "transfer" | "invoice_payment";
 
-const accountsQuery = () =>
-  queryOptions({ queryKey: ["lookups", "accounts"], queryFn: () => getAccountsLookup() });
+const accountsQuery = () => queryOptions({ queryKey: ["lookups", "accounts"], queryFn: () => getAccountsLookup() });
 
 const categoriesQuery = () =>
   queryOptions({ queryKey: ["lookups", "categories"], queryFn: () => getCategoriesLookup() });
@@ -117,16 +92,12 @@ function NewTransactionPage() {
   const [installmentOn, setInstallmentOn] = useState(false);
   const [installmentCount, setInstallmentCount] = useState(2);
   const [recurrenceOn, setRecurrenceOn] = useState(false);
-  const [frequency, setFrequency] =
-    useState<"daily" | "weekly" | "monthly" | "yearly">("monthly");
+  const [frequency, setFrequency] = useState<"daily" | "weekly" | "monthly" | "yearly">("monthly");
   const [intervalCount, setIntervalCount] = useState(1);
   const [endOn, setEndOn] = useState<string>("");
 
   const filteredCategories = useMemo(
-    () =>
-      categories.filter((c) =>
-        kind === "income" ? c.kind === "income" : c.kind === "expense",
-      ),
+    () => categories.filter((c) => (kind === "income" ? c.kind === "income" : c.kind === "expense")),
     [categories, kind],
   );
 
@@ -134,8 +105,7 @@ function NewTransactionPage() {
   const isCard = selectedAccount?.type === "credit_card";
 
   // Projeção de fatura (apenas para cartão)
-  const projectionEnabled =
-    isCard && (kind === "expense") && !!accountId && !!occurredOn;
+  const projectionEnabled = isCard && kind === "expense" && !!accountId && !!occurredOn;
   const { data: projection } = useQuery({
     queryKey: ["invoice-projection", accountId, occurredOn],
     queryFn: () =>
@@ -149,28 +119,25 @@ function NewTransactionPage() {
   const invoicesQuery = useQuery({
     queryKey: ["open-invoices-for-payment"],
     queryFn: async () => {
-      const { getOpenCreditCardInvoices } = await import(
-        "@/services/dashboard.functions"
-      );
+      const { getOpenCreditCardInvoices } = await import("@/services/dashboard.functions");
       return getOpenCreditCardInvoices();
     },
     enabled: kind === "invoice_payment",
   });
 
-  // GATILHO AUTOMÁTICO: Regra inteligente de detecção de Temperos e Grãos
+  // GATILHO AUTOMÁTICO CORRIGIDO COM OPTIONAL CHAINING (?.) PARA PASSAR NO BUILD
   const handleDescriptionChange = (val: string) => {
     setDescription(val);
     const termo = val.toLowerCase();
-    
+
     if (termo.includes("mariareniele") || termo.includes("woshington")) {
-      // 1. Encontra automaticamente a categoria correta de mercearia/alimentação
+      // Encontra com segurança usando c.name?.toLowerCase()
       const targetCategory = categories.find(
-        (c) => c.name.toLowerCase().includes("mercearia") || c.name.toLowerCase().includes("alimentação")
+        (c) => c.name?.toLowerCase().includes("mercearia") || c.name?.toLowerCase().includes("alimentação"),
       );
       if (targetCategory) {
         setCategoryId(targetCategory.id);
       }
-      // 2. Insere automaticamente o texto padrão nas observações (notes)
       setNotes("Compra de temperos e Graos");
     }
   };
@@ -193,8 +160,7 @@ function NewTransactionPage() {
     };
   };
   const createMut = useMutation({
-    mutationFn: (payload: CreatePayload) =>
-      createTransactionEntry({ data: payload }),
+    mutationFn: (payload: CreatePayload) => createTransactionEntry({ data: payload }),
     onSuccess: async (res) => {
       toast.success(
         `${res.created_count} lançamento${res.created_count === 1 ? "" : "s"} criado${
@@ -214,8 +180,7 @@ function NewTransactionPage() {
     e.preventDefault();
     if (!accountId) return toast.error("Selecione a conta.");
     const normalizedAmount = amount.replace(",", ".").trim();
-    if (!/^\d+(\.\d{1,2})?$/.test(normalizedAmount))
-      return toast.error("Valor inválido. Use formato 1234.56");
+    if (!/^\d+(\.\d{1,2})?$/.test(normalizedAmount)) return toast.error("Valor inválido. Use formato 1234.56");
     if (!description.trim()) return toast.error("Descrição obrigatória.");
 
     createMut.mutate({
@@ -225,14 +190,10 @@ function NewTransactionPage() {
       description: description.trim(),
       notes: notes.trim() || undefined,
       account_id: accountId,
-      category_id:
-        kind === "income" || kind === "expense" ? categoryId : undefined,
+      category_id: kind === "income" || kind === "expense" ? categoryId : undefined,
       counterpart_account_id: kind === "transfer" ? counterpartId : undefined,
       paid_invoice_id: kind === "invoice_payment" ? paidInvoiceId : undefined,
-      installment:
-        installmentOn && kind === "expense"
-          ? { count: installmentCount }
-          : undefined,
+      installment: installmentOn && kind === "expense" ? { count: installmentCount } : undefined,
       recurrence:
         recurrenceOn && (kind === "income" || kind === "expense")
           ? {
@@ -267,21 +228,22 @@ function NewTransactionPage() {
                 <ArrowLeft className="size-4" /> Voltar
               </Link>
             </Button>
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-              Novo Lançamento
-            </h1>
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Novo Lançamento</h1>
             <div className="w-[88px]" />
           </header>
 
           {/* Pílulas de seleção */}
-          <KindPills value={kind} onChange={(k) => {
-            setKind(k);
-            setCategoryId(undefined);
-            setCounterpartId(undefined);
-            setPaidInvoiceId(undefined);
-            if (k !== "expense") setInstallmentOn(false);
-            if (k !== "income" && k !== "expense") setRecurrenceOn(false);
-          }} />
+          <KindPills
+            value={kind}
+            onChange={(k) => {
+              setKind(k);
+              setCategoryId(undefined);
+              setCounterpartId(undefined);
+              setPaidInvoiceId(undefined);
+              if (k !== "expense") setInstallmentOn(false);
+              if (k !== "income" && k !== "expense") setRecurrenceOn(false);
+            }}
+          />
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <GlassCard className="space-y-4 p-5">
@@ -315,11 +277,7 @@ function NewTransactionPage() {
               </Field>
 
               <Field label={kind === "transfer" ? "Conta de origem" : "Conta"}>
-                <AccountSelect
-                  accounts={accounts}
-                  value={accountId}
-                  onChange={setAccountId}
-                />
+                <AccountSelect accounts={accounts} value={accountId} onChange={setAccountId} />
               </Field>
 
               {kind === "transfer" && (
@@ -359,11 +317,7 @@ function NewTransactionPage() {
                   <Select value={paidInvoiceId} onValueChange={setPaidInvoiceId}>
                     <SelectTrigger className="border-white/10 bg-white/[0.04]">
                       <SelectValue
-                        placeholder={
-                          invoicesQuery.isLoading
-                            ? "Carregando faturas..."
-                            : "Selecione a fatura..."
-                        }
+                        placeholder={invoicesQuery.isLoading ? "Carregando faturas..." : "Selecione a fatura..."}
                       />
                     </SelectTrigger>
                     <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
@@ -373,12 +327,9 @@ function NewTransactionPage() {
                           {formatBRL(inv.total_amount)}
                         </SelectItem>
                       ))}
-                      {(invoicesQuery.data?.length ?? 0) === 0 &&
-                        !invoicesQuery.isLoading && (
-                          <div className="px-3 py-2 text-xs text-foreground/50">
-                            Nenhuma fatura em aberto.
-                          </div>
-                        )}
+                      {(invoicesQuery.data?.length ?? 0) === 0 && !invoicesQuery.isLoading && (
+                        <div className="px-3 py-2 text-xs text-foreground/50">Nenhuma fatura em aberto.</div>
+                      )}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -401,15 +352,11 @@ function NewTransactionPage() {
                   <div className="font-semibold text-foreground">
                     Esta compra entrará na fatura de{" "}
                     <span className="text-violet-300">
-                      {projection.projected_reference_month
-                        .split("-")
-                        .reverse()
-                        .join("/")}
+                      {projection.projected_reference_month.split("-").reverse().join("/")}
                     </span>
                   </div>
                   <div className="mt-1 text-xs text-foreground/60">
-                    Cartão {projection.account_name} · fecha dia{" "}
-                    {projection.closing_day} · vence em{" "}
+                    Cartão {projection.account_name} · fecha dia {projection.closing_day} · vence em{" "}
                     {projection.projected_due_date.split("-").reverse().join("/")}
                     {projection.due_day > projection.closing_day && (
                       <span className="ml-1 text-amber-300">
@@ -438,9 +385,7 @@ function NewTransactionPage() {
                     max={360}
                     className="h-9 w-24 border-white/10 bg-white/[0.04]"
                     value={installmentCount}
-                    onChange={(e) =>
-                      setInstallmentCount(Math.max(2, Number(e.target.value) || 2))
-                    }
+                    onChange={(e) => setInstallmentCount(Math.max(2, Number(e.target.value) || 2))}
                   />
                 </div>
               </ModifierCard>
@@ -456,10 +401,7 @@ function NewTransactionPage() {
               >
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Field label="Frequência" inline>
-                    <Select
-                      value={frequency}
-                      onValueChange={(v) => setFrequency(v as typeof frequency)}
-                    >
+                    <Select value={frequency} onValueChange={(v) => setFrequency(v as typeof frequency)}>
                       <SelectTrigger className="h-9 border-white/10 bg-white/[0.04]">
                         <SelectValue />
                       </SelectTrigger>
@@ -478,9 +420,7 @@ function NewTransactionPage() {
                       max={60}
                       className="h-9 border-white/10 bg-white/[0.04]"
                       value={intervalCount}
-                      onChange={(e) =>
-                        setIntervalCount(Math.max(1, Number(e.target.value) || 1))
-                      }
+                      onChange={(e) => setIntervalCount(Math.max(1, Number(e.target.value) || 1))}
                     />
                   </Field>
                   <Field label="Termina em (opcional)" inline>
@@ -495,45 +435,54 @@ function NewTransactionPage() {
               </ModifierCard>
             )}
 
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="ghost"
-              className="border border-white/10 bg-white/[0.04] hover:bg-white/10"
-              onClick={() => navigate({ to: "/transactions", search: { month: occurredOn.slice(0, 7), page: 1 } })}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              disabled={createMut.isPending}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              {createMut.isPending ? "Salvando..." : "Salvar lançamento"}
-            </Button>
-          </div>
-        </form>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="border border-white/10 bg-white/[0.04] hover:bg-white/10"
+                onClick={() => navigate({ to: "/transactions", search: { month: occurredOn.slice(0, 7), page: 1 } })}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={createMut.isPending}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {createMut.isPending ? "Salvando..." : "Salvar lançamento"}
+              </Button>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
-  </AppShell>
+    </AppShell>
   );
 }
 
 // ---------------------------------------------------------------------------
 // UI helpers
 // ---------------------------------------------------------------------------
-function KindPills({
-  value,
-  onChange,
-}: {
-  value: TxKind;
-  onChange: (k: TxKind) => void;
-}) {
+function KindPills({ value, onChange }: { value: TxKind; onChange: (k: TxKind) => void }) {
   const opts: { k: TxKind; label: string; icon: React.ElementType; active: string }[] = [
-    { k: "income", label: "Receita", icon: ArrowUpCircle, active: "bg-emerald-500/20 text-emerald-300 ring-emerald-400/40" },
+    {
+      k: "income",
+      label: "Receita",
+      icon: ArrowUpCircle,
+      active: "bg-emerald-500/20 text-emerald-300 ring-emerald-400/40",
+    },
     { k: "expense", label: "Despesa", icon: ArrowDownCircle, active: "bg-rose-500/20 text-rose-300 ring-rose-400/40" },
-    { k: "transfer", label: "Transferência", icon: ArrowLeftRight, active: "bg-sky-500/20 text-sky-300 ring-sky-400/40" },
-    { k: "invoice_payment", label: "Pgto. Fatura", icon: CardIcon, active: "bg-violet-500/20 text-violet-300 ring-violet-400/40" },
+    {
+      k: "transfer",
+      label: "Transferência",
+      icon: ArrowLeftRight,
+      active: "bg-sky-500/20 text-sky-300 ring-sky-400/40",
+    },
+    {
+      k: "invoice_payment",
+      label: "Pgto. Fatura",
+      icon: CardIcon,
+      active: "bg-violet-500/20 text-violet-300 ring-violet-400/40",
+    },
   ];
   return (
     <div className="flex flex-wrap gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-2 backdrop-blur-xl">
@@ -547,9 +496,7 @@ function KindPills({
             onClick={() => onChange(o.k)}
             className={cn(
               "flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all",
-              isActive
-                ? `${o.active} ring-1`
-                : "text-foreground/60 hover:bg-white/[0.04] hover:text-foreground",
+              isActive ? `${o.active} ring-1` : "text-foreground/60 hover:bg-white/[0.04] hover:text-foreground",
             )}
           >
             <Icon className="size-4" />
@@ -561,26 +508,15 @@ function KindPills({
   );
 }
 
-function Field({
-  label,
-  children,
-  inline,
-}: {
-  label: string;
-  children: React.ReactNode;
-  inline?: boolean;
-}) {
+function Field({ label, children, inline }: { label: string; children: React.ReactNode; inline?: boolean }) {
   return (
     <div className={inline ? "" : "space-y-1.5"}>
-      <Label className="text-[10px] uppercase tracking-wider text-foreground/60">
-        {label}
-      </Label>
+      <Label className="text-[10px] uppercase tracking-wider text-foreground/60">{label}</Label>
       <div className={inline ? "mt-1" : ""}>{children}</div>
     </div>
   );
 }
 
-// Mantive intacto
 function AccountSelect({
   accounts,
   value,
@@ -600,19 +536,11 @@ function AccountSelect({
           <SelectItem key={a.id} value={a.id}>
             {a.name}
             <span className="ml-2 text-[10px] uppercase tracking-wider text-foreground/50">
-              {a.type === "credit_card"
-                ? "cartão"
-                : a.type === "bank"
-                ? "banco"
-                : "dinheiro"}
+              {a.type === "credit_card" ? "cartão" : a.type === "bank" ? "banco" : "dinheiro"}
             </span>
           </SelectItem>
         ))}
-        {accounts.length === 0 && (
-          <div className="px-3 py-2 text-xs text-foreground/50">
-            Nenhuma conta cadastrada.
-          </div>
-        )}
+        {accounts.length === 0 && <div className="px-3 py-2 text-xs text-foreground/50">Nenhuma conta cadastrada.</div>}
       </SelectContent>
     </Select>
   );
@@ -649,9 +577,7 @@ function ModifierCard({
           <div className="text-xs text-foreground/50">{description}</div>
         </div>
       </label>
-      {checked && (
-        <div className="mt-4 border-t border-white/5 pt-4">{children}</div>
-      )}
+      {checked && <div className="mt-4 border-t border-white/5 pt-4">{children}</div>}
     </GlassCard>
   );
 }
