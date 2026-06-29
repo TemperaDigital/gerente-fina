@@ -58,9 +58,9 @@ function resolveReferenceMonth(month: string | undefined): string {
 }
 
 /** Soma duas strings `numeric(14,2)` em precisão decimal exata. */
-function addAmount(a: string, b: string): string {
-  const toCents = (s: string): bigint => {
-    const [i, f = ""] = s.replace(/^\+/, "").split(".");
+function addAmount(a: string | number, b: string | number): string {
+  const toCents = (s: string | number): bigint => {
+    const [i, f = ""] = String(s).replace(/^\+/, "").split(".");
     const frac = (f + "00").slice(0, 2);
     const neg = i.startsWith("-");
     const intAbs = neg ? i.slice(1) : i;
