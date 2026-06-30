@@ -54,7 +54,7 @@ import {
   deleteBudget,
   type BudgetDTO,
 } from "@/services/budgets.functions";
-import { listExpenseCategories, type CategoryOption } from "@/services/lookups.functions";
+import { getCategoriesLookup, type CategoryLookupDTO } from "@/services/lookups.functions";
 
 const formatBRL = (value: string | number | null | undefined) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
