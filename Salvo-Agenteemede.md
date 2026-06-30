@@ -1,5 +1,5 @@
 <!-- LOVABLE:BEGIN -->
-> [!IMPORTANT]
+> [!IMPORTANTE-]
 > This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
 > published git history — force pushing, or rebasing/amending/squashing commits
 > that are already pushed — as it rewrites history on Lovable's side and the
