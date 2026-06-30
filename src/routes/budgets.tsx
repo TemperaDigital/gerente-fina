@@ -1,249 +1,297 @@
 /**
- * Rota /budgets — Gerenciador de Orçamentos & Metas de Poupança.
- * Conexão direta com Supabase, cálculo de progresso e fim do "Em Breve".
+ * Rota /budgets — Orçamentos por categoria.
+ * Consome server functions com Admin Client (seed user). Metas de poupança ficam
+ * marcadas como "Em breve" — a tabela `goals` ainda não foi materializada no banco.
  */
 import { createFileRoute } from "@tanstack/react-router";
-import { 
-  queryOptions, 
-  useMutation, 
-  useQueryClient, 
-  useSuspenseQuery 
+import {
+  queryOptions,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
 } from "@tanstack/react-query";
-import { supabase } from "@/lib/supabase/client";
-import { Plus, Target, PiggyBank, TrendingUp, AlertTriangle, Trash2 } from "lucide-react";
+import { useServerFn } from "@tanstack/react-start";
+import { useState } from "react";
+import { Plus, Target, PiggyBank, AlertTriangle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
-import { GlassCard } from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
+import { GlassCard } from "@/components/dashboard/primitives";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  listBudgets,
+  upsertBudget,
+  deleteBudget,
+  type BudgetDTO,
+} from "@/services/budgets.functions";
+import { getCategoriesLookup, type CategoryLookupDTO } from "@/services/lookups.functions";
 
-// ---------------------------------------------------------------------------
-// Tipagens Estruturadas
-// ---------------------------------------------------------------------------
-interface BudgetWithCategory {
-  id: string;
-  category_id: string;
-  limit_amount: number;
-  current_amount: number;
-  period: string;
-  categories: {
-    name: string;
-  } | null;
+const formatBRL = (value: string | number | null | undefined) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+    Number(value ?? 0) || 0,
+  );
+
+function budgetsQO(fn: () => Promise<BudgetDTO[]>) {
+  return queryOptions({ queryKey: ["budgets", "list"], queryFn: fn });
+}
+function categoriesQO(fn: () => Promise<CategoryLookupDTO[]>) {
+  return queryOptions({ queryKey: ["lookups", "expense-cats"], queryFn: fn });
 }
 
-interface SavingGoal {
-  id: string;
-  title: string;
-  target_amount: number;
-  current_amount: number;
-  target_date: string;
-  status: string;
-}
-
-// ---------------------------------------------------------------------------
-// Queries do TanStack Query (Fiação Direta do Banco)
-// ---------------------------------------------------------------------------
-const budgetsQueryOptions = () =>
-  queryOptions({
-    queryKey: ["budgets", "list"],
-    queryFn: async (): Promise<BudgetWithCategory[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
-
-      // Busca orçamentos trazendo o nome da categoria associada via Join
-      const { data, error } = await supabase
-        .from("budgets")
-        .select(`
-          id,
-          category_id,
-          limit_amount,
-          current_amount,
-          period,
-          categories ( name )
-        `)
-        .eq("user_id", user.id);
-
-      if (error) throw error;
-      return (data as unknown as BudgetWithCategory[]) || [];
-    },
-  });
-
-const goalsQueryOptions = () =>
-  queryOptions({
-    queryKey: ["goals", "list"],
-    queryFn: async (): Promise<SavingGoal[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
-
-      const { data, error } = await supabase
-        .from("goals")
-        .select("id, title, target_amount, current_amount, target_date, status")
-        .eq("user_id", user.id)
-        .order("target_date", { ascending: true });
-
-      if (error) throw error;
-      return (data as unknown as SavingGoal[]) || [];
-    },
-  });
-
-// ---------------------------------------------------------------------------
-// Definição da Rota do TanStack Router
-// ---------------------------------------------------------------------------
 export const Route = createFileRoute("/budgets")({
-  head: () => ({
-    meta: [{ title: "Orçamentos & Metas — Gerente Fina" }],
-  }),
-  loader: async ({ context }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(budgetsQueryOptions()),
-      context.queryClient.ensureQueryData(goalsQueryOptions()),
-    ]);
-  },
-  component: BudgetsAndGoalsPage,
+  head: () => ({ meta: [{ title: "Orçamentos — Gerente Fina" }] }),
+  component: BudgetsPage,
+  errorComponent: ({ error }) => (
+    <AppShell>
+      <div className="mx-auto max-w-3xl px-4 py-10">
+        <GlassCard className="p-6 text-sm text-red-300">
+          Erro ao carregar orçamentos: {error.message}
+        </GlassCard>
+      </div>
+    </AppShell>
+  ),
+  notFoundComponent: () => (
+    <AppShell>
+      <div className="p-8 text-sm text-foreground/60">Recurso não encontrado.</div>
+    </AppShell>
+  ),
 });
 
-// ---------------------------------------------------------------------------
-// Componente Principal da Tela
-// ---------------------------------------------------------------------------
-function BudgetsAndGoalsPage() {
-  const queryClient = useQueryClient();
+function BudgetsPage() {
+  const qc = useQueryClient();
+  const fetchBudgets = useServerFn(listBudgets);
+  const fetchCats = useServerFn(getCategoriesLookup);
+  const saveBudget = useServerFn(upsertBudget);
+  const removeBudget = useServerFn(deleteBudget);
 
-  // Consome os dados reais sincronizados do banco de dados
-  const { data: budgets } = useSuspenseQuery(budgetsQueryOptions());
-  const { data: goals } = useSuspenseQuery(goalsQueryOptions());
+  const { data: budgets } = useSuspenseQuery(
+    budgetsQO(() => fetchBudgets({ data: {} })),
+  );
+  const { data: categories } = useSuspenseQuery(categoriesQO(fetchCats));
 
-  // Mutations para exclusão (Pronto para você estender para o CRUD completo)
-  const deleteBudgetMutation = useMutation({
+  const [open, setOpen] = useState(false);
+  const [categoryId, setCategoryId] = useState<string>("");
+  const [amount, setAmount] = useState<string>("");
+
+  const upsert = useMutation({
+    mutationFn: async () => {
+      if (!categoryId) throw new Error("Selecione uma categoria.");
+      if (!amount.trim()) throw new Error("Informe um valor.");
+      const now = new Date();
+      const month = `${now.getUTCFullYear()}-${String(
+        now.getUTCMonth() + 1,
+      ).padStart(2, "0")}`;
+      await saveBudget({
+        data: { category_id: categoryId, amount, reference_month: month },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Orçamento salvo.");
+      setOpen(false);
+      setCategoryId("");
+      setAmount("");
+      qc.invalidateQueries({ queryKey: ["budgets"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const remove = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("budgets").delete().eq("id", id);
-      if (error) throw error;
+      await removeBudget({ data: { id } });
     },
     onSuccess: () => {
       toast.success("Orçamento removido.");
-      queryClient.invalidateQueries({ queryKey: ["budgets"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["budgets"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
+    onError: (e: Error) => toast.error(e.message),
   });
-
-  const deleteGoalMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("goals").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Meta de poupança removida.");
-      queryClient.invalidateQueries({ queryKey: ["goals"] });
-    },
-  });
-
-  // Auxiliares de Formatação
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-  const calculatePercentage = (current: number, limit: number) => {
-    if (!limit || limit === 0) return 0;
-    const percentage = (current / limit) * 100;
-    return Math.min(Math.round(percentage), 100);
-  };
 
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <header className="mb-8">
+        <header className="mb-6">
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            Gestão de Limites e Metas
+            Orçamentos & Metas
           </h1>
           <p className="mt-1 text-sm text-foreground/60">
-            Controle seus tetos de gastos por categoria e monitore seus objetivos de acúmulo de capital.
+            Defina tetos de gastos por categoria e acompanhe o consumo no mês.
           </p>
         </header>
 
         <Tabs defaultValue="limites" className="w-full">
-          <TabsList className="mb-6 grid w-full grid-cols-2 max-w-md border border-white/10 bg-zinc-950/40 p-1">
-            <TabsTrigger value="limites" className="gap-2 data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
-              <Target className="size-4" /> Orçamentos Mensais
+          <TabsList className="mb-6 grid w-full max-w-md grid-cols-2 border border-white/10 bg-zinc-950/40 p-1">
+            <TabsTrigger value="limites" className="gap-2">
+              <Target className="size-4" /> Tetos mensais
             </TabsTrigger>
-            <TabsTrigger value="metas" className="gap-2 data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
-              <PiggyBank className="size-4" /> Metas de Poupança
+            <TabsTrigger value="metas" className="gap-2">
+              <PiggyBank className="size-4" /> Metas
             </TabsTrigger>
           </TabsList>
 
-          {/* ========================================================================= */}
-          {/* ABA 1: ORÇAMENTOS POR CATEGORIA */}
-          {/* ========================================================================= */}
           <TabsContent value="limites" className="space-y-4">
-            <div className="flex justify-end mb-2">
-              <Button className="rounded-full gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-                <Plus className="size-4" /> Definir Novo Teto
-              </Button>
+            <div className="flex justify-end">
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                  <Button className="rounded-full gap-2">
+                    <Plus className="size-4" /> Novo teto
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Definir teto mensal</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div>
+                      <Label>Categoria</Label>
+                      <Select value={categoryId} onValueChange={setCategoryId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {categories.filter((c) => c.kind === "expense").map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Valor limite (R$)</Label>
+                      <Input
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      onClick={() => upsert.mutate()}
+                      disabled={upsert.isPending}
+                    >
+                      Salvar
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
 
             {budgets.length === 0 ? (
               <GlassCard className="p-12 text-center text-foreground/60">
-                <Target className="mx-auto size-12 opacity-30 mb-4" />
-                Nenhum limite de despesa configurado para este mês.
+                <Target className="mx-auto mb-4 size-12 opacity-30" />
+                Nenhum teto definido ainda.
               </GlassCard>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {budgets.map((budget) => {
-                  const pct = calculatePercentage(budget.current_amount, budget.limit_amount);
-                  const isOver = pct >= 100;
-                  const isWarning = pct >= 80 && pct < 100;
-
+                {budgets.map((b) => {
+                  const pct = Math.min(b.percent, 100);
+                  const over = b.percent >= 100;
+                  const warn = b.percent >= 80 && b.percent < 100;
                   return (
-                    <GlassCard key={budget.id} className="p-5 border border-white/10 flex flex-col justify-between">
+                    <GlassCard
+                      key={b.id}
+                      className="flex flex-col justify-between border border-white/10 p-5"
+                    >
                       <div>
                         <div className="flex items-start justify-between">
                           <div>
-                            <h3 className="font-medium text-foreground/90">
-                              {budget.categories?.name || "Categoria Indefinida"}
+                            <h3 className="font-medium">
+                              {b.category_name ?? "Categoria"}
                             </h3>
-                            <p className="text-xs text-foreground/40 uppercase tracking-wider mt-0.5">
-                              Período: {budget.period}
+                            <p className="mt-0.5 text-xs uppercase tracking-wider text-foreground/40">
+                              {b.reference_month ? "Mensal" : "Global"}
                             </p>
                           </div>
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            className="size-8 text-destructive opacity-40 hover:opacity-100 hover:bg-destructive/10"
-                            onClick={() => {
-                              if(confirm("Deseja deletar este orçamento?")) deleteBudgetMutation.mutate(budget.id);
-                            }}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="size-8 text-destructive opacity-50 hover:bg-destructive/10 hover:opacity-100"
+                              >
+                                <Trash2 className="size-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Remover teto?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  O teto de "{b.category_name}" será apagado.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => remove.mutate(b.id)}
+                                >
+                                  Remover
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </div>
-
-                        <div className="my-5 space-y-2">
+                        <div className="my-4 space-y-2">
                           <div className="flex items-baseline justify-between">
-                            <span className="text-xl font-mono font-semibold">
-                              {formatCurrency(budget.current_amount)}
+                            <span className="font-mono text-xl font-semibold">
+                              {formatBRL(b.spent)}
                             </span>
                             <span className="text-xs text-foreground/50">
-                              de {formatCurrency(budget.limit_amount)}
+                              de {formatBRL(b.amount)}
                             </span>
                           </div>
-                          <Progress 
-                            value={pct} 
-                            className={`h-2 ${isOver ? "bg-red-500/20" : isWarning ? "bg-amber-500/20" : "bg-primary/20"}`}
-                          />
+                          <Progress value={pct} className="h-2" />
                         </div>
                       </div>
-
-                      <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs">
-                        <span className="font-medium text-foreground/70">{pct}% consumido</span>
-                        {isOver ? (
-                          <span className="flex items-center gap-1 text-red-400 font-medium">
+                      <div className="flex items-center justify-between border-t border-white/5 pt-2 text-xs">
+                        <span className="font-medium text-foreground/70">
+                          {b.percent}% consumido
+                        </span>
+                        {over ? (
+                          <span className="flex items-center gap-1 font-medium text-red-400">
                             <AlertTriangle className="size-3.5" /> Estourado
                           </span>
-                        ) : isWarning ? (
-                          <span className="flex items-center gap-1 text-amber-400 font-medium">
-                            <AlertTriangle className="size-3.5" /> Limite Próximo
+                        ) : warn ? (
+                          <span className="flex items-center gap-1 font-medium text-amber-400">
+                            <AlertTriangle className="size-3.5" /> Atenção
                           </span>
                         ) : (
-                          <span className="text-emerald-400 font-medium">Dentro do planejado</span>
+                          <span className="font-medium text-emerald-400">
+                            No ritmo
+                          </span>
                         )}
                       </div>
                     </GlassCard>
@@ -253,77 +301,12 @@ function BudgetsAndGoalsPage() {
             )}
           </TabsContent>
 
-          {/* ========================================================================= */}
-          {/* ABA 2: METAS DE POUPANÇA (FIM DO "EM BREVE") */}
-          {/* ========================================================================= */}
-          <TabsContent value="metas" className="space-y-4">
-            <div className="flex justify-end mb-2">
-              <Button className="rounded-full gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-                <Plus className="size-4" /> Criar Objetivo
-              </Button>
-            </div>
-
-            {goals.length === 0 ? (
-              <GlassCard className="p-12 text-center text-foreground/60">
-                <PiggyBank className="mx-auto size-12 opacity-30 mb-4" />
-                Nenhum objetivo de poupança ou investimento cadastrado ainda.
-              </GlassCard>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {goals.map((goal) => {
-                  const pct = calculatePercentage(goal.current_amount, goal.target_amount);
-                  const isCompleted = pct >= 100;
-
-                  return (
-                    <GlassCard key={goal.id} className="p-5 border border-white/10 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <h3 className="font-medium text-foreground/90">{goal.title}</h3>
-                            <p className="text-xs text-foreground/40 mt-0.5">
-                              Alvo: {new Date(goal.target_date).toLocaleDateString("pt-BR")}
-                            </p>
-                          </div>
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            className="size-8 text-destructive opacity-40 hover:opacity-100 hover:bg-destructive/10"
-                            onClick={() => {
-                              if(confirm("Deseja deletar esta meta?")) deleteGoalMutation.mutate(goal.id);
-                            }}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
-
-                        <div className="my-5 space-y-2">
-                          <div className="flex items-baseline justify-between">
-                            <span className="text-xl font-mono font-semibold text-emerald-400">
-                              {formatCurrency(goal.current_amount)}
-                            </span>
-                            <span className="text-xs text-foreground/50">
-                              meta: {formatCurrency(goal.target_amount)}
-                            </span>
-                          </div>
-                          <Progress value={pct} className="h-2 bg-emerald-500/20" />
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs">
-                        <span className="font-medium text-foreground/70">{pct}% acumulado</span>
-                        {isCompleted ? (
-                          <span className="flex items-center gap-1 text-emerald-400 font-medium">
-                            <TrendingUp className="size-3.5" /> Concluída! 🎉
-                          </span>
-                        ) : (
-                          <span className="text-primary font-medium">Em andamento</span>
-                        )}
-                      </div>
-                    </GlassCard>
-                  );
-                })}
-              </div>
-            )}
+          <TabsContent value="metas">
+            <GlassCard className="p-12 text-center text-foreground/60">
+              <PiggyBank className="mx-auto mb-4 size-12 opacity-30" />
+              Metas de poupança em construção — a tabela <code>goals</code>{" "}
+              será materializada em breve.
+            </GlassCard>
           </TabsContent>
         </Tabs>
       </div>

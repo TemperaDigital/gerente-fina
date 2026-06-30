@@ -1,242 +1,226 @@
 /**
- * Rota /installments — Gerenciador de Parcelas & Dívidas.
- * Fiação real conectada ao Supabase com TanStack Query e invalidação de cache.
+ * Rota /installments — Parcelamentos, Empréstimos, Financiamentos e Consórcios.
+ * Consome server functions com Admin Client (seed user), sem dependência de auth do browser.
  */
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { 
-  queryOptions, 
-  useMutation, 
-  useQueryClient, 
-  useSuspenseQuery 
-} from "@tanstack/react-query";
-import { supabase } from "@/lib/supabase/client";
-import { Plus, Trash2, CheckCircle2, Calendar, CreditCard } from "lucide-react";
-import { toast } from "sonner";
+import { createFileRoute } from "@tanstack/react-router";
+import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { Calendar, CreditCard, Wallet, Landmark, Trophy } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { GlassCard } from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table";
+import { GlassCard } from "@/components/dashboard/primitives";
+import { Progress } from "@/components/ui/progress";
+import {
+  listInstallmentPurchases,
+  listLoans,
+  type InstallmentPurchaseDTO,
+  type LoanDTO,
+} from "@/services/installments.functions";
+import { fromCents, toCents, safePercent } from "@/lib/finance/money";
 
-// ---------------------------------------------------------------------------
-// Tipagem dos dados vindo do Supabase
-// ---------------------------------------------------------------------------
-interface InstallmentItem {
-  id: string;
-  title: string;
-  total_amount: number;
-  current_installment: number;
-  total_installments: number;
-  next_due_date: string;
-  status: "active" | "paid" | "overdue";
-  description?: string | null;
+const formatBRL = (value: string | number | null | undefined) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+    Number(value ?? 0) || 0,
+  );
+
+const formatDate = (s: string | null | undefined) => {
+  if (!s) return "—";
+  const [y, m, d] = s.split("-");
+  return `${d}/${m}/${y}`;
+};
+
+function installmentsQO(fn: () => Promise<InstallmentPurchaseDTO[]>) {
+  return queryOptions({
+    queryKey: ["installments", "purchases"],
+    queryFn: fn,
+  });
+}
+function loansQO(fn: () => Promise<LoanDTO[]>) {
+  return queryOptions({ queryKey: ["installments", "loans"], queryFn: fn });
 }
 
-// ---------------------------------------------------------------------------
-// TanStack Query Options — Busca real no banco filtrando por usuário logado
-// ---------------------------------------------------------------------------
-const installmentsQueryOptions = () =>
-  queryOptions({
-    queryKey: ["installments", "list"],
-    queryFn: async (): Promise<InstallmentItem[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
-
-      const { data, error } = await supabase
-        .from("installments")
-        .select("id, title, total_amount, current_installment, total_installments, next_due_date, status, description")
-        .eq("user_id", user.id)
-        .order("next_due_date", { ascending: true });
-
-      if (error) throw error;
-      return (data as unknown as InstallmentItem[]) || [];
-    },
-  });
-
-// ---------------------------------------------------------------------------
-// Definição da Rota do TanStack Router
-// ---------------------------------------------------------------------------
 export const Route = createFileRoute("/installments")({
-  head: () => ({
-    meta: [{ title: "Parcelas & Dívidas — Gerente Fina" }],
-  }),
-  loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData(installmentsQueryOptions());
-  },
+  head: () => ({ meta: [{ title: "Parcelamentos & Dívidas — Gerente Fina" }] }),
   component: InstallmentsPage,
+  errorComponent: ({ error }) => (
+    <AppShell>
+      <div className="mx-auto max-w-3xl px-4 py-10">
+        <GlassCard className="p-6 text-sm text-red-300">
+          Erro ao carregar parcelamentos: {error.message}
+        </GlassCard>
+      </div>
+    </AppShell>
+  ),
+  notFoundComponent: () => (
+    <AppShell>
+      <div className="p-8 text-sm text-foreground/60">Recurso não encontrado.</div>
+    </AppShell>
+  ),
 });
 
-// ---------------------------------------------------------------------------
-// Componente Principal da Tela
-// ---------------------------------------------------------------------------
+const KIND_META: Record<
+  LoanDTO["kind"],
+  { label: string; tone: string; icon: typeof Wallet }
+> = {
+  personal: { label: "Empréstimos", tone: "text-red-300", icon: Wallet },
+  financing: { label: "Financiamentos", tone: "text-sky-300", icon: Landmark },
+  consortium: { label: "Consórcios", tone: "text-emerald-300", icon: Trophy },
+};
+
 function InstallmentsPage() {
-  const queryClient = useQueryClient();
-  const router = useRouter();
-  
-  // Consome os dados reais sincronizados pelo Loader
-  const { data: installments } = useSuspenseQuery(installmentsQueryOptions());
+  const fetchPurchases = useServerFn(listInstallmentPurchases);
+  const fetchLoans = useServerFn(listLoans);
+  const { data: purchases } = useSuspenseQuery(installmentsQO(fetchPurchases));
+  const { data: loans } = useSuspenseQuery(loansQO(fetchLoans));
 
-  // Mutation: Pagar/Avançar uma parcela
-  const payMutation = useMutation({
-    mutationFn: async (id: string) => {
-      // 1. Busca a parcela atual para calcular a próxima
-      const { data: current } = await supabase
-        .from("installments")
-        .select("current_installment, total_installments")
-        .eq("id", id)
-        .single();
+  const monthlyTotalCents = [
+    ...purchases.map((p) => {
+      const remaining = toCents(p.remaining_amount);
+      const left = Math.max(p.installments_count - p.paid_count, 1);
+      return remaining / BigInt(left);
+    }),
+    ...loans.map((l) => {
+      const principal = toCents(l.principal_amount);
+      return principal / BigInt(Math.max(l.installments_count, 1));
+    }),
+  ].reduce((acc, v) => acc + v, 0n);
 
-      if (!current) throw new Error("Parcela não encontrada");
-
-      const nextInstallment = current.current_installment + 1;
-      const isFinished = nextInstallment > current.total_installments;
-
-      // 2. Atualiza o registro no banco
-      const { error } = await supabase
-        .from("installments")
-        .update({
-          current_installment: isFinished ? current.total_installments : nextInstallment,
-          status: isFinished ? "paid" : "active",
-        })
-        .eq("id", id);
-
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Parcela atualizada com sucesso!");
-      // Invalida o cache local e avisa telas vizinhas (Dashboard e Caixa precisam recalcular)
-      queryClient.invalidateQueries({ queryKey: ["installments"] });
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-    },
-    onError: (err: Error) => toast.error(`Erro ao pagar parcela: ${err.message}`),
-  });
-
-  // Mutation: Deletar compromisso
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("installments").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Compromisso removido.");
-      queryClient.invalidateQueries({ queryKey: ["installments"] });
-    },
-    onError: (err: Error) => toast.error(`Não foi possível deletar: ${err.message}`),
-  });
-
-  // Auxiliar para formatação de moeda
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-  // Auxiliar para formatação de data
-  const formatDate = (dateStr: string) => {
-    const [year, month, day] = dateStr.split("-");
-    return `${day}/${month}/${year}`;
-  };
+  const loansByKind = (kind: LoanDTO["kind"]) =>
+    loans.filter((l) => l.kind === kind);
 
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-              Parcelas & Dívidas
-            </h1>
-            <p className="mt-1 text-sm text-foreground/60">
-              Acompanhamento de compras parceladas, financiamentos e passivos de longo prazo.
-            </p>
-          </div>
-          <Button className="h-9 gap-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90">
-            <Plus className="size-4" />
-            Novo parcelamento
-          </Button>
+        <header className="mb-6">
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            Parcelamentos & Dívidas
+          </h1>
+          <p className="mt-1 text-sm text-foreground/60">
+            Compras parceladas, empréstimos, financiamentos e consórcios.
+          </p>
         </header>
 
-        {installments.length === 0 ? (
-          <GlassCard className="p-12 text-center text-foreground/60">
-            <CreditCard className="mx-auto size-12 opacity-40 mb-4" />
-            Nenhum parcelamento ativo encontrado para o seu usuário.
-          </GlassCard>
-        ) : (
-          <GlassCard className="overflow-hidden border border-white/10 bg-zinc-900/50">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-white/10 bg-white/[0.02]">
-                  <TableHead className="text-foreground/80">Compromisso</TableHead>
-                  <TableHead className="text-foreground/80">Progresso</TableHead>
-                  <TableHead className="text-foreground/80">Valor Total</TableHead>
-                  <TableHead className="text-foreground/80">Próximo Vencimento</TableHead>
-                  <TableHead className="text-foreground/80 text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {installments.map((item) => (
-                  <TableRow key={item.id} className="border-white/5 hover:bg-white/[0.02]">
-                    <TableCell className="font-medium">
+        <GlassCard className="mb-6 border border-white/10 p-5">
+          <p className="text-xs uppercase tracking-wider text-foreground/50">
+            Compromisso mensal consolidado (estimado)
+          </p>
+          <p className="mt-2 font-mono text-3xl font-semibold text-primary">
+            {formatBRL(fromCents(monthlyTotalCents))}
+          </p>
+        </GlassCard>
+
+        {/* Parcelamentos */}
+        <section className="mb-8">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-orange-300">
+            <CreditCard className="size-4" /> Parcelamentos no cartão
+          </h2>
+          {purchases.length === 0 ? (
+            <GlassCard className="p-8 text-center text-sm text-foreground/60">
+              Nenhuma compra parcelada cadastrada.
+            </GlassCard>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {purchases.map((p) => {
+                const pct = safePercent(p.paid_count, p.installments_count);
+                return (
+                  <GlassCard
+                    key={p.id}
+                    className="border border-white/10 p-4"
+                  >
+                    <div className="flex items-start justify-between">
                       <div>
-                        <p>{item.title}</p>
-                        {item.description && (
-                          <p className="text-xs text-foreground/40 mt-0.5">{item.description}</p>
-                        )}
+                        <p className="font-medium">{p.description}</p>
+                        <p className="text-xs text-foreground/50">
+                          {p.category_name ?? "Sem categoria"} ·{" "}
+                          {p.account_name ?? "Sem conta"}
+                        </p>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-0.5 text-xs font-medium text-foreground/80">
-                        {item.current_installment} de {item.total_installments}
+                      <span className="rounded-full bg-orange-500/10 px-2 py-0.5 text-xs text-orange-300">
+                        {p.paid_count}/{p.installments_count}
                       </span>
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {formatCurrency(item.total_amount)}
-                    </TableCell>
-                    <TableCell className="text-foreground/70">
-                      <div className="flex items-center gap-1.5 text-sm">
-                        <Calendar className="size-3.5 text-foreground/40" />
-                        {formatDate(item.next_due_date)}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {item.status !== "paid" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 gap-1.5 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-400"
-                            onClick={() => payMutation.mutate(item.id)}
-                            disabled={payMutation.isPending}
-                          >
-                            <CheckCircle2 className="size-4" />
-                            Pagar Parcela
-                          </Button>
-                        )}
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          onClick={() => {
-                            if (confirm("Tem certeza que deseja remover este compromisso?")) {
-                              deleteMutation.mutate(item.id);
-                            }
-                          }}
-                          disabled={deleteMutation.isPending}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </GlassCard>
-        )}
+                    </div>
+                    <div className="mt-3 flex items-baseline justify-between">
+                      <span className="font-mono text-lg">
+                        {formatBRL(p.total_amount)}
+                      </span>
+                      <span className="text-xs text-foreground/50">
+                        falta {formatBRL(p.remaining_amount)}
+                      </span>
+                    </div>
+                    <Progress value={Math.round(pct)} className="mt-2 h-2" />
+                    <p className="mt-2 flex items-center gap-1.5 text-xs text-foreground/60">
+                      <Calendar className="size-3.5" />
+                      Próx.: {formatDate(p.next_due_date)}
+                    </p>
+                  </GlassCard>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Loans por tipo */}
+        {(Object.keys(KIND_META) as LoanDTO["kind"][]).map((kind) => {
+          const meta = KIND_META[kind];
+          const list = loansByKind(kind);
+          const Icon = meta.icon;
+          return (
+            <section key={kind} className="mb-8">
+              <h2
+                className={`mb-3 flex items-center gap-2 text-sm font-medium ${meta.tone}`}
+              >
+                <Icon className="size-4" /> {meta.label}
+              </h2>
+              {list.length === 0 ? (
+                <GlassCard className="p-6 text-center text-sm text-foreground/50">
+                  Nenhum registro.
+                </GlassCard>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {list.map((l) => {
+                    const pct = safePercent(
+                      l.installments_paid,
+                      l.installments_count,
+                    );
+                    return (
+                      <GlassCard
+                        key={l.id}
+                        className="border border-white/10 p-4"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="font-medium">{l.description}</p>
+                            <p className="text-xs text-foreground/50">
+                              {l.account_name ?? "Sem conta"} · vence dia{" "}
+                              {l.monthly_due_day}
+                            </p>
+                          </div>
+                          {kind === "consortium" && l.is_contemplated && (
+                            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">
+                              Contemplado
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-3 flex items-baseline justify-between">
+                          <span className="font-mono text-lg">
+                            {formatBRL(l.principal_amount)}
+                          </span>
+                          <span className="text-xs text-foreground/50">
+                            {l.installments_paid}/{l.installments_count}
+                          </span>
+                        </div>
+                        <Progress
+                          value={Math.round(pct)}
+                          className="mt-2 h-2"
+                        />
+                      </GlassCard>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          );
+        })}
       </div>
     </AppShell>
   );
