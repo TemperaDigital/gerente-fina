@@ -33,6 +33,7 @@ import {
   getDashboardSummary,
   getOpenCreditCardInvoices,
 } from "@/services/dashboard.functions";
+import { listBudgets } from "@/services/budgets.functions";
 import {
   GlassCard,
   GooglePeriodPicker,
@@ -44,6 +45,8 @@ import { CreditCardsWidget } from "@/components/dashboard/credit-cards-widget";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Link } from "@tanstack/react-router";
+import { safePercent } from "@/lib/finance/money";
 
 // ---------------------------------------------------------------------------
 // Search params
@@ -70,6 +73,12 @@ const invoicesQuery = () =>
   queryOptions({
     queryKey: ["dashboard", "open-invoices"],
     queryFn: () => getOpenCreditCardInvoices(),
+  });
+
+const budgetsDashboardQuery = (month: string) =>
+  queryOptions({
+    queryKey: ["budgets", month],
+    queryFn: () => listBudgets({ data: { month } }),
   });
 
 // ---------------------------------------------------------------------------
