@@ -107,6 +107,7 @@ export const Route = createFileRoute("/dashboard")({
     await Promise.all([
       context.queryClient.ensureQueryData(summaryQuery(deps.month)),
       context.queryClient.ensureQueryData(invoicesQuery()),
+      context.queryClient.ensureQueryData(budgetsDashboardQuery(deps.month)),
     ]);
   },
   pendingComponent: DashboardPending,
@@ -129,6 +130,7 @@ function DashboardPage() {
 
   const { data: summary } = useSuspenseQuery(summaryQuery(month));
   const { data: invoices } = useSuspenseQuery(invoicesQuery());
+  const { data: budgets } = useSuspenseQuery(budgetsDashboardQuery(month));
 
   const setMonth = (next: string) =>
     navigate({ search: (prev: DashboardSearch) => ({ ...prev, month: next }) });
