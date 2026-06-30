@@ -5,6 +5,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
+import { toCents, fromCents, safePercent } from "@/lib/finance/money";
 
 export interface BudgetDTO {
   id: string;
