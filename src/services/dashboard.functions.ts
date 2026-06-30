@@ -86,7 +86,7 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
 
     const accounts = (balancesRes.data ?? []) as AccountBalanceDTO[];
     const consolidated_balance = accounts.reduce(
-      (acc, a) => addAmount(acc, a.balance ?? "0.00"),
+      (acc, a) => addAmounts(acc, a.balance ?? "0.00"),
       "0.00",
     );
 
