@@ -57,14 +57,16 @@ export const listBudgets = createServerFn({ method: "GET" })
         .in("category_id", catIds)
         .gte("occurred_on", first)
         .lte("occurred_on", last);
+      const spentByCat = new Map<string, bigint>();
       for (const t of (tx ?? []) as Array<{
         category_id: string | null;
         amount: string;
       }>) {
         if (!t.category_id) continue;
-        const prev = spentMap.get(t.category_id) ?? 0;
-        spentMap.set(t.category_id, prev + Math.round(Number(t.amount) * 100));
+        const prev = spentByCat.get(t.category_id) ?? 0n;
+        spentByCat.set(t.category_id, prev + toCents(t.amount));
       }
+      for (const [k, v] of spentByCat) spentMap.set(k, Number(v));
     }
 
     return ((budgets ?? []) as unknown as Array<{
@@ -74,12 +76,10 @@ export const listBudgets = createServerFn({ method: "GET" })
       reference_month: string | null;
       categories?: { name?: string | null; icon?: string | null } | null;
     }>).map((b) => {
-      const amountCents = Math.round(Number(b.amount) * 100);
-      const spentCents = spentMap.get(b.category_id) ?? 0;
+      const amountCents = toCents(b.amount);
+      const spentCents = BigInt(spentMap.get(b.category_id) ?? 0);
       const remainingCents = amountCents - spentCents;
-      const percent = amountCents > 0
-        ? Math.min(100, Math.round((spentCents / amountCents) * 100))
-        : 0;
+      const percent = safePercent(fromCents(spentCents), fromCents(amountCents));
       return {
         id: b.id,
         category_id: b.category_id,
@@ -87,9 +87,9 @@ export const listBudgets = createServerFn({ method: "GET" })
         category_icon: b.categories?.icon ?? null,
         amount: b.amount,
         reference_month: b.reference_month,
-        spent: (spentCents / 100).toFixed(2),
-        remaining: (remainingCents / 100).toFixed(2),
-        percent,
+        spent: fromCents(spentCents),
+        remaining: fromCents(remainingCents),
+        percent: Math.round(percent),
       };
     });
   });
