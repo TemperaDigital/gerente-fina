@@ -1,252 +1,243 @@
 /**
- * Rota /installments — Parcelamentos, Financiamentos e Consórcios.
- * Cores: roxo (parcelas), azul (financiamentos), âmbar (consórcios).
+ * Rota /installments — Gerenciador de Parcelas & Dívidas.
+ * Fiação real conectada ao Supabase com TanStack Query e invalidação de cache.
  */
-import { createFileRoute } from "@tanstack/react-router";
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
-import { Layers, Banknote, Sparkles, Trophy } from "lucide-react";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { 
+  queryOptions, 
+  useMutation, 
+  useQueryClient, 
+  useSuspenseQuery 
+} from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { Plus, Trash2, CheckCircle2, Calendar, CreditCard } from "lucide-react";
+import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
+import { GlassCard } from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
-import { GlassCard, formatBRL } from "@/components/dashboard/primitives";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import {
-  listInstallmentPurchases,
-  listLoans,
-  type LoanDTO,
-} from "@/services/installments.functions";
-import { cn } from "@/lib/utils";
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from "@/components/ui/table";
 
-const purchasesQ = () =>
+// ---------------------------------------------------------------------------
+// Tipagem dos dados vindo do Supabase
+// ---------------------------------------------------------------------------
+interface InstallmentItem {
+  id: string;
+  title: string;
+  total_amount: number;
+  current_installment: number;
+  total_installments: number;
+  next_due_date: string;
+  status: "active" | "paid" | "overdue";
+  description?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// TanStack Query Options — Busca real no banco filtrando por usuário logado
+// ---------------------------------------------------------------------------
+const installmentsQueryOptions = () =>
   queryOptions({
-    queryKey: ["installments", "purchases"],
-    queryFn: () => listInstallmentPurchases(),
-  });
-const loansQ = () =>
-  queryOptions({ queryKey: ["installments", "loans"], queryFn: () => listLoans() });
+    queryKey: ["installments", "list"],
+    queryFn: async (): Promise<InstallmentItem[]> => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Usuário não autenticado");
 
+      const { data, error } = await supabase
+        .from("installments")
+        .select("id, title, total_amount, current_installment, total_installments, next_due_date, status, description")
+        .eq("user_id", user.id)
+        .order("next_due_date", { ascending: true });
+
+      if (error) throw error;
+      return (data as unknown as InstallmentItem[]) || [];
+    },
+  });
+
+// ---------------------------------------------------------------------------
+// Definição da Rota do TanStack Router
+// ---------------------------------------------------------------------------
 export const Route = createFileRoute("/installments")({
-  head: () => ({ meta: [{ title: "Parcelas & Dívidas — Gerente Fina" }] }),
+  head: () => ({
+    meta: [{ title: "Parcelas & Dívidas — Gerente Fina" }],
+  }),
   loader: async ({ context }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(purchasesQ()),
-      context.queryClient.ensureQueryData(loansQ()),
-    ]);
+    await context.queryClient.ensureQueryData(installmentsQueryOptions());
   },
-  errorComponent: ({ error }) => (
-    <AppShell>
-      <div className="p-6 text-rose-400">{error.message}</div>
-    </AppShell>
-  ),
-  notFoundComponent: () => (
-    <AppShell>
-      <div className="p-6 text-foreground/60">Indisponível.</div>
-    </AppShell>
-  ),
   component: InstallmentsPage,
 });
 
+// ---------------------------------------------------------------------------
+// Componente Principal da Tela
+// ---------------------------------------------------------------------------
 function InstallmentsPage() {
-  const { data: purchases } = useSuspenseQuery(purchasesQ());
-  const { data: loans } = useSuspenseQuery(loansQ());
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  
+  // Consome os dados reais sincronizados pelo Loader
+  const { data: installments } = useSuspenseQuery(installmentsQueryOptions());
 
-  const financings = loans.filter((l) => l.kind === "financing");
-  const consortiums = loans.filter((l) => l.kind === "consortium");
-  const personals = loans.filter((l) => l.kind === "personal");
+  // Mutation: Pagar/Avançar uma parcela
+  const payMutation = useMutation({
+    mutationFn: async (id: string) => {
+      // 1. Busca a parcela atual para calcular a próxima
+      const { data: current } = await supabase
+        .from("installments")
+        .select("current_installment, total_installments")
+        .eq("id", id)
+        .single();
+
+      if (!current) throw new Error("Parcela não encontrada");
+
+      const nextInstallment = current.current_installment + 1;
+      const isFinished = nextInstallment > current.total_installments;
+
+      // 2. Atualiza o registro no banco
+      const { error } = await supabase
+        .from("installments")
+        .update({
+          current_installment: isFinished ? current.total_installments : nextInstallment,
+          status: isFinished ? "paid" : "active",
+        })
+        .eq("id", id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Parcela atualizada com sucesso!");
+      // Invalida o cache local e avisa telas vizinhas (Dashboard e Caixa precisam recalcular)
+      queryClient.invalidateQueries({ queryKey: ["installments"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (err: Error) => toast.error(`Erro ao pagar parcela: ${err.message}`),
+  });
+
+  // Mutation: Deletar compromisso
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("installments").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Compromisso removido.");
+      queryClient.invalidateQueries({ queryKey: ["installments"] });
+    },
+    onError: (err: Error) => toast.error(`Não foi possível deletar: ${err.message}`),
+  });
+
+  // Auxiliar para formatação de moeda
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+
+  // Auxiliar para formatação de data
+  const formatDate = (dateStr: string) => {
+    const [year, month, day] = dateStr.split("-");
+    return `${day}/${month}/${year}`;
+  };
 
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <header className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            Parcelas & Dívidas
-          </h1>
-          <p className="mt-1 text-sm text-foreground/60">
-            Compras parceladas correntes, financiamentos ativos e consórcios.
-          </p>
+        <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              Parcelas & Dívidas
+            </h1>
+            <p className="mt-1 text-sm text-foreground/60">
+              Acompanhamento de compras parceladas, financiamentos e passivos de longo prazo.
+            </p>
+          </div>
+          <Button className="h-9 gap-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90">
+            <Plus className="size-4" />
+            Novo parcelamento
+          </Button>
         </header>
 
-        <section className="mb-8">
-          <SectionHeader
-            icon={<Layers className="size-4" />}
-            title="Compras parceladas"
-            count={purchases.length}
-            tone="violet"
-          />
-          {purchases.length === 0 ? (
-            <Empty text="Nenhuma compra parcelada ativa." />
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {purchases.map((p) => {
-                const percent =
-                  p.installments_count > 0
-                    ? Math.round((p.paid_count / p.installments_count) * 100)
-                    : 0;
-                return (
-                  <GlassCard key={p.id} className="p-4">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">
-                          {p.description}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-foreground/50">
-                          {p.account_name ?? "—"}
-                        </div>
+        {installments.length === 0 ? (
+          <GlassCard className="p-12 text-center text-foreground/60">
+            <CreditCard className="mx-auto size-12 opacity-40 mb-4" />
+            Nenhum parcelamento ativo encontrado para o seu usuário.
+          </GlassCard>
+        ) : (
+          <GlassCard className="overflow-hidden border border-white/10 bg-zinc-900/50">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-white/10 bg-white/[0.02]">
+                  <TableHead className="text-foreground/80">Compromisso</TableHead>
+                  <TableHead className="text-foreground/80">Progresso</TableHead>
+                  <TableHead className="text-foreground/80">Valor Total</TableHead>
+                  <TableHead className="text-foreground/80">Próximo Vencimento</TableHead>
+                  <TableHead className="text-foreground/80 text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {installments.map((item) => (
+                  <TableRow key={item.id} className="border-white/5 hover:bg-white/[0.02]">
+                    <TableCell className="font-medium">
+                      <div>
+                        <p>{item.title}</p>
+                        {item.description && (
+                          <p className="text-xs text-foreground/40 mt-0.5">{item.description}</p>
+                        )}
                       </div>
-                      <Badge className="bg-violet-500/20 text-violet-300 hover:bg-violet-500/20">
-                        {p.paid_count}/{p.installments_count}
-                      </Badge>
-                    </div>
-                    <Progress
-                      value={percent}
-                      className="mt-3 h-1.5 bg-white/10 [&>div]:bg-violet-400"
-                    />
-                    <div className="mt-3 flex items-end justify-between text-xs">
-                      <span className="text-foreground/50">Restam</span>
-                      <span className="text-sm font-semibold tabular-nums text-rose-300">
-                        {formatBRL(p.remaining_amount)}
+                    </TableCell>
+                    <TableCell>
+                      <span className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-0.5 text-xs font-medium text-foreground/80">
+                        {item.current_installment} de {item.total_installments}
                       </span>
-                    </div>
-                    {p.next_due_date && (
-                      <div className="mt-1 text-[11px] text-foreground/50">
-                        Próx. vencimento: {p.next_due_date}
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {formatCurrency(item.total_amount)}
+                    </TableCell>
+                    <TableCell className="text-foreground/70">
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <Calendar className="size-3.5 text-foreground/40" />
+                        {formatDate(item.next_due_date)}
                       </div>
-                    )}
-                  </GlassCard>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        <section className="mb-8">
-          <SectionHeader
-            icon={<Banknote className="size-4" />}
-            title="Financiamentos"
-            count={financings.length}
-            tone="sky"
-          />
-          <LoansGrid loans={financings} accent="sky" />
-        </section>
-
-        <section className="mb-8">
-          <SectionHeader
-            icon={<Trophy className="size-4" />}
-            title="Consórcios"
-            count={consortiums.length}
-            tone="amber"
-          />
-          <LoansGrid loans={consortiums} accent="amber" showContemplation />
-        </section>
-
-        {personals.length > 0 && (
-          <section className="mb-8">
-            <SectionHeader
-              icon={<Sparkles className="size-4" />}
-              title="Empréstimos pessoais"
-              count={personals.length}
-              tone="rose"
-            />
-            <LoansGrid loans={personals} accent="rose" />
-          </section>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {item.status !== "paid" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 gap-1.5 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-400"
+                            onClick={() => payMutation.mutate(item.id)}
+                            disabled={payMutation.isPending}
+                          >
+                            <CheckCircle2 className="size-4" />
+                            Pagar Parcela
+                          </Button>
+                        )}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => {
+                            if (confirm("Tem certeza que deseja remover este compromisso?")) {
+                              deleteMutation.mutate(item.id);
+                            }
+                          }}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </GlassCard>
         )}
       </div>
     </AppShell>
-  );
-}
-
-function SectionHeader({
-  icon,
-  title,
-  count,
-  tone,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  count: number;
-  tone: "violet" | "sky" | "amber" | "rose";
-}) {
-  const toneClass = {
-    violet: "text-violet-300",
-    sky: "text-sky-300",
-    amber: "text-amber-300",
-    rose: "text-rose-300",
-  }[tone];
-  return (
-    <div className="mb-3 flex items-center gap-2">
-      <span className={cn("flex items-center gap-2", toneClass)}>
-        {icon}
-        <h2 className="text-sm font-semibold uppercase tracking-wider">{title}</h2>
-      </span>
-      <span className="text-xs text-foreground/40">({count})</span>
-    </div>
-  );
-}
-
-function Empty({ text }: { text: string }) {
-  return (
-    <GlassCard className="p-8 text-center text-sm text-foreground/50">
-      {text}
-    </GlassCard>
-  );
-}
-
-function LoansGrid({
-  loans,
-  accent,
-  showContemplation,
-}: {
-  loans: LoanDTO[];
-  accent: "sky" | "amber" | "rose";
-  showContemplation?: boolean;
-}) {
-  if (loans.length === 0) return <Empty text="Nenhum registro." />;
-  const bar = {
-    sky: "[&>div]:bg-sky-400",
-    amber: "[&>div]:bg-amber-400",
-    rose: "[&>div]:bg-rose-400",
-  }[accent];
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {loans.map((l) => {
-        const percent =
-          l.installments_count > 0
-            ? Math.round((l.installments_paid / l.installments_count) * 100)
-            : 0;
-        return (
-          <GlassCard key={l.id} className="p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{l.description}</div>
-                <div className="mt-0.5 text-[11px] text-foreground/50">
-                  {l.account_name ?? "—"} · venc. dia {l.monthly_due_day}
-                </div>
-              </div>
-              {showContemplation && (
-                <Badge
-                  className={cn(
-                    l.is_contemplated
-                      ? "bg-emerald-500/25 text-emerald-300 hover:bg-emerald-500/25"
-                      : "bg-zinc-500/20 text-zinc-300 hover:bg-zinc-500/20",
-                  )}
-                >
-                  {l.is_contemplated ? "Contemplado" : "Aguardando"}
-                </Badge>
-              )}
-            </div>
-            <div className="mt-3 text-lg font-semibold tabular-nums">
-              {formatBRL(l.principal_amount)}
-            </div>
-            <Progress value={percent} className={cn("mt-2 h-1.5 bg-white/10", bar)} />
-            <div className="mt-2 flex items-center justify-between text-[11px] text-foreground/50">
-              <span>
-                {l.installments_paid}/{l.installments_count} parcelas
-              </span>
-              <span>{l.status}</span>
-            </div>
-          </GlassCard>
-        );
-      })}
-    </div>
   );
 }
