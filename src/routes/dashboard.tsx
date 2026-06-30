@@ -270,6 +270,64 @@ function DashboardPage() {
 
           <CreditCardsWidget invoices={invoices} />
         </section>
+
+        {/* Orçamentos do mês */}
+        <section className="mt-6">
+          <GlassCard className="p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold tracking-wide text-foreground">
+                Orçamentos do mês
+              </h2>
+              <Link
+                to="/budgets"
+                search={{ month }}
+                className="text-xs text-foreground/60 hover:text-foreground"
+              >
+                Gerenciar →
+              </Link>
+            </div>
+
+            {budgets.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-foreground/50">
+                Nenhum teto de gasto definido. Vá em{" "}
+                <Link to="/budgets" search={{ month }} className="underline">
+                  Orçamentos
+                </Link>{" "}
+                para criar.
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {budgets.slice(0, 5).map((b) => {
+                  const pct = safePercent(b.spent, b.amount);
+                  const tone =
+                    pct >= 100
+                      ? "from-rose-500 to-red-600"
+                      : pct >= 70
+                      ? "from-amber-500 to-orange-600"
+                      : "from-emerald-500 to-teal-600";
+                  return (
+                    <li key={b.id} className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="truncate font-medium text-foreground">
+                          {b.category_name ?? "Categoria"}
+                        </span>
+                        <span className="tabular-nums text-foreground/60">
+                          {formatBRL(b.spent)} / {formatBRL(b.amount)}
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-900/80">
+                        <div
+                          className={`h-full bg-gradient-to-r ${tone} transition-all`}
+                          style={{ width: `${Math.min(100, pct)}%` }}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </GlassCard>
+        </section>
       </div>
     </AppShell>
   );
