@@ -32,6 +32,7 @@ import { GlassCard, formatBRL } from "@/components/dashboard/primitives";
 import { getAccountsLookup, getCategoriesLookup, type AccountLookupDTO } from "@/services/lookups.functions";
 import { createTransactionEntry } from "@/services/transactions.functions";
 import { projectInvoiceForPurchase } from "@/services/invoice-projection.functions";
+import { toCents, fromCents } from "@/lib/finance/money";
 // IMPORTANTE: Trazendo o AppShell para manter o painel lateral fixo
 import { AppShell } from "@/components/app-shell";
 
@@ -179,9 +180,10 @@ function NewTransactionPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!accountId) return toast.error("Selecione a conta.");
-    const normalizedAmount = amount.replace(",", ".").trim();
-    if (!/^\d+(\.\d{1,2})?$/.test(normalizedAmount)) return toast.error("Valor inválido. Use formato 1234.56");
+    const cents = toCents(amount);
+    if (cents <= 0n) return toast.error("Valor inválido. Informe um valor maior que zero.");
     if (!description.trim()) return toast.error("Descrição obrigatória.");
+    const normalizedAmount = fromCents(cents);
 
     createMut.mutate({
       kind,

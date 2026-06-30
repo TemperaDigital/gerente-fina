@@ -5,6 +5,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
+import { toCents, fromCents, safePercent } from "@/lib/finance/money";
 
 export interface BudgetDTO {
   id: string;
@@ -56,14 +57,16 @@ export const listBudgets = createServerFn({ method: "GET" })
         .in("category_id", catIds)
         .gte("occurred_on", first)
         .lte("occurred_on", last);
+      const spentByCat = new Map<string, bigint>();
       for (const t of (tx ?? []) as Array<{
         category_id: string | null;
         amount: string;
       }>) {
         if (!t.category_id) continue;
-        const prev = spentMap.get(t.category_id) ?? 0;
-        spentMap.set(t.category_id, prev + Math.round(Number(t.amount) * 100));
+        const prev = spentByCat.get(t.category_id) ?? 0n;
+        spentByCat.set(t.category_id, prev + toCents(t.amount));
       }
+      for (const [k, v] of spentByCat) spentMap.set(k, Number(v));
     }
 
     return ((budgets ?? []) as unknown as Array<{
@@ -73,12 +76,10 @@ export const listBudgets = createServerFn({ method: "GET" })
       reference_month: string | null;
       categories?: { name?: string | null; icon?: string | null } | null;
     }>).map((b) => {
-      const amountCents = Math.round(Number(b.amount) * 100);
-      const spentCents = spentMap.get(b.category_id) ?? 0;
+      const amountCents = toCents(b.amount);
+      const spentCents = BigInt(spentMap.get(b.category_id) ?? 0);
       const remainingCents = amountCents - spentCents;
-      const percent = amountCents > 0
-        ? Math.min(100, Math.round((spentCents / amountCents) * 100))
-        : 0;
+      const percent = safePercent(fromCents(spentCents), fromCents(amountCents));
       return {
         id: b.id,
         category_id: b.category_id,
@@ -86,16 +87,16 @@ export const listBudgets = createServerFn({ method: "GET" })
         category_icon: b.categories?.icon ?? null,
         amount: b.amount,
         reference_month: b.reference_month,
-        spent: (spentCents / 100).toFixed(2),
-        remaining: (remainingCents / 100).toFixed(2),
-        percent,
+        spent: fromCents(spentCents),
+        remaining: fromCents(remainingCents),
+        percent: Math.round(percent),
       };
     });
   });
 
 const UpsertInput = z.object({
   category_id: z.string().uuid(),
-  amount: z.string().regex(/^\d+(\.\d{1,2})?$/),
+  amount: z.union([z.string(), z.number()]),
   reference_month: z.string().regex(/^\d{4}-\d{2}$/).optional().nullable(),
 });
 
@@ -106,11 +107,13 @@ export const upsertBudget = createServerFn({ method: "POST" })
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
     const ref = data.reference_month ? `${data.reference_month}-01` : null;
+    const normalized = fromCents(toCents(data.amount));
+    if (toCents(normalized) <= 0n) throw new Error("Valor do orçamento deve ser maior que zero.");
     const { error } = await sb.from("budgets").upsert(
       {
         user_id: userId,
         category_id: data.category_id,
-        amount: data.amount,
+        amount: normalized,
         reference_month: ref,
       },
       { onConflict: "user_id,category_id,reference_month" },

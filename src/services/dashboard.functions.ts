@@ -10,6 +10,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { addAmounts } from "@/lib/finance/money";
 
 // -----------------------------------------------------------------------------
 // Tipos públicos (DTOs)
@@ -57,21 +58,7 @@ function resolveReferenceMonth(month: string | undefined): string {
   return `${y}-${m}-01`;
 }
 
-/** Soma duas strings `numeric(14,2)` em precisão decimal exata. */
-function addAmount(a: string | number, b: string | number): string {
-  const toCents = (s: string | number): bigint => {
-    const [i, f = ""] = String(s).replace(/^\+/, "").split(".");
-    const frac = (f + "00").slice(0, 2);
-    const neg = i.startsWith("-");
-    const intAbs = neg ? i.slice(1) : i;
-    const cents = BigInt(intAbs) * 100n + BigInt(frac);
-    return neg ? -cents : cents;
-  };
-  const cents = toCents(a) + toCents(b);
-  const neg = cents < 0n;
-  const abs = neg ? -cents : cents;
-  return `${neg ? "-" : ""}${(abs / 100n).toString()}.${(abs % 100n).toString().padStart(2, "0")}`;
-}
+// Aritmética monetária centralizada em src/lib/finance/money.ts
 
 export const getDashboardSummary = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => DashboardInput.parse(input))
@@ -99,7 +86,7 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
 
     const accounts = (balancesRes.data ?? []) as AccountBalanceDTO[];
     const consolidated_balance = accounts.reduce(
-      (acc, a) => addAmount(acc, a.balance ?? "0.00"),
+      (acc, a) => addAmounts(acc, a.balance ?? "0.00"),
       "0.00",
     );
 
