@@ -4,7 +4,7 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useRef, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabase/client";
 import { Send, Mic, Square, Bot, User, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
