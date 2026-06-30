@@ -96,7 +96,7 @@ export const listBudgets = createServerFn({ method: "GET" })
 
 const UpsertInput = z.object({
   category_id: z.string().uuid(),
-  amount: z.string().regex(/^\d+(\.\d{1,2})?$/),
+  amount: z.union([z.string(), z.number()]),
   reference_month: z.string().regex(/^\d{4}-\d{2}$/).optional().nullable(),
 });
 
@@ -107,11 +107,13 @@ export const upsertBudget = createServerFn({ method: "POST" })
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
     const ref = data.reference_month ? `${data.reference_month}-01` : null;
+    const normalized = fromCents(toCents(data.amount));
+    if (toCents(normalized) <= 0n) throw new Error("Valor do orçamento deve ser maior que zero.");
     const { error } = await sb.from("budgets").upsert(
       {
         user_id: userId,
         category_id: data.category_id,
-        amount: data.amount,
+        amount: normalized,
         reference_month: ref,
       },
       { onConflict: "user_id,category_id,reference_month" },
