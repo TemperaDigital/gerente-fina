@@ -180,7 +180,7 @@ function BudgetsPage() {
                           <SelectValue placeholder="Selecione" />
                         </SelectTrigger>
                         <SelectContent>
-                          {categories.map((c) => (
+                          {categories.filter((c) => c.kind === "expense").map((c) => (
                             <SelectItem key={c.id} value={c.id}>
                               {c.name}
                             </SelectItem>
