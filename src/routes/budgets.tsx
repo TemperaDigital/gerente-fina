@@ -64,7 +64,7 @@ const formatBRL = (value: string | number | null | undefined) =>
 function budgetsQO(fn: () => Promise<BudgetDTO[]>) {
   return queryOptions({ queryKey: ["budgets", "list"], queryFn: fn });
 }
-function categoriesQO(fn: () => Promise<CategoryOption[]>) {
+function categoriesQO(fn: () => Promise<CategoryLookupDTO[]>) {
   return queryOptions({ queryKey: ["lookups", "expense-cats"], queryFn: fn });
 }
 
@@ -90,7 +90,7 @@ export const Route = createFileRoute("/budgets")({
 function BudgetsPage() {
   const qc = useQueryClient();
   const fetchBudgets = useServerFn(listBudgets);
-  const fetchCats = useServerFn(listExpenseCategories);
+  const fetchCats = useServerFn(getCategoriesLookup);
   const saveBudget = useServerFn(upsertBudget);
   const removeBudget = useServerFn(deleteBudget);
 
