@@ -9,7 +9,7 @@ import {
   useQueryClient, 
   useSuspenseQuery 
 } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabase/client";
 import { Plus, Trash2, CheckCircle2, Calendar, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 
