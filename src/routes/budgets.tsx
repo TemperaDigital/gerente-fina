@@ -1,203 +1,488 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useState } from 'react';
-import { Plus, Target, PiggyBank, AlertCircle } from 'lucide-react';
-import { AppShell } from '@/components/app-shell';
+/**
+ * Rota /budgets — Orçamentos (tetos de gasto por categoria).
+ *
+ * Fiação real com Supabase via listBudgets / upsertBudget / deleteBudget.
+ * Metas de Poupança ainda não possuem tabela (ver AGENTS.md §6 — pendência).
+ */
+import { useState } from "react";
+import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
+import {
+  queryOptions,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
+import { Plus, Target, PiggyBank, AlertCircle, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
-export const Route = createFileRoute('/budgets')({
+import { AppShell } from "@/components/app-shell";
+import {
+  GlassCard,
+  GooglePeriodPicker,
+  formatBRL,
+} from "@/components/dashboard/primitives";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+
+import {
+  listBudgets,
+  upsertBudget,
+  deleteBudget,
+  type BudgetDTO,
+} from "@/services/budgets.functions";
+import { getCategoriesLookup } from "@/services/lookups.functions";
+import { safePercent } from "@/lib/finance/money";
+
+// ---------------------------------------------------------------------------
+// Search params
+// ---------------------------------------------------------------------------
+function currentMonth(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+interface BudgetsSearch {
+  month: string; // YYYY-MM
+}
+
+// ---------------------------------------------------------------------------
+// Query options
+// ---------------------------------------------------------------------------
+const budgetsQuery = (month: string) =>
+  queryOptions({
+    queryKey: ["budgets", month],
+    queryFn: () => listBudgets({ data: { month } }),
+  });
+
+const categoriesQuery = () =>
+  queryOptions({
+    queryKey: ["lookups", "categories"],
+    queryFn: () => getCategoriesLookup(),
+  });
+
+// ---------------------------------------------------------------------------
+// Route
+// ---------------------------------------------------------------------------
+export const Route = createFileRoute("/budgets")({
+  head: () => ({
+    meta: [
+      { title: "Orçamentos — Gerente Fina" },
+      {
+        name: "description",
+        content: "Defina tetos mensais de gasto por categoria.",
+      },
+    ],
+  }),
+  validateSearch: (raw): BudgetsSearch => {
+    const m =
+      typeof raw.month === "string" && /^\d{4}-\d{2}$/.test(raw.month)
+        ? raw.month
+        : currentMonth();
+    return { month: m };
+  },
+  loaderDeps: ({ search: { month } }) => ({ month }),
+  loader: async ({ context, deps }) => {
+    await Promise.all([
+      context.queryClient.ensureQueryData(budgetsQuery(deps.month)),
+      context.queryClient.ensureQueryData(categoriesQuery()),
+    ]);
+  },
+  pendingComponent: BudgetsPending,
+  errorComponent: BudgetsError,
   component: () => (
     <AppShell>
-      <BudgetsComponent />
+      <BudgetsPage />
     </AppShell>
   ),
 });
 
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+function BudgetsPage() {
+  const { month } = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const router = useRouter();
+  const queryClient = useQueryClient();
 
-const INITIAL_BUDGETS = [
-  { id: '1', categoryName: 'Alimentação', limitValue: 1500, currentSpent: 1240.50, color: 'from-indigo-500 to-purple-600' },
-  { id: '2', categoryName: 'Lazer e Viagens', limitValue: 600, currentSpent: 150.00, color: 'from-pink-500 to-rose-600' },
-  { id: '3', categoryName: 'Transporte / Uber', limitValue: 800, currentSpent: 840.00, color: 'from-amber-500 to-orange-600' },
-];
+  const { data: budgets } = useSuspenseQuery(budgetsQuery(month));
+  const { data: categories } = useSuspenseQuery(categoriesQuery());
 
-const INITIAL_GOALS = [
-  { id: 'g1', title: 'Reserva de Emergência', targetValue: 20000, currentSaved: 14500, deadline: 'Dez/2026' },
-  { id: 'g2', title: 'Viagem de Fim de Ano', targetValue: 8000, currentSaved: 3200, deadline: 'Nov/2026' },
-];
+  const expenseCategories = categories.filter((c) => c.kind === "expense");
 
-function BudgetsComponent() {
-  const [budgets, setBudgets] = useState(INITIAL_BUDGETS);
-  const [goals, setGoals] = useState(INITIAL_GOALS);
-  const [showModal, setShowModal] = useState(false);
-  const [modalMode, setModalMode] = useState<'budget' | 'goal'>('budget');
+  const [openForm, setOpenForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [categoryId, setCategoryId] = useState<string>("");
+  const [amount, setAmount] = useState<string>("");
+  const [scopeGlobal, setScopeGlobal] = useState(true);
+  const [pendingDelete, setPendingDelete] = useState<BudgetDTO | null>(null);
 
-  const [name, setName] = useState('');
-  const [target, setTarget] = useState('');
-
-  const handleSave = () => {
-    if (!name || !target) return;
-    const numTarget = parseFloat(target);
-
-    if (modalMode === 'budget') {
-      setBudgets(prev => [...prev, {
-        id: Date.now().toString(),
-        categoryName: name,
-        limitValue: numTarget,
-        currentSpent: 0,
-        color: 'from-teal-500 to-emerald-600'
-      }]);
-    } else {
-      setGoals(prev => [...prev, {
-        id: Date.now().toString(),
-        title: name,
-        targetValue: numTarget,
-        currentSaved: 0,
-        deadline: '2026'
-      }]);
-    }
-    setShowModal(false);
+  const resetForm = () => {
+    setEditingId(null);
+    setCategoryId("");
+    setAmount("");
+    setScopeGlobal(true);
   };
 
+  const upsertMut = useMutation({
+    mutationFn: () =>
+      upsertBudget({
+        data: {
+          category_id: categoryId,
+          amount,
+          reference_month: scopeGlobal ? null : month,
+        },
+      }),
+    onSuccess: async () => {
+      toast.success("Orçamento salvo.");
+      await queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      router.invalidate();
+      setOpenForm(false);
+      resetForm();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteBudget({ data: { id } }),
+    onSuccess: async () => {
+      toast.success("Orçamento removido.");
+      await queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      router.invalidate();
+      setPendingDelete(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const openEdit = (b: BudgetDTO) => {
+    setEditingId(b.id);
+    setCategoryId(b.category_id);
+    setAmount(b.amount);
+    setScopeGlobal(b.reference_month === null);
+    setOpenForm(true);
+  };
+
+  const setMonth = (next: string) =>
+    navigate({ search: (prev: BudgetsSearch) => ({ ...prev, month: next }) });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!categoryId) return toast.error("Selecione uma categoria.");
+    if (!amount.trim()) return toast.error("Informe o valor do teto.");
+    upsertMut.mutate();
+  }
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-4 md:p-8 space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold bg-gradient-to-r from-white via-zinc-200 to-zinc-500 bg-clip-text text-transparent">
-          Orçamentos e Metas
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Defina tetos de gastos mensais por categoria e monitore seus objetivos de poupança de longo prazo.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* BLOCO DE LIMITES */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
-            <h2 className="text-lg font-bold text-zinc-200 flex items-center gap-2">
-              <Target className="w-5 h-5 text-indigo-400" /> Limites Mensais
-            </h2>
-            <button onClick={() => { setModalMode('budget'); setName(''); setTarget(''); setShowModal(true); }} className="text-xs bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.08] text-zinc-300 font-semibold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1">
-              <Plus className="w-3.5 h-3.5" /> Definir Limite
-            </button>
+    <div className="min-h-screen bg-zinc-950 text-foreground">
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+        <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              Orçamentos e Metas
+            </h1>
+            <p className="mt-1 text-sm text-foreground/60">
+              Defina tetos de gastos mensais por categoria. O consumo é
+              calculado em tempo real a partir das suas transações.
+            </p>
           </div>
-
-          <div className="space-y-4">
-            {budgets.map(b => {
-              const percent = Math.min((b.currentSpent / b.limitValue) * 100, 100);
-              const isOver = b.currentSpent > b.limitValue;
-
-              return (
-                <div key={b.id} className="bg-white/[0.02] border border-white/[0.06] rounded-2xl p-5 space-y-3 shadow-xl backdrop-blur-md">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="font-bold text-zinc-200 text-sm">{b.categoryName}</h3>
-                      <p className="text-[11px] text-zinc-500 mt-0.5">
-                        Gasto: R$ {b.currentSpent.toLocaleString('pt-BR')} de R$ {b.limitValue.toLocaleString('pt-BR')}
-                      </p>
-                    </div>
-                    {isOver && (
-                      <span className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 animate-pulse">
-                        <AlertCircle className="w-3 h-3" /> Orçamento Estourado
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden p-0.5 border border-white/5">
-                    <div 
-                      className={`h-full rounded-full bg-gradient-to-r ${isOver ? 'from-rose-500 to-red-600' : b.color} transition-all duration-500`}
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
-
-                  <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
-                    <span>{percent.toFixed(0)}% consumido</span>
-                    <span>Disponível: R$ {Math.max(0, b.limitValue - b.currentSpent).toLocaleString('pt-BR')}</span>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex items-center gap-2">
+            <GooglePeriodPicker value={month} onChange={setMonth} />
+            <Button
+              onClick={() => {
+                resetForm();
+                setOpenForm(true);
+              }}
+              className="gap-2 rounded-full"
+            >
+              <Plus className="size-4" /> Definir Limite
+            </Button>
           </div>
-        </div>
+        </header>
 
-        {/* BLOCO DE METAS */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
-            <h2 className="text-lg font-bold text-zinc-200 flex items-center gap-2">
-              <PiggyBank className="w-5 h-5 text-emerald-400" /> Metas de Poupança
-            </h2>
-            <button onClick={() => { setModalMode('goal'); setName(''); setTarget(''); setShowModal(true); }} className="text-xs bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.08] text-zinc-300 font-semibold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1">
-              <Plus className="w-3.5 h-3.5" /> Nova Meta
-            </button>
-          </div>
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+          {/* BLOCO ORÇAMENTOS */}
+          <section className="space-y-4 lg:col-span-2">
+            <div className="flex items-center gap-2 border-b border-white/10 pb-3 text-foreground">
+              <Target className="size-5 text-indigo-400" />
+              <h2 className="text-sm font-semibold tracking-wide">
+                Limites Mensais
+              </h2>
+              <span className="ml-auto text-xs text-foreground/50">
+                {budgets.length} {budgets.length === 1 ? "categoria" : "categorias"}
+              </span>
+            </div>
 
-          <div className="space-y-4">
-            {goals.map(g => {
-              const percent = Math.min((g.currentSaved / g.targetValue) * 100, 100);
+            {budgets.length === 0 ? (
+              <GlassCard className="px-4 py-10 text-center text-sm text-foreground/60">
+                Nenhum teto definido para este mês. Use{" "}
+                <span className="font-medium text-foreground">Definir Limite</span>{" "}
+                para começar.
+              </GlassCard>
+            ) : (
+              <ul className="space-y-3">
+                {budgets.map((b) => (
+                  <BudgetItem
+                    key={b.id}
+                    budget={b}
+                    onEdit={() => openEdit(b)}
+                    onDelete={() => setPendingDelete(b)}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
 
-              return (
-                <div key={g.id} className="bg-white/[0.02] border border-white/[0.06] rounded-2xl p-5 space-y-3 shadow-xl backdrop-blur-md">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="font-bold text-zinc-200 text-sm">{g.title}</h3>
-                      <p className="text-[11px] text-zinc-500 mt-0.5">
-                        Alvo: R$ {g.targetValue.toLocaleString('pt-BR')} | Prazo: {g.deadline}
-                      </p>
-                    </div>
-                    <span className="text-xs font-mono font-bold text-emerald-400">
-                      R$ {g.currentSaved.toLocaleString('pt-BR')}
-                    </span>
-                  </div>
-
-                  <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden p-0.5 border border-white/5">
-                    <div 
-                      className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 transition-all duration-500"
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
-
-                  <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
-                    <span>{percent.toFixed(0)}% concluído</span>
-                    <span>Faltam: R$ {(g.targetValue - g.currentSaved).toLocaleString('pt-BR')}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {/* METAS — placeholder */}
+          <aside className="space-y-4">
+            <div className="flex items-center gap-2 border-b border-white/10 pb-3">
+              <PiggyBank className="size-5 text-emerald-400" />
+              <h2 className="text-sm font-semibold tracking-wide">
+                Metas de Poupança
+              </h2>
+            </div>
+            <GlassCard className="px-4 py-8 text-center text-sm text-foreground/60">
+              Em breve. Definição de objetivos de poupança com prazo e progresso
+              chega na próxima migração de schema.
+            </GlassCard>
+          </aside>
         </div>
       </div>
 
-      {/* MODAL FORMULÁRIO */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-white/[0.08] max-w-sm w-full rounded-2xl p-6 space-y-4 shadow-2xl">
-            <div>
-              <h3 className="text-lg font-bold text-white">
-                {modalMode === 'budget' ? 'Definir Teto de Gasto' : 'Criar Nova Meta'}
-              </h3>
-              <p className="text-xs text-zinc-400 mt-0.5">Preencha os valores de governança financeira.</p>
+      {/* FORM */}
+      <Dialog open={openForm} onOpenChange={(o) => { setOpenForm(o); if (!o) resetForm(); }}>
+        <DialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editingId ? "Editar Limite" : "Definir Teto de Gasto"}
+            </DialogTitle>
+            <DialogDescription className="text-foreground/60">
+              Tetos globais valem para todos os meses; tetos do mês sobrescrevem
+              o global apenas no período selecionado.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Categoria de despesa</Label>
+              <Select
+                value={categoryId}
+                onValueChange={setCategoryId}
+                disabled={!!editingId}
+              >
+                <SelectTrigger className="border-white/10 bg-white/[0.04]">
+                  <SelectValue placeholder="Selecione..." />
+                </SelectTrigger>
+                <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
+                  {expenseCategories.length === 0 && (
+                    <SelectItem value="__empty" disabled>
+                      Nenhuma categoria de despesa cadastrada.
+                    </SelectItem>
+                  )}
+                  {expenseCategories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="space-y-3 text-sm">
-              <div className="space-y-1">
-                <label className="text-xs text-zinc-400 font-medium">
-                  {modalMode === 'budget' ? 'Nome da Categoria' : 'Objetivo / Título da Meta'}
-                </label>
-                <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={modalMode === 'budget' ? "Ex: Lazer" : "Ex: Comprar Carro"} className="w-full bg-zinc-950 border border-zinc-800 outline-none p-2 rounded-xl text-white text-xs" />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs text-zinc-400 font-medium">
-                  {modalMode === 'budget' ? 'Valor Limite Mensal (R$)' : 'Valor Alvo Final (R$)'}
-                </label>
-                <input type="number" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="R$ 1000" className="w-full bg-zinc-950 border border-zinc-800 outline-none p-2 rounded-xl text-white font-mono text-xs" />
-              </div>
+            <div className="space-y-2">
+              <Label>Valor limite (R$)</Label>
+              <Input
+                inputMode="decimal"
+                placeholder="0,00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="border-white/10 bg-white/[0.04]"
+              />
             </div>
 
-            <div className="flex space-x-3 pt-2">
-              <button onClick={() => setShowModal(false)} className="w-full py-2 bg-zinc-800 text-zinc-400 text-xs font-semibold rounded-xl">Cancelar</button>
-              <button onClick={handleSave} className="w-full py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg">Salvar</button>
+            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <input
+                id="scope-global"
+                type="checkbox"
+                checked={scopeGlobal}
+                onChange={(e) => setScopeGlobal(e.target.checked)}
+                className="size-4"
+              />
+              <label htmlFor="scope-global" className="text-sm text-foreground/80">
+                Aplicar em todos os meses (orçamento global)
+              </label>
             </div>
-          </div>
-        </div>
-      )}
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => { setOpenForm(false); resetForm(); }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={upsertMut.isPending}>
+                {upsertMut.isPending ? "Salvando..." : "Salvar"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* DELETE CONFIRM */}
+      <AlertDialog
+        open={!!pendingDelete}
+        onOpenChange={(o) => !o && setPendingDelete(null)}
+      >
+        <AlertDialogContent className="border-white/10 bg-zinc-900/95 text-foreground">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover orçamento?</AlertDialogTitle>
+            <AlertDialogDescription className="text-foreground/60">
+              O teto de{" "}
+              <strong className="text-foreground">
+                {pendingDelete?.category_name ?? "categoria"}
+              </strong>{" "}
+              será removido. As transações não são afetadas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => pendingDelete && deleteMut.mutate(pendingDelete.id)}
+              className="bg-rose-600 text-white hover:bg-rose-700"
+            >
+              Remover
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Budget item
+// ---------------------------------------------------------------------------
+function BudgetItem({
+  budget,
+  onEdit,
+  onDelete,
+}: {
+  budget: BudgetDTO;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const pct = safePercent(budget.spent, budget.amount);
+  const isOver = pct >= 100;
+  const tone =
+    pct >= 100
+      ? "from-rose-500 to-red-600"
+      : pct >= 70
+      ? "from-amber-500 to-orange-600"
+      : "from-emerald-500 to-teal-600";
+
+  return (
+    <li>
+      <GlassCard className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <button onClick={onEdit} className="min-w-0 flex-1 text-left">
+            <div className="truncate text-sm font-semibold text-foreground">
+              {budget.category_name ?? "Categoria"}
+            </div>
+            <div className="mt-0.5 text-[11px] text-foreground/50">
+              Gasto: {formatBRL(budget.spent)} de {formatBRL(budget.amount)}
+              {budget.reference_month === null && " · global"}
+            </div>
+          </button>
+          <div className="flex items-center gap-2">
+            {isOver && (
+              <span className="flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold text-rose-300">
+                <AlertCircle className="size-3" /> Estourado
+              </span>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 text-foreground/50 hover:text-rose-300"
+              onClick={onDelete}
+              aria-label="Remover orçamento"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-3 h-2 w-full overflow-hidden rounded-full border border-white/5 bg-zinc-900/80 p-0.5">
+          <div
+            className={`h-full rounded-full bg-gradient-to-r ${tone} transition-all duration-500`}
+            style={{ width: `${Math.min(100, pct)}%` }}
+          />
+        </div>
+
+        <div className="mt-2 flex justify-between font-mono text-[10px] text-foreground/50">
+          <span>{pct.toFixed(0)}% consumido</span>
+          <span>Disponível: {formatBRL(budget.remaining)}</span>
+        </div>
+      </GlassCard>
+    </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pending & Error
+// ---------------------------------------------------------------------------
+function BudgetsPending() {
+  return (
+    <AppShell>
+      <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+        <Skeleton className="h-8 w-48 bg-white/10" />
+        <div className="mt-6 space-y-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-24 w-full bg-white/10" />
+          ))}
+        </div>
+      </div>
+    </AppShell>
+  );
+}
+
+function BudgetsError({ error }: { error: Error }) {
+  const router = useRouter();
+  return (
+    <AppShell>
+      <div className="flex min-h-[60vh] items-center justify-center px-4">
+        <GlassCard className="max-w-md p-6 text-center">
+          <h2 className="text-lg font-semibold">Não foi possível carregar os orçamentos</h2>
+          <p className="mt-2 text-sm text-foreground/60">{error.message}</p>
+          <Button className="mt-4" onClick={() => router.invalidate()}>
+            Tentar novamente
+          </Button>
+        </GlassCard>
+      </div>
+    </AppShell>
   );
 }
