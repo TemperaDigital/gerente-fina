@@ -90,11 +90,18 @@ function ImportPage() {
   const queryClient = useQueryClient();
   const { data: accounts } = useSuspenseQuery(accountsQuery());
   const { data: categories } = useSuspenseQuery(categoriesQuery());
+  const { data: defaultAccount } = useSuspenseQuery(defaultAccountQuery());
 
-  const [accountId, setAccountId] = useState("");
+  const [accountId, setAccountId] = useState(defaultAccount?.id ?? "");
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
   const [rows, setRows] = useState<CheckedImportRow[]>([]);
   const [isChecking, setIsChecking] = useState(false);
+
+  // Pré-seleciona conta padrão assim que resolvida (mantém sincronia com Chat IA)
+  useEffect(() => {
+    if (!accountId && defaultAccount?.id) setAccountId(defaultAccount.id);
+  }, [defaultAccount, accountId]);
+
 
   const bankAccounts = accounts.filter((a) => a.type !== "credit_card");
   const expenseCategories = categories.filter((c) => c.kind === "expense");
