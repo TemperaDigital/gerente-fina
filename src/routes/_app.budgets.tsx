@@ -68,7 +68,7 @@ function categoriesQO(fn: () => Promise<CategoryLookupDTO[]>) {
   return queryOptions({ queryKey: ["lookups", "expense-cats"], queryFn: fn });
 }
 
-export const Route = createFileRoute("/budgets")({
+export const Route = createFileRoute("/_app/budgets")({
   head: () => ({ meta: [{ title: "Orçamentos — Gerente Fina" }] }),
   component: BudgetsPage,
   errorComponent: ({ error }) => (

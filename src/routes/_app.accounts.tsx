@@ -66,7 +66,7 @@ const accountsQuery = () =>
   });
 
 
-export const Route = createFileRoute("/accounts")({
+export const Route = createFileRoute("/_app/accounts")({
   head: () => ({
     meta: [
       { title: "Contas — Gerente Fina" },

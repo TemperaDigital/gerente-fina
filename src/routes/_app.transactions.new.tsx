@@ -46,7 +46,7 @@ const accountsQuery = () => queryOptions({ queryKey: ["lookups", "accounts"], qu
 const categoriesQuery = () =>
   queryOptions({ queryKey: ["lookups", "categories"], queryFn: () => getCategoriesLookup() });
 
-export const Route = createFileRoute("/transactions/new")({
+export const Route = createFileRoute("/_app/transactions/new")({
   head: () => ({
     meta: [
       { title: "Novo Lançamento — Gerente Fina" },

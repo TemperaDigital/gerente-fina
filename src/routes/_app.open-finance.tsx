@@ -44,7 +44,7 @@ const connectionsQueryOptions = () =>
     },
   });
 
-export const Route = createFileRoute("/open-finance")({
+export const Route = createFileRoute("/_app/open-finance")({
   head: () => ({
     meta: [{ title: "Open Finance — Gerente Fina" }],
   }),

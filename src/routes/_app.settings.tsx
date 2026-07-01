@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
 import { exportBackup, restoreBackup } from '@/services/backup.functions';
 
-export const Route = createFileRoute('/settings')({
+export const Route = createFileRoute('/_app/settings')({
   component: () => (
     <AppShell>
       <SettingsComponent />

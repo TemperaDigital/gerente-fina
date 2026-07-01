@@ -23,7 +23,7 @@ const forecastQuery = () =>
     queryFn: () => getForecast({ data: { days: 90 } }),
   });
 
-export const Route = createFileRoute("/forecast")({
+export const Route = createFileRoute("/_app/forecast")({
   head: () => ({ meta: [{ title: "Previsões — Gerente Fina" }] }),
   loader: ({ context }) => context.queryClient.ensureQueryData(forecastQuery()),
   errorComponent: ({ error }) => (

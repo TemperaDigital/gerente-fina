@@ -61,7 +61,7 @@ const cardsQuery = () =>
     queryFn: () => listAccounts({ data: { type: "credit_card" } }),
   });
 
-export const Route = createFileRoute("/credit-cards")({
+export const Route = createFileRoute("/_app/credit-cards")({
   head: () => ({
     meta: [
       { title: "Cartões de Crédito — Gerente Fina" },

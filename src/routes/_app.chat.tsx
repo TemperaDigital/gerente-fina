@@ -25,7 +25,7 @@ interface Message {
   transaction?: ChatResponse["transaction"];
 }
 
-export const Route = createFileRoute("/chat")({
+export const Route = createFileRoute("/_app/chat")({
   head: () => ({ meta: [{ title: "IA Contábil — Gerente Fina" }] }),
   component: ChatPage,
 });

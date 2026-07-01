@@ -50,7 +50,7 @@ const budgetsQuery = () =>
 // ---------------------------------------------------------------------------
 // Route
 // ---------------------------------------------------------------------------
-export const Route = createFileRoute("/dashboard")({
+export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Gerente Fina" }] }),
   loader: async ({ context }) => {
     await Promise.all([

@@ -61,7 +61,7 @@ const categoriesQuery = () =>
     queryFn: () => getCategoriesLookup(),
   });
 
-export const Route = createFileRoute("/transactions/edit/$id")({
+export const Route = createFileRoute("/_app/transactions/edit/$id")({
   head: () => ({
     meta: [
       { title: "Editar Lançamento — Gerente Fina" },
