@@ -132,11 +132,12 @@ function SettingsComponent() {
                 Baixe instantaneamente um relatório compilado de todas as suas contas, cartões e lançamentos históricos em formatos portáveis JSON e CSV para auditorias externas.
               </p>
             </div>
-            <button 
-              onClick={handleExportData}
-              className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-colors"
+            <button
+              onClick={handleBackup}
+              disabled={isBusy !== null}
+              className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 border border-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-colors"
             >
-              Exportar Agora (JSON/CSV)
+              {isBusy === 'export' ? 'Exportando…' : 'Exportar Agora (JSON)'}
             </button>
           </div>
 
