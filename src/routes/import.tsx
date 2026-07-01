@@ -10,7 +10,7 @@
  * Hash SHA-256 via WebCrypto — mesmo algoritmo da trigger do banco.
  */
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import Papa from "papaparse";
 import {
@@ -47,8 +47,13 @@ import { getAccountsLookup, getCategoriesLookup } from "@/services/lookups.funct
 import {
   checkImportDuplicates,
   commitImport,
+  getDefaultImportAccount,
   type CheckedImportRow,
 } from "@/lib/supabase/import.functions";
+
+const defaultAccountQuery = () =>
+  queryOptions({ queryKey: ["import", "default-account"], queryFn: () => getDefaultImportAccount() });
+
 
 const accountsQuery = () =>
   queryOptions({ queryKey: ["lookups", "accounts"], queryFn: () => getAccountsLookup() });
@@ -62,7 +67,9 @@ export const Route = createFileRoute("/import")({
     Promise.all([
       context.queryClient.ensureQueryData(accountsQuery()),
       context.queryClient.ensureQueryData(categoriesQuery()),
+      context.queryClient.ensureQueryData(defaultAccountQuery()),
     ]),
+
   errorComponent: ({ error }) => (
     <AppShell>
       <div className="mx-auto max-w-3xl px-4 py-10">
@@ -83,11 +90,18 @@ function ImportPage() {
   const queryClient = useQueryClient();
   const { data: accounts } = useSuspenseQuery(accountsQuery());
   const { data: categories } = useSuspenseQuery(categoriesQuery());
+  const { data: defaultAccount } = useSuspenseQuery(defaultAccountQuery());
 
-  const [accountId, setAccountId] = useState("");
+  const [accountId, setAccountId] = useState(defaultAccount?.id ?? "");
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
   const [rows, setRows] = useState<CheckedImportRow[]>([]);
   const [isChecking, setIsChecking] = useState(false);
+
+  // Pré-seleciona conta padrão assim que resolvida (mantém sincronia com Chat IA)
+  useEffect(() => {
+    if (!accountId && defaultAccount?.id) setAccountId(defaultAccount.id);
+  }, [defaultAccount, accountId]);
+
 
   const bankAccounts = accounts.filter((a) => a.type !== "credit_card");
   const expenseCategories = categories.filter((c) => c.kind === "expense");
@@ -252,62 +266,105 @@ function ImportPage() {
       {/* Etapa 3: Pré-visualização */}
       {rows.length > 0 && (
         <div className="space-y-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between bg-zinc-900/60 p-4 rounded-xl border border-white/5">
-            <div className="flex items-center gap-2 text-sm text-foreground/70">
-              <FileText className="size-4 text-primary" />
-              {rows.length} linhas · <span className="text-emerald-400 font-semibold">{newCount} novos</span> · <span className="text-red-400 font-semibold">{rows.length - newCount} duplicatas</span>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-zinc-900/60 p-4 rounded-xl border border-white/5">
+            <div className="grid grid-cols-3 gap-2 text-xs sm:flex sm:items-center sm:gap-3 sm:text-sm text-foreground/70">
+              <div className="flex items-center gap-1.5"><FileText className="size-4 text-primary shrink-0" /> <span className="font-semibold">{rows.length}</span> linhas</div>
+              <div className="text-emerald-400 font-semibold">{newCount} novos</div>
+              <div className="text-red-400 font-semibold">{rows.length - newCount} duplicatas</div>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setRows([])} className="rounded-full">Cancelar</Button>
+              <Button variant="outline" size="sm" onClick={() => setRows([])} className="rounded-full flex-1 sm:flex-none">Cancelar</Button>
               <Button
                 size="sm"
                 onClick={() => commitMut.mutate()}
                 disabled={commitMut.isPending || newCount === 0}
-                className="rounded-full gap-1.5"
+                className="rounded-full gap-1.5 flex-1 sm:flex-none"
               >
                 {commitMut.isPending && <RefreshCw className="size-3.5 animate-spin" />}
-                Gravar {newCount} lançamento(s) <ArrowRight className="size-4" />
+                Gravar {newCount} <ArrowRight className="size-4" />
               </Button>
             </div>
           </div>
 
-          <GlassCard className="overflow-hidden border border-white/10">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-white/10 bg-white/[0.02]">
-                  <TableHead>Status</TableHead>
-                  <TableHead>Data</TableHead>
-                  <TableHead>Descrição</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead className="text-right">Valor</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((r, i) => (
-                  <TableRow key={i} className={`border-white/5 ${r.is_duplicate ? "bg-red-500/10 text-red-300/60 line-through" : "hover:bg-white/[0.02]"}`}>
-                    <TableCell>
-                      {r.is_duplicate
-                        ? <span className="inline-flex items-center gap-1 text-[11px] text-red-400 font-bold bg-red-500/10 px-2 py-0.5 rounded-full"><AlertTriangle className="size-3" /> Duplicado</span>
-                        : <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full"><CheckCircle className="size-3" /> Novo</span>
-                      }
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-foreground/60">{r.occurred_on}</TableCell>
-                    <TableCell className="max-w-xs truncate font-medium">{r.description}</TableCell>
-                    <TableCell>
-                      <span className={`text-xs font-semibold ${r.kind === "income" ? "text-emerald-400" : "text-foreground/60"}`}>
-                        {r.kind === "income" ? "Receita" : "Despesa"}
-                      </span>
-                    </TableCell>
-                    <TableCell className={`text-right font-mono font-semibold ${r.kind === "income" ? "text-emerald-400" : "text-foreground/80"}`}>
-                      {r.kind === "income" ? "+" : "−"} R$ {r.amount_raw}
-                    </TableCell>
+          {/* Mobile: cards empilhados */}
+          <div className="grid gap-2 sm:hidden">
+            {rows.map((r, i) => (
+              <div
+                key={i}
+                className={`rounded-xl border p-3 space-y-2 ${
+                  r.is_duplicate
+                    ? "border-red-500/40 bg-red-500/10 opacity-70"
+                    : "border-white/10 bg-white/[0.02]"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  {r.is_duplicate
+                    ? <span className="inline-flex items-center gap-1 text-[11px] text-red-300 font-bold bg-red-500/20 px-2 py-0.5 rounded-full"><AlertTriangle className="size-3" /> Duplicado</span>
+                    : <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full"><CheckCircle className="size-3" /> Novo</span>
+                  }
+                  <span className={`font-mono text-sm font-semibold whitespace-nowrap ${r.kind === "income" ? "text-emerald-400" : "text-foreground/90"}`}>
+                    {r.kind === "income" ? "+" : "−"} R$ {r.amount_raw}
+                  </span>
+                </div>
+                <p className="text-sm font-medium line-clamp-2 min-w-0">{r.description}</p>
+                <div className="flex items-center justify-between text-[11px] text-foreground/50">
+                  <span className="font-mono">{r.occurred_on}</span>
+                  <span className={`font-semibold ${r.kind === "income" ? "text-emerald-400" : "text-foreground/60"}`}>
+                    {r.kind === "income" ? "Receita" : "Despesa"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop: tabela */}
+          <GlassCard className="hidden sm:block overflow-hidden border border-white/10">
+            <div className="max-h-[600px] overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-zinc-950/95 backdrop-blur z-10">
+                  <TableRow className="border-white/10">
+                    <TableHead className="w-28">Status</TableHead>
+                    <TableHead className="w-28 whitespace-nowrap">Data</TableHead>
+                    <TableHead>Descrição</TableHead>
+                    <TableHead className="w-24">Tipo</TableHead>
+                    <TableHead className="w-32 text-right whitespace-nowrap">Valor</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r, i) => (
+                    <TableRow
+                      key={i}
+                      className={`border-white/5 ${
+                        r.is_duplicate
+                          ? "bg-red-500/10 text-red-300/70"
+                          : "hover:bg-white/[0.02]"
+                      }`}
+                    >
+                      <TableCell>
+                        {r.is_duplicate
+                          ? <span className="inline-flex items-center gap-1 text-[11px] text-red-300 font-bold bg-red-500/20 px-2 py-0.5 rounded-full"><AlertTriangle className="size-3" /> Duplicado</span>
+                          : <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full"><CheckCircle className="size-3" /> Novo</span>
+                        }
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-foreground/60 whitespace-nowrap">{r.occurred_on}</TableCell>
+                      <TableCell className="min-w-0 max-w-md truncate font-medium">{r.description}</TableCell>
+                      <TableCell>
+                        <span className={`text-xs font-semibold ${r.kind === "income" ? "text-emerald-400" : "text-foreground/60"}`}>
+                          {r.kind === "income" ? "Receita" : "Despesa"}
+                        </span>
+                      </TableCell>
+                      <TableCell className={`text-right font-mono font-semibold whitespace-nowrap ${r.kind === "income" ? "text-emerald-400" : "text-foreground/80"}`}>
+                        {r.kind === "income" ? "+" : "−"} R$ {r.amount_raw}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </GlassCard>
         </div>
       )}
+
     </div>
   );
 }

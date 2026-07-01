@@ -133,17 +133,23 @@ export const commitImport = createServerFn({ method: "POST" })
   .inputValidator((i: unknown) => CommitImportInput.parse(i))
   .handler(async ({ data }): Promise<{ inserted: number }> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { accountBelongsToUser } = await import("@/lib/finance/active-account.server");
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
+
+    // Blindagem: garante que TODAS as linhas apontem para conta do próprio usuário
+    const uniqueAccountIds = Array.from(new Set(data.rows.map((r) => r.account_id)));
+    for (const accId of uniqueAccountIds) {
+      const ok = await accountBelongsToUser(sb, userId, accId);
+      if (!ok) throw new Error(`Conta ${accId} não pertence ao usuário ou foi arquivada.`);
+    }
 
     const payload = data.rows.map((row) => ({
       user_id: userId,
       account_id: row.account_id,
       category_id: row.category_id,
       kind: row.kind,
-      // type: 'credit' para receita, 'debit' para despesa
       type: row.kind === "income" ? "credit" : "debit",
-      // amount: sempre positivo, numeric(14,2) string — NÃO em centavos
       amount: normalizeAmount(row.amount_raw),
       occurred_on: row.occurred_on,
       description: row.description,
@@ -157,3 +163,24 @@ export const commitImport = createServerFn({ method: "POST" })
 
     return { inserted: payload.length };
   });
+
+// ---------------------------------------------------------------------------
+// Server Function 3: getDefaultImportAccount
+// Retorna a conta ativa padrão (mesma lógica do Chat IA) para pré-seleção.
+// ---------------------------------------------------------------------------
+
+export const getDefaultImportAccount = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ id: string; name: string; type: string } | null> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { resolveActiveAccount } = await import("@/lib/finance/active-account.server");
+    const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
+    try {
+      const acc = await resolveActiveAccount(sb, userId);
+      return acc;
+    } catch {
+      return null;
+    }
+  },
+);
+
