@@ -197,7 +197,7 @@ export const restoreBackup = createServerFn({ method: "POST" })
         categories_upserted: categoriesUp,
         transactions_upserted: transactionsUp,
       };
-      await writeAudit(userId, "backup.restore", report);
+      await writeAudit(userId, "backup.restore", { ...report });
       return report;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
