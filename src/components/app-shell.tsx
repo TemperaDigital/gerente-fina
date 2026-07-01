@@ -43,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="pointer-events-none fixed inset-0 -z-10"
         style={{
           background:
-            "radial-gradient(800px 500px at 15% -10%, rgba(99,102,241,0.18), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,0.14), transparent 60%), radial-gradient(900px[...]
+            "radial-gradient(800px 500px at 15% -10%, rgba(99,102,241,0.18), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,0.14), transparent 60%)"
         }}
       />
 
@@ -54,8 +54,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Link>
         <button
           onClick={() => setOpenMobile((v) => !v)}
+          aria-expanded={openMobile}
+          aria-controls="mobile-nav"
           className="grid size-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-foreground/80"
-          aria-label="Menu"
+          aria-label={openMobile ? "Fechar menu" : "Abrir menu"}
         >
           <Menu className="size-4" />
         </button>
@@ -63,7 +65,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Mobile drawer */}
       {openMobile && (
-        <nav className="border-b border-white/5 bg-zinc-950/95 px-2 py-2 backdrop-blur-xl md:hidden">
+        <nav
+          id="mobile-nav"
+          className="border-b border-white/5 bg-zinc-950/95 px-2 py-2 backdrop-blur-xl md:hidden"
+        >
           <ul className="grid grid-cols-2 gap-1">
             {NAV.map((n) => {
               const active = pathname.startsWith(n.to);

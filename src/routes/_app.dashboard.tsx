@@ -224,7 +224,7 @@ function DashboardPage() {
             </div>
 
             <div className="mt-6 border-t border-white/5 pt-4">
-              <Link to="/_app/accounts">
+              <Link to="/accounts">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -277,7 +277,7 @@ function DashboardPage() {
             </div>
 
             <div className="mt-6 border-t border-white/5 pt-4">
-              <Link to="/_app/budgets">
+              <Link to="/budgets">
                 <Button
                   variant="ghost"
                   size="sm"

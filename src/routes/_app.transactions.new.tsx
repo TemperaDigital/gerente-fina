@@ -132,7 +132,6 @@ function NewTransactionPage() {
     const termo = val.toLowerCase();
 
     if (termo.includes("mariareniele") || termo.includes("woshington")) {
-      // Encontra com segurança usando c.name?.toLowerCase()
       const targetCategory = categories.find(
         (c) => c.name?.toLowerCase().includes("mercearia") || c.name?.toLowerCase().includes("alimentação"),
       );
@@ -226,7 +225,8 @@ function NewTransactionPage() {
               variant="ghost"
               className="h-9 gap-2 rounded-full border border-white/10 bg-white/[0.04] text-foreground/70 hover:bg-white/10"
             >
-              <Link to="/_app/transactions">
+              {/* O PARÂMETRO SEARCH CORRIGIDO AQUI */}
+              <Link to="/transactions" search={{ month: occurredOn.slice(0, 7), page: 1 }}>
                 <ArrowLeft className="size-4" /> Voltar
               </Link>
             </Button>
@@ -234,7 +234,6 @@ function NewTransactionPage() {
             <div className="w-[88px]" />
           </header>
 
-          {/* Pílulas de seleção */}
           <KindPills
             value={kind}
             onChange={(k) => {
@@ -346,7 +345,6 @@ function NewTransactionPage() {
               </Field>
             </GlassCard>
 
-            {/* Box de Projeção de Fatura */}
             {projectionEnabled && projection && (
               <GlassCard className="flex items-start gap-3 border-violet-400/30 p-4">
                 <Sparkles className="mt-0.5 size-5 shrink-0 text-violet-300" />
@@ -370,7 +368,6 @@ function NewTransactionPage() {
               </GlassCard>
             )}
 
-            {/* Modificadores inline */}
             {kind === "expense" && (
               <ModifierCard
                 icon={<Layers className="size-4 text-amber-300" />}

@@ -125,3 +125,9 @@ create trigger transactions_attach_invoice
 --   0006 — Função RPC `create_transfer(...)` atômica (2 linhas / 1 transfer_id)
 --   0007 — Trigger de fechamento de fatura (status → 'closed' + total_amount)
 -- =============================================================================
+
+-- Adicionando a rota /dashboard ao mapa canônico para consistência
+-- com a implementação do AppShell.
+--
+-- /dashboard (Painel Principal): Tela inicial após o login, apresentando
+-- um resumo das finanças do usuário.
