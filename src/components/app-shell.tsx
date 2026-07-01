@@ -47,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Top bar mobile */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/5 bg-zinc-950/70 px-4 py-3 backdrop-blur-xl md:hidden">
-        <Link to="/dashboard" className="text-base font-semibold tracking-tight">
+        <Link to="/_app/dashboard" className="text-base font-semibold tracking-tight">
           Gerente <span className="text-primary">Fina</span>
         </Link>
         <button
@@ -92,7 +92,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Sidebar desktop */}
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-1 border-r border-white/5 px-3 py-6 md:flex">
           <Link
-            to="/dashboard"
+            to="/_app/dashboard"
             className="mb-6 px-3 text-lg font-semibold tracking-tight"
           >
             Gerente <span className="text-primary">Fina</span>

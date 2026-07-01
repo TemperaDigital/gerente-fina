@@ -50,7 +50,7 @@ const budgetsQuery = () =>
 // ---------------------------------------------------------------------------
 // Route
 // ---------------------------------------------------------------------------
-export const Route = createFileRoute("/dashboard")({
+export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Gerente Fina" }] }),
   loader: async ({ context }) => {
     await Promise.all([
@@ -224,7 +224,7 @@ function DashboardPage() {
             </div>
 
             <div className="mt-6 border-t border-white/5 pt-4">
-              <Link to="/accounts">
+              <Link to="/_app/accounts">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -277,7 +277,7 @@ function DashboardPage() {
             </div>
 
             <div className="mt-6 border-t border-white/5 pt-4">
-              <Link to="/budgets">
+              <Link to="/_app/budgets">
                 <Button
                   variant="ghost"
                   size="sm"

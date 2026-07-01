@@ -61,7 +61,7 @@ const categoriesQuery = () =>
     queryFn: () => getCategoriesLookup(),
   });
 
-export const Route = createFileRoute("/transactions/edit/$id")({
+export const Route = createFileRoute("/_app/transactions/edit/$id")({
   head: () => ({
     meta: [
       { title: "Editar Lançamento — Gerente Fina" },
@@ -188,7 +188,7 @@ function EditTransactionPage() {
             variant="ghost"
             className="h-9 gap-2 rounded-full border border-white/10 bg-white/[0.04] text-foreground/70 hover:bg-white/10"
           >
-            <Link to="/transactions">
+            <Link to="/_app/transactions">
               <ArrowLeft className="size-4" /> Voltar
             </Link>
           </Button>

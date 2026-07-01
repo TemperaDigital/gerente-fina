@@ -39,7 +39,7 @@ function loansQO(fn: () => Promise<LoanDTO[]>) {
   return queryOptions({ queryKey: ["installments", "loans"], queryFn: fn });
 }
 
-export const Route = createFileRoute("/installments")({
+export const Route = createFileRoute("/_app/installments")({
   head: () => ({ meta: [{ title: "Parcelamentos & Dívidas — Gerente Fina" }] }),
   component: InstallmentsPage,
   errorComponent: ({ error }) => (

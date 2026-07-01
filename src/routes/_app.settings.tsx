@@ -2,14 +2,16 @@
  * Rota /settings — Hub de configurações com 4 abas (Master/Detail Otimizado).
  * Aba ativa controlada via search param ?tab=
  */
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
-import { Shield, Download, Upload, ShieldAlert, Trash2, CheckCircle2, User } from 'lucide-react';
+import { Shield, Download, Upload, ShieldAlert, Trash2, CheckCircle2, User, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
+import { Progress } from '@/components/ui/progress';
+import { supabase } from '@/lib/supabase/client';
 import { exportBackup, restoreBackup } from '@/services/backup.functions';
 
-export const Route = createFileRoute('/settings')({
+export const Route = createFileRoute('/_app/settings')({
   component: () => (
     <AppShell>
       <SettingsComponent />
@@ -17,12 +19,33 @@ export const Route = createFileRoute('/settings')({
   ),
 });
 
+type RestoreState = 'idle' | 'reading' | 'validating' | 'uploading' | 'done' | 'error';
+
+const RESTORE_PROGRESS: Record<RestoreState, number> = {
+  idle: 0,
+  reading: 20,
+  validating: 45,
+  uploading: 80,
+  done: 100,
+  error: 100,
+};
+
+const RESTORE_LABEL: Record<RestoreState, string> = {
+  idle: '',
+  reading: 'Lendo arquivo…',
+  validating: 'Validando integridade contábil…',
+  uploading: 'Enviando ao banco de dados…',
+  done: 'Restauração concluída.',
+  error: 'Falha na restauração.',
+};
 
 function SettingsComponent() {
+  const navigate = useNavigate();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState<'export' | 'restore' | null>(null);
+  const [restoreState, setRestoreState] = useState<RestoreState>('idle');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const triggerNotification = (message: string) => {
@@ -34,9 +57,7 @@ function SettingsComponent() {
     setIsBusy('export');
     try {
       const payload = await exportBackup();
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: 'application/json',
-      });
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       const stamp = new Date().toISOString().slice(0, 10);
@@ -59,30 +80,42 @@ function SettingsComponent() {
     }
   };
 
-  const handleRestore = () => {
-    fileInputRef.current?.click();
-  };
+  const handleRestore = () => fileInputRef.current?.click();
 
   const handleRestoreFile = async (ev: React.ChangeEvent<HTMLInputElement>) => {
     const file = ev.target.files?.[0];
     ev.target.value = '';
     if (!file) return;
     setIsBusy('restore');
+    setRestoreState('reading');
     try {
       const text = await file.text();
+      setRestoreState('validating');
       const payload = JSON.parse(text);
+      setRestoreState('uploading');
       const report = await restoreBackup({ data: { payload } });
+      setRestoreState('done');
       toast.success('Restore concluído', {
         description: `Contas: ${report.accounts_upserted} · Categorias: ${report.categories_upserted} · Transações: ${report.transactions_upserted}.`,
       });
       triggerNotification('🔄 Base restaurada com sucesso a partir do arquivo enviado.');
+      setTimeout(() => setRestoreState('idle'), 2500);
     } catch (err) {
+      setRestoreState('error');
       const msg = err instanceof Error ? err.message : 'Arquivo inválido.';
       toast.error('Falha ao restaurar backup', { description: msg });
+      setTimeout(() => setRestoreState('idle'), 4000);
     } finally {
       setIsBusy(null);
     }
   };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    toast.success('Você saiu com segurança.');
+    navigate({ to: '/' });
+  };
+
 
   const handleDeleteAccount = () => {
     if (confirmText.toLowerCase() === 'excluir definitivamente') {
@@ -176,6 +209,35 @@ function SettingsComponent() {
             </div>
           </div>
         </div>
+
+        {/* Progresso do restore */}
+        {restoreState !== 'idle' && (
+          <div className="mt-2 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className={restoreState === 'error' ? 'text-rose-400 font-semibold' : 'text-zinc-400'}>
+                {RESTORE_LABEL[restoreState]}
+              </span>
+              <span className="font-mono text-zinc-500">{RESTORE_PROGRESS[restoreState]}%</span>
+            </div>
+            <Progress value={RESTORE_PROGRESS[restoreState]} className={restoreState === 'error' ? 'bg-rose-950' : ''} />
+          </div>
+        )}
+      </div>
+
+      {/* SESSÃO / LOGOUT */}
+      <div className="bg-white/[0.02] border border-white/[0.06] backdrop-blur-xl rounded-2xl p-6 shadow-2xl flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-bold text-zinc-200 flex items-center gap-2">
+            <LogOut className="w-4 h-4 text-zinc-500" /> Sessão
+          </h2>
+          <p className="text-xs text-zinc-500 mt-1">Encerre a sessão atual com segurança.</p>
+        </div>
+        <button
+          onClick={handleSignOut}
+          className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl border border-zinc-700"
+        >
+          Sair
+        </button>
       </div>
 
       {/* BLOCO 2: PREFERÊNCIAS PLACEHOLDER (ZIMAOS STYLE UI) */}

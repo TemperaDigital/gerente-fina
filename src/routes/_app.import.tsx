@@ -61,7 +61,7 @@ const accountsQuery = () =>
 const categoriesQuery = () =>
   queryOptions({ queryKey: ["lookups", "categories"], queryFn: () => getCategoriesLookup() });
 
-export const Route = createFileRoute("/import")({
+export const Route = createFileRoute("/_app/import")({
   head: () => ({ meta: [{ title: "Importar Extrato — Gerente Fina" }] }),
   loader: ({ context }) =>
     Promise.all([

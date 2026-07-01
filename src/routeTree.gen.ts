@@ -9,75 +9,37 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as OpenFinanceRouteImport } from './routes/open-finance'
-import { Route as InstallmentsRouteImport } from './routes/installments'
-import { Route as ImportRouteImport } from './routes/import'
-import { Route as ForecastRouteImport } from './routes/forecast'
-import { Route as DashboardRouteImport } from './routes/dashboard'
-import { Route as CreditCardsRouteImport } from './routes/credit-cards'
-import { Route as ChatRouteImport } from './routes/chat'
-import { Route as CategoriesRouteImport } from './routes/categories'
-import { Route as BudgetsRouteImport } from './routes/budgets'
-import { Route as AccountsRouteImport } from './routes/accounts'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as TransactionsIndexRouteImport } from './routes/transactions.index'
-import { Route as TransactionsNewRouteImport } from './routes/transactions.new'
-import { Route as TransactionsEditIdRouteImport } from './routes/transactions.edit.$id'
+import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as AppOpenFinanceRouteImport } from './routes/_app.open-finance'
+import { Route as AppInstallmentsRouteImport } from './routes/_app.installments'
+import { Route as AppImportRouteImport } from './routes/_app.import'
+import { Route as AppForecastRouteImport } from './routes/_app.forecast'
+import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppCreditCardsRouteImport } from './routes/_app.credit-cards'
+import { Route as AppChatRouteImport } from './routes/_app.chat'
+import { Route as AppCategoriesRouteImport } from './routes/_app.categories'
+import { Route as AppBudgetsRouteImport } from './routes/_app.budgets'
+import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
+import { Route as AppTransactionsIndexRouteImport } from './routes/_app.transactions.index'
+import { Route as AppTransactionsNewRouteImport } from './routes/_app.transactions.new'
+import { Route as AppTransactionsEditIdRouteImport } from './routes/_app.transactions.edit.$id'
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
-const OpenFinanceRoute = OpenFinanceRouteImport.update({
-  id: '/open-finance',
-  path: '/open-finance',
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
-const InstallmentsRoute = InstallmentsRouteImport.update({
-  id: '/installments',
-  path: '/installments',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ImportRoute = ImportRouteImport.update({
-  id: '/import',
-  path: '/import',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ForecastRoute = ForecastRouteImport.update({
-  id: '/forecast',
-  path: '/forecast',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DashboardRoute = DashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CreditCardsRoute = CreditCardsRouteImport.update({
-  id: '/credit-cards',
-  path: '/credit-cards',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChatRoute = ChatRouteImport.update({
-  id: '/chat',
-  path: '/chat',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CategoriesRoute = CategoriesRouteImport.update({
-  id: '/categories',
-  path: '/categories',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BudgetsRoute = BudgetsRouteImport.update({
-  id: '/budgets',
-  path: '/budgets',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AccountsRoute = AccountsRouteImport.update({
-  id: '/accounts',
-  path: '/accounts',
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -85,78 +47,142 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TransactionsIndexRoute = TransactionsIndexRouteImport.update({
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOpenFinanceRoute = AppOpenFinanceRouteImport.update({
+  id: '/open-finance',
+  path: '/open-finance',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInstallmentsRoute = AppInstallmentsRouteImport.update({
+  id: '/installments',
+  path: '/installments',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppImportRoute = AppImportRouteImport.update({
+  id: '/import',
+  path: '/import',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppForecastRoute = AppForecastRouteImport.update({
+  id: '/forecast',
+  path: '/forecast',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCreditCardsRoute = AppCreditCardsRouteImport.update({
+  id: '/credit-cards',
+  path: '/credit-cards',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppChatRoute = AppChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCategoriesRoute = AppCategoriesRouteImport.update({
+  id: '/categories',
+  path: '/categories',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBudgetsRoute = AppBudgetsRouteImport.update({
+  id: '/budgets',
+  path: '/budgets',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAccountsRoute = AppAccountsRouteImport.update({
+  id: '/accounts',
+  path: '/accounts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTransactionsIndexRoute = AppTransactionsIndexRouteImport.update({
   id: '/transactions/',
   path: '/transactions/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const TransactionsNewRoute = TransactionsNewRouteImport.update({
+const AppTransactionsNewRoute = AppTransactionsNewRouteImport.update({
   id: '/transactions/new',
   path: '/transactions/new',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const TransactionsEditIdRoute = TransactionsEditIdRouteImport.update({
+const AppTransactionsEditIdRoute = AppTransactionsEditIdRouteImport.update({
   id: '/transactions/edit/$id',
   path: '/transactions/edit/$id',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/accounts': typeof AccountsRoute
-  '/budgets': typeof BudgetsRoute
-  '/categories': typeof CategoriesRoute
-  '/chat': typeof ChatRoute
-  '/credit-cards': typeof CreditCardsRoute
-  '/dashboard': typeof DashboardRoute
-  '/forecast': typeof ForecastRoute
-  '/import': typeof ImportRoute
-  '/installments': typeof InstallmentsRoute
-  '/open-finance': typeof OpenFinanceRoute
-  '/settings': typeof SettingsRoute
-  '/transactions/new': typeof TransactionsNewRoute
-  '/transactions/': typeof TransactionsIndexRoute
-  '/transactions/edit/$id': typeof TransactionsEditIdRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/accounts': typeof AppAccountsRoute
+  '/budgets': typeof AppBudgetsRoute
+  '/categories': typeof AppCategoriesRoute
+  '/chat': typeof AppChatRoute
+  '/credit-cards': typeof AppCreditCardsRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/forecast': typeof AppForecastRoute
+  '/import': typeof AppImportRoute
+  '/installments': typeof AppInstallmentsRoute
+  '/open-finance': typeof AppOpenFinanceRoute
+  '/settings': typeof AppSettingsRoute
+  '/transactions/new': typeof AppTransactionsNewRoute
+  '/transactions/': typeof AppTransactionsIndexRoute
+  '/transactions/edit/$id': typeof AppTransactionsEditIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/accounts': typeof AccountsRoute
-  '/budgets': typeof BudgetsRoute
-  '/categories': typeof CategoriesRoute
-  '/chat': typeof ChatRoute
-  '/credit-cards': typeof CreditCardsRoute
-  '/dashboard': typeof DashboardRoute
-  '/forecast': typeof ForecastRoute
-  '/import': typeof ImportRoute
-  '/installments': typeof InstallmentsRoute
-  '/open-finance': typeof OpenFinanceRoute
-  '/settings': typeof SettingsRoute
-  '/transactions/new': typeof TransactionsNewRoute
-  '/transactions': typeof TransactionsIndexRoute
-  '/transactions/edit/$id': typeof TransactionsEditIdRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/accounts': typeof AppAccountsRoute
+  '/budgets': typeof AppBudgetsRoute
+  '/categories': typeof AppCategoriesRoute
+  '/chat': typeof AppChatRoute
+  '/credit-cards': typeof AppCreditCardsRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/forecast': typeof AppForecastRoute
+  '/import': typeof AppImportRoute
+  '/installments': typeof AppInstallmentsRoute
+  '/open-finance': typeof AppOpenFinanceRoute
+  '/settings': typeof AppSettingsRoute
+  '/transactions/new': typeof AppTransactionsNewRoute
+  '/transactions': typeof AppTransactionsIndexRoute
+  '/transactions/edit/$id': typeof AppTransactionsEditIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/accounts': typeof AccountsRoute
-  '/budgets': typeof BudgetsRoute
-  '/categories': typeof CategoriesRoute
-  '/chat': typeof ChatRoute
-  '/credit-cards': typeof CreditCardsRoute
-  '/dashboard': typeof DashboardRoute
-  '/forecast': typeof ForecastRoute
-  '/import': typeof ImportRoute
-  '/installments': typeof InstallmentsRoute
-  '/open-finance': typeof OpenFinanceRoute
-  '/settings': typeof SettingsRoute
-  '/transactions/new': typeof TransactionsNewRoute
-  '/transactions/': typeof TransactionsIndexRoute
-  '/transactions/edit/$id': typeof TransactionsEditIdRoute
+  '/_app': typeof AppRouteWithChildren
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/_app/accounts': typeof AppAccountsRoute
+  '/_app/budgets': typeof AppBudgetsRoute
+  '/_app/categories': typeof AppCategoriesRoute
+  '/_app/chat': typeof AppChatRoute
+  '/_app/credit-cards': typeof AppCreditCardsRoute
+  '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/forecast': typeof AppForecastRoute
+  '/_app/import': typeof AppImportRoute
+  '/_app/installments': typeof AppInstallmentsRoute
+  '/_app/open-finance': typeof AppOpenFinanceRoute
+  '/_app/settings': typeof AppSettingsRoute
+  '/_app/transactions/new': typeof AppTransactionsNewRoute
+  '/_app/transactions/': typeof AppTransactionsIndexRoute
+  '/_app/transactions/edit/$id': typeof AppTransactionsEditIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/forgot-password'
+    | '/reset-password'
     | '/accounts'
     | '/budgets'
     | '/categories'
@@ -174,6 +200,8 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/forgot-password'
+    | '/reset-password'
     | '/accounts'
     | '/budgets'
     | '/categories'
@@ -191,117 +219,53 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/accounts'
-    | '/budgets'
-    | '/categories'
-    | '/chat'
-    | '/credit-cards'
-    | '/dashboard'
-    | '/forecast'
-    | '/import'
-    | '/installments'
-    | '/open-finance'
-    | '/settings'
-    | '/transactions/new'
-    | '/transactions/'
-    | '/transactions/edit/$id'
+    | '/_app'
+    | '/forgot-password'
+    | '/reset-password'
+    | '/_app/accounts'
+    | '/_app/budgets'
+    | '/_app/categories'
+    | '/_app/chat'
+    | '/_app/credit-cards'
+    | '/_app/dashboard'
+    | '/_app/forecast'
+    | '/_app/import'
+    | '/_app/installments'
+    | '/_app/open-finance'
+    | '/_app/settings'
+    | '/_app/transactions/new'
+    | '/_app/transactions/'
+    | '/_app/transactions/edit/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AccountsRoute: typeof AccountsRoute
-  BudgetsRoute: typeof BudgetsRoute
-  CategoriesRoute: typeof CategoriesRoute
-  ChatRoute: typeof ChatRoute
-  CreditCardsRoute: typeof CreditCardsRoute
-  DashboardRoute: typeof DashboardRoute
-  ForecastRoute: typeof ForecastRoute
-  ImportRoute: typeof ImportRoute
-  InstallmentsRoute: typeof InstallmentsRoute
-  OpenFinanceRoute: typeof OpenFinanceRoute
-  SettingsRoute: typeof SettingsRoute
-  TransactionsNewRoute: typeof TransactionsNewRoute
-  TransactionsIndexRoute: typeof TransactionsIndexRoute
-  TransactionsEditIdRoute: typeof TransactionsEditIdRoute
+  AppRoute: typeof AppRouteWithChildren
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/open-finance': {
-      id: '/open-finance'
-      path: '/open-finance'
-      fullPath: '/open-finance'
-      preLoaderRoute: typeof OpenFinanceRouteImport
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/installments': {
-      id: '/installments'
-      path: '/installments'
-      fullPath: '/installments'
-      preLoaderRoute: typeof InstallmentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/import': {
-      id: '/import'
-      path: '/import'
-      fullPath: '/import'
-      preLoaderRoute: typeof ImportRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/forecast': {
-      id: '/forecast'
-      path: '/forecast'
-      fullPath: '/forecast'
-      preLoaderRoute: typeof ForecastRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dashboard': {
-      id: '/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof DashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/credit-cards': {
-      id: '/credit-cards'
-      path: '/credit-cards'
-      fullPath: '/credit-cards'
-      preLoaderRoute: typeof CreditCardsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/chat': {
-      id: '/chat'
-      path: '/chat'
-      fullPath: '/chat'
-      preLoaderRoute: typeof ChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/categories': {
-      id: '/categories'
-      path: '/categories'
-      fullPath: '/categories'
-      preLoaderRoute: typeof CategoriesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/budgets': {
-      id: '/budgets'
-      path: '/budgets'
-      fullPath: '/budgets'
-      preLoaderRoute: typeof BudgetsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/accounts': {
-      id: '/accounts'
-      path: '/accounts'
-      fullPath: '/accounts'
-      preLoaderRoute: typeof AccountsRouteImport
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -311,46 +275,148 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transactions/': {
-      id: '/transactions/'
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/open-finance': {
+      id: '/_app/open-finance'
+      path: '/open-finance'
+      fullPath: '/open-finance'
+      preLoaderRoute: typeof AppOpenFinanceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/installments': {
+      id: '/_app/installments'
+      path: '/installments'
+      fullPath: '/installments'
+      preLoaderRoute: typeof AppInstallmentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/import': {
+      id: '/_app/import'
+      path: '/import'
+      fullPath: '/import'
+      preLoaderRoute: typeof AppImportRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/forecast': {
+      id: '/_app/forecast'
+      path: '/forecast'
+      fullPath: '/forecast'
+      preLoaderRoute: typeof AppForecastRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/credit-cards': {
+      id: '/_app/credit-cards'
+      path: '/credit-cards'
+      fullPath: '/credit-cards'
+      preLoaderRoute: typeof AppCreditCardsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/chat': {
+      id: '/_app/chat'
+      path: '/chat'
+      fullPath: '/chat'
+      preLoaderRoute: typeof AppChatRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/categories': {
+      id: '/_app/categories'
+      path: '/categories'
+      fullPath: '/categories'
+      preLoaderRoute: typeof AppCategoriesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/budgets': {
+      id: '/_app/budgets'
+      path: '/budgets'
+      fullPath: '/budgets'
+      preLoaderRoute: typeof AppBudgetsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/accounts': {
+      id: '/_app/accounts'
+      path: '/accounts'
+      fullPath: '/accounts'
+      preLoaderRoute: typeof AppAccountsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/transactions/': {
+      id: '/_app/transactions/'
       path: '/transactions'
       fullPath: '/transactions/'
-      preLoaderRoute: typeof TransactionsIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppTransactionsIndexRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/transactions/new': {
-      id: '/transactions/new'
+    '/_app/transactions/new': {
+      id: '/_app/transactions/new'
       path: '/transactions/new'
       fullPath: '/transactions/new'
-      preLoaderRoute: typeof TransactionsNewRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppTransactionsNewRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/transactions/edit/$id': {
-      id: '/transactions/edit/$id'
+    '/_app/transactions/edit/$id': {
+      id: '/_app/transactions/edit/$id'
       path: '/transactions/edit/$id'
       fullPath: '/transactions/edit/$id'
-      preLoaderRoute: typeof TransactionsEditIdRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppTransactionsEditIdRouteImport
+      parentRoute: typeof AppRoute
     }
   }
 }
 
+interface AppRouteChildren {
+  AppAccountsRoute: typeof AppAccountsRoute
+  AppBudgetsRoute: typeof AppBudgetsRoute
+  AppCategoriesRoute: typeof AppCategoriesRoute
+  AppChatRoute: typeof AppChatRoute
+  AppCreditCardsRoute: typeof AppCreditCardsRoute
+  AppDashboardRoute: typeof AppDashboardRoute
+  AppForecastRoute: typeof AppForecastRoute
+  AppImportRoute: typeof AppImportRoute
+  AppInstallmentsRoute: typeof AppInstallmentsRoute
+  AppOpenFinanceRoute: typeof AppOpenFinanceRoute
+  AppSettingsRoute: typeof AppSettingsRoute
+  AppTransactionsNewRoute: typeof AppTransactionsNewRoute
+  AppTransactionsIndexRoute: typeof AppTransactionsIndexRoute
+  AppTransactionsEditIdRoute: typeof AppTransactionsEditIdRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppAccountsRoute: AppAccountsRoute,
+  AppBudgetsRoute: AppBudgetsRoute,
+  AppCategoriesRoute: AppCategoriesRoute,
+  AppChatRoute: AppChatRoute,
+  AppCreditCardsRoute: AppCreditCardsRoute,
+  AppDashboardRoute: AppDashboardRoute,
+  AppForecastRoute: AppForecastRoute,
+  AppImportRoute: AppImportRoute,
+  AppInstallmentsRoute: AppInstallmentsRoute,
+  AppOpenFinanceRoute: AppOpenFinanceRoute,
+  AppSettingsRoute: AppSettingsRoute,
+  AppTransactionsNewRoute: AppTransactionsNewRoute,
+  AppTransactionsIndexRoute: AppTransactionsIndexRoute,
+  AppTransactionsEditIdRoute: AppTransactionsEditIdRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AccountsRoute: AccountsRoute,
-  BudgetsRoute: BudgetsRoute,
-  CategoriesRoute: CategoriesRoute,
-  ChatRoute: ChatRoute,
-  CreditCardsRoute: CreditCardsRoute,
-  DashboardRoute: DashboardRoute,
-  ForecastRoute: ForecastRoute,
-  ImportRoute: ImportRoute,
-  InstallmentsRoute: InstallmentsRoute,
-  OpenFinanceRoute: OpenFinanceRoute,
-  SettingsRoute: SettingsRoute,
-  TransactionsNewRoute: TransactionsNewRoute,
-  TransactionsIndexRoute: TransactionsIndexRoute,
-  TransactionsEditIdRoute: TransactionsEditIdRoute,
+  AppRoute: AppRouteWithChildren,
+  ForgotPasswordRoute: ForgotPasswordRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

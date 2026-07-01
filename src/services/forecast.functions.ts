@@ -32,6 +32,9 @@ export interface ForecastResultDTO {
   final_projected_balance: string;
   days_of_runway: number | null;
   points: ForecastPointDTO[];
+  has_sufficient_history: boolean;
+  history_days_with_expense: number;
+  horizon_days: number;
 }
 
 const Input = z
@@ -77,7 +80,7 @@ export const getForecast = createServerFn({ method: "GET" })
     // 2) Histórico de despesas (últimos 90 dias) → média móvel diária
     const { data: hist, error: histErr } = await sb
       .from("transactions")
-      .select("amount")
+      .select("amount, occurred_on")
       .eq("user_id", userId)
       .eq("kind", "expense")
       .gte("occurred_on", iso(historyStart))
@@ -85,11 +88,15 @@ export const getForecast = createServerFn({ method: "GET" })
     if (histErr) throw new Error(`transactions history: ${histErr.message}`);
 
     let totalExpenseCents = 0n;
-    for (const r of (hist ?? []) as Array<{ amount: string }>) {
+    const daysWithExpense = new Set<string>();
+    for (const r of (hist ?? []) as Array<{ amount: string; occurred_on: string }>) {
       totalExpenseCents += toCents(r.amount);
+      daysWithExpense.add(r.occurred_on);
     }
     const dailyBurnCents = totalExpenseCents / BigInt(HISTORY_DAYS);
     const avgDailyExpense = fromCents(dailyBurnCents);
+    const historyDaysWithExpense = daysWithExpense.size;
+    const hasSufficientHistory = historyDaysWithExpense >= 30;
 
     // 3) Parcelas em aberto (sem transaction_id) no horizonte
     const { data: items, error: itemsErr } = await sb
@@ -142,5 +149,8 @@ export const getForecast = createServerFn({ method: "GET" })
       final_projected_balance: fromCents(runningCents),
       days_of_runway: daysOfRunway,
       points,
+      has_sufficient_history: hasSufficientHistory,
+      history_days_with_expense: historyDaysWithExpense,
+      horizon_days: horizon,
     };
   });

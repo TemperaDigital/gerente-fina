@@ -47,7 +47,7 @@ import {
 const categoriesQuery = () =>
   queryOptions({ queryKey: ["categories", "all"], queryFn: () => listCategories() });
 
-export const Route = createFileRoute("/categories")({
+export const Route = createFileRoute("/_app/categories")({
   head: () => ({
     meta: [
       { title: "Categorias — Gerente Fina" },

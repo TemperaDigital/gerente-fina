@@ -1,43 +1,102 @@
-## Objetivo
-Consolidar o ecossistema Chat + Importador com uma única fonte da verdade para a "conta ativa" e deixar o preview de duplicatas 100% responsivo antes de avançarmos para Backup/Restore.
 
-## 1. Unificar seleção de conta (Chat & Import)
+# Virada de Produção — Gerente FINA
 
-Criar helper server-side compartilhado `resolveActiveAccountId()` em `src/lib/finance/active-account.server.ts`:
-- Recebe `userId` já resolvido.
-- Busca a primeira conta ativa (não arquivada), priorizando `bank`/`cash` sobre `credit_card`, ordenada por `created_at`.
-- Lança erro em português claro se nenhuma conta ativa existir ("Nenhuma conta ativa cadastrada. Cadastre uma conta em /accounts antes de lançar transações.").
-- Cache leve por request (evita 2 queries no mesmo handler).
+Ciclo único com typecheck limpo e `vite build` verde. Remove o usuário semente (`primopobre@gmail.com`) e liga o sistema à sessão real do Supabase Auth.
 
-Refatorar `src/services/chat.functions.ts`:
-- Substituir a lógica inline de resolução de conta pela chamada ao novo helper.
-- Envolver o `insert` em `transactions` com timeout explícito (Promise.race 10s) e retornar mensagem amigável se estourar.
-- Garantir que erros de FK/constraint virem `reply` em pt-BR (não 500 cru).
+---
 
-Refatorar `src/routes/import.tsx` + `src/lib/supabase/import.functions.ts`:
-- Adicionar server function `getDefaultImportAccount()` que reusa o mesmo helper.
-- No mount da página, pré-selecionar automaticamente a conta padrão via `useSuspenseQuery` (mantendo o Select editável para o usuário trocar).
-- Validar no `commitImport` que `account_id` recebido ainda existe e pertence ao user antes do bulk insert (evita erro 23503 silencioso).
+## 1. Autenticação Real e Proteção de Rotas
 
-## 2. Preview do Import — responsividade das linhas duplicadas
+### 1.1 Substituir `resolveActiveUserId`
+- Reescrever `src/lib/supabase/resolve-user.ts` para:
+  - Ler o cookie `sb-<project>-auth-token` via `getCookie` do `@tanstack/react-start/server`.
+  - Validar o token com `supabaseAdmin.auth.getUser(token)` (não confia no client).
+  - Retornar `user.id`. Se ausente ou inválido, `throw new Error("UNAUTHENTICATED")`.
+  - Remover totalmente o fallback do seed `primopobre@gmail.com` e o `createSeedUser`.
+- Todas as server functions que já usam `resolveActiveUserId()` continuam funcionando — apenas passam a exigir sessão.
 
-Refatorar a `<Table>` de preview em `src/routes/import.tsx`:
-- Em mobile (`< sm`): trocar `<Table>` por lista de cards empilhados. Cada card mostra status (pill), data + valor no topo, descrição em 2 linhas com `line-clamp-2`, tipo abaixo.
-- Cards duplicados: borda `border-red-500/40`, fundo `bg-red-500/10`, badge "Duplicado" bem visível, sem `line-through` (ilegível em mobile — trocar por opacity-60 + tag vermelha).
-- Em `sm+`: manter tabela atual, mas com `min-w-0` + `truncate` nas células de descrição e `whitespace-nowrap` na data/valor.
-- Header sticky (`sticky top-0`) para longas listas.
-- Contador do topo: quebrar em 2 linhas em mobile (grid `grid-cols-2 sm:flex`).
+### 1.2 Cliente Supabase no browser
+- Ajustar `src/lib/supabase/client.ts` para persistir sessão em `localStorage` **e** espelhar em cookie (`sb-<ref>-auth-token`) para que o SSR leia — usar `storage: cookieStorage` via helper local ou registrar `onAuthStateChange` que sincroniza `document.cookie`.
 
-## 3. Verificação final
-- Rodar `tsgo --noEmit` — precisa passar limpo.
-- Rodar `bun run build` — precisa terminar com Nitro gerado.
-- Se ambos verdes: sinalizar OK para iniciar módulo de Backup/Restore.
+### 1.3 Rotas de auth (Shadcn/UI, pt-BR)
+- Criar:
+  - `src/routes/login.tsx` — email + senha, botão "Entrar", link p/ cadastro e "Esqueci a senha".
+  - `src/routes/signup.tsx` — email + senha + confirmação. `emailRedirectTo: window.location.origin`.
+  - `src/routes/forgot-password.tsx` — `resetPasswordForEmail` com `redirectTo: origin + /reset-password`.
+  - `src/routes/reset-password.tsx` — detecta `type=recovery`, chama `updateUser({ password })`.
+- Todas rotas públicas (fora de proteção), com `head()` próprio em pt-BR.
 
-## Arquivos afetados
-- **Novo:** `src/lib/finance/active-account.server.ts`
-- **Editar:** `src/services/chat.functions.ts`, `src/lib/supabase/import.functions.ts`, `src/routes/import.tsx`
+### 1.4 Guarda global
+- Criar layout pathless `src/routes/_app.tsx` com `beforeLoad` que chama `supabase.auth.getSession()`; se ausente → `redirect({ to: "/login" })`. `ssr: false`.
+- Mover as rotas internas (`dashboard`, `transactions*`, `accounts`, `credit-cards`, `categories`, `installments`, `budgets`, `forecast`, `settings`, `chat`, `import`, `open-finance`) para nomes prefixados `_app.<rota>.tsx` (renomear arquivos preservando conteúdo).
+- Rota `/` (index) permanece pública e redireciona para `/dashboard` quando logado, `/login` quando não.
 
-## Fora de escopo
-- Sistema de Backup/Restore (próximo ciclo, após confirmação verde).
-- Mudanças no schema do banco.
-- Novas migrations.
+### 1.5 Onboarding blank-state
+- Novo componente `src/components/onboarding/first-account-modal.tsx` (Shadcn `Dialog`).
+- No `_app.tsx` (após auth), disparar `useQuery` que checa `accounts.count` + `categories.count`. Se ambos 0, abrir modal convidando a cadastrar a primeira conta (link para `/accounts`).
+
+---
+
+## 2. Refinamento do `/forecast`
+
+### 2.1 Controles de Horizonte
+- Adicionar `ToggleGroup` (Shadcn) com opções 30/60/90 dias no cabeçalho. Estado local `horizon`, invalidar `queryKey: ["forecast", horizon]`.
+- `getForecast({ data: { days } })` já aceita param — apenas passar dinamicamente.
+
+### 2.2 Estados da tela
+- Loading: skeleton de KPIs + gráfico (usar `Skeleton` do Shadcn), enquanto `isFetching`.
+- Empty state: se `result.points.length === 0` **ou** `Number(result.avg_daily_expense) === 0` com <30 dias de histórico → card "Histórico insuficiente" (mín. 30 dias de despesas para calcular média móvel).
+- Sinalizar no backend: adicionar campo `has_sufficient_history: boolean` em `ForecastResultDTO` (true se >=30 dias com transações debit).
+
+---
+
+## 3. Blindagem do Restore + Auditoria Durável
+
+### 3.1 Migration nova
+- `docs/migrations/0007_audit_log.sql`:
+  ```sql
+  CREATE TABLE public.audit_log (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid references auth.users(id) on delete cascade not null,
+    action text not null,           -- 'backup.export' | 'backup.restore' | 'backup.restore.failed'
+    payload jsonb not null default '{}',
+    created_at timestamptz not null default now()
+  );
+  GRANT SELECT, INSERT ON public.audit_log TO authenticated;
+  GRANT ALL ON public.audit_log TO service_role;
+  ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
+  CREATE POLICY "own audit" ON public.audit_log FOR SELECT TO authenticated USING (user_id = auth.uid());
+  CREATE POLICY "insert own audit" ON public.audit_log FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+  ```
+
+### 3.2 Validação Zod financeira ultra estrita
+- Em `backup.functions.ts`:
+  - Criar `MoneySchema` = `z.string().regex(/^-?\d{1,12}(\.\d{1,2})?$/)` (compatível `numeric(14,2)`).
+  - `TransactionSchema.amount` = `MoneySchema` (aceita string OR number, transformando number com `.toFixed(2)`).
+  - `AccountSchema.credit_limit` = mesma regra, nullable.
+  - Validar totais: rejeitar payloads com `transactions.length > 50000`.
+
+### 3.3 Persistência de auditoria
+- Substituir `console.info("[AUDIT] ...")` por `supabaseAdmin.from("audit_log").insert({ user_id, action, payload })`.
+- Envolver `restoreBackup` em try/catch: em falha, gravar `backup.restore.failed` com `error.message` no payload e re-lançar.
+
+### 3.4 UI de progresso no Restore
+- Em `src/routes/settings.tsx`:
+  - Estado local `restoreState: 'idle' | 'reading' | 'validating' | 'uploading' | 'done' | 'error'`.
+  - Renderizar `<Progress>` (Shadcn) + label textual durante etapas.
+  - Ao concluir, exibir toast Sonner com contagens (`accounts_upserted`, etc.).
+
+---
+
+## Técnico
+
+- **Renomeações**: usar `mv` para prefixar rotas internas com `_app.`. Regenerar `routeTree.gen.ts` automaticamente pelo plugin Vite.
+- **Cookie SSR**: chave = `sb-${SUPABASE_PROJECT_ID}-auth-token`. Ler `SUPABASE_PROJECT_ID` de env (já disponível).
+- **Sem seed**: remover `SEED_EMAIL`, `SEED_PASSWORD`, `createSeedUser`, `cachedUserId`.
+- **Type-safety**: manter `resolveActiveUserId(): Promise<string>` — quem chama já espera string, e o throw propaga.
+- **Compat numeric(14,2)**: `MoneySchema` garante formato exato antes do upsert.
+- **Build**: `bun run build` deve terminar em exit 0. `tsgo --noEmit` limpo.
+
+---
+
+Confirma para eu executar? É um ciclo grande (≈15 arquivos criados/editados + 1 migration SQL para você aplicar no Supabase).
