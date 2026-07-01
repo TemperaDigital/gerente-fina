@@ -153,24 +153,20 @@ export const sendChatMessage = createServerFn({ method: "POST" })
 
     try {
       const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+      const { resolveActiveAccount } = await import("@/lib/finance/active-account.server");
       const sb = getSupabaseAdmin();
       const userId = await resolveActiveUserId();
 
-      // Conta ativa (preferir bank/cash sobre credit_card para despesas manuais)
-      const { data: accounts, error: accErr } = await sb
-        .from("accounts")
-        .select("id, type")
-        .is("archived_at", null)
-        .order("type", { ascending: true });
-      if (accErr) throw new Error(`contas: ${accErr.message}`);
-      const account =
-        accounts?.find((a) => a.type !== "credit_card") ?? accounts?.[0];
-      if (!account) {
+      let account: { id: string; type: string };
+      try {
+        account = await resolveActiveAccount(sb, userId);
+      } catch (e) {
         return {
-          reply: "Você precisa cadastrar ao menos uma conta em /accounts antes de eu registrar lançamentos.",
+          reply: e instanceof Error ? e.message : "Nenhuma conta ativa cadastrada.",
           transactionCreated: false,
         };
       }
+
 
       // Categoria — regra dos temperos vem primeiro
       const isTempero = kind === "expense" && matchesTemperoRule(description);
