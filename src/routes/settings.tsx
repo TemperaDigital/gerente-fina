@@ -152,12 +152,27 @@ function SettingsComponent() {
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={handleRestore} className="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold rounded-xl border border-zinc-800 transition-colors">
-                Restaurar Backup
+              <button
+                onClick={handleRestore}
+                disabled={isBusy !== null}
+                className="py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-xs font-semibold rounded-xl border border-zinc-800 transition-colors"
+              >
+                {isBusy === 'restore' ? 'Restaurando…' : 'Restaurar Backup'}
               </button>
-              <button onClick={handleBackup} className="py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-md transition-colors">
-                Fazer Backup
+              <button
+                onClick={handleBackup}
+                disabled={isBusy !== null}
+                className="py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow-md transition-colors"
+              >
+                {isBusy === 'export' ? '…' : 'Fazer Backup'}
               </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={handleRestoreFile}
+              />
             </div>
           </div>
         </div>
