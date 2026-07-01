@@ -25,6 +25,7 @@ import {
   GooglePeriodPicker,
 } from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   FiltersBar,
   ReviewQueue,
@@ -223,15 +224,20 @@ function TransactionsPage() {
               value={search.month}
               onChange={(m) => setSearch({ month: m })}
             />
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-9 rounded-full border border-white/10 bg-white/[0.04] text-foreground/70 hover:bg-white/10"
-              onClick={() => router.invalidate()}
-              aria-label="Recarregar"
-            >
-              <RefreshCcw className="size-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-9 rounded-full border border-white/10 bg-white/[0.04] text-foreground/70 hover:bg-white/10"
+                  onClick={() => router.invalidate()}
+                  aria-label="Recarregar"
+                >
+                  <RefreshCcw className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Recarregar lançamentos</TooltipContent>
+            </Tooltip>
             <Button
               asChild
               className="h-9 gap-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
@@ -276,6 +282,7 @@ function TransactionsPage() {
             onPageChange={(p) =>
               navigate({ search: (prev: TxSearch) => ({ ...prev, page: p }) })
             }
+            onDelete={(id) => discardMut.mutate(id)}
           />
         </div>
       </div>

@@ -37,6 +37,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { GlassCard, formatBRL } from "@/components/dashboard/primitives";
 import type {
@@ -200,12 +201,14 @@ export function TransactionsTable({
   pageSize,
   total,
   onPageChange,
+  onDelete,
 }: {
   items: TransactionListItemDTO[];
   page: number;
   pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
+  onDelete: (id: string, description: string) => void;
 }) {
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
   const grouped = useMemo(() => {
@@ -232,7 +235,7 @@ export function TransactionsTable({
               </div>
               <ul className="divide-y divide-white/5">
                 {dayItems.map((it) => (
-                  <TransactionRow key={it.id} it={it} />
+                  <TransactionRow key={it.id} it={it} onDelete={onDelete} />
                 ))}
               </ul>
             </li>
@@ -270,7 +273,13 @@ export function TransactionsTable({
   );
 }
 
-function TransactionRow({ it }: { it: TransactionListItemDTO }) {
+function TransactionRow({
+  it,
+  onDelete,
+}: {
+  it: TransactionListItemDTO;
+  onDelete: (id: string, description: string) => void;
+}) {
   const meta = kindMeta(it.kind);
   const Icon = meta.icon;
   const amountSign =
@@ -284,12 +293,14 @@ function TransactionRow({ it }: { it: TransactionListItemDTO }) {
       ? "text-sky-300"
       : "text-violet-300";
 
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
   return (
-    <li>
+    <li className="group relative">
       <Link
         to="/transactions/edit/$id"
         params={{ id: it.id }}
-        className="grid grid-cols-[auto_1fr_auto] items-center gap-4 px-5 py-3 transition-colors hover:bg-white/[0.04]"
+        className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 px-5 py-3 transition-colors hover:bg-white/[0.04]"
       >
         <div
           className={cn(
@@ -349,7 +360,53 @@ function TransactionRow({ it }: { it: TransactionListItemDTO }) {
           {amountSign}
           {formatBRL(it.amount)}
         </div>
+
+        {/* placeholder pra manter o grid alinhado; o botão real fica fora do Link */}
+        <span className="size-8" aria-hidden />
       </Link>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setConfirmOpen(true);
+            }}
+            className="absolute right-3 top-1/2 size-8 -translate-y-1/2 text-foreground/30 opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+            aria-label="Excluir lançamento"
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Excluir este lançamento permanentemente</TooltipContent>
+      </Tooltip>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir lançamento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{it.description || meta.label}" ({formatBRL(it.amount)}) será removido
+              permanentemente. Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                onDelete(it.id, it.description || meta.label);
+                setConfirmOpen(false);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </li>
   );
 }
