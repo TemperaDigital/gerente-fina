@@ -3,9 +3,11 @@
  * Aba ativa controlada via search param ?tab=
  */
 import { createFileRoute } from '@tanstack/react-router';
-import { useState } from 'react';
-import { Shield, Download, Upload, ShieldAlert, Trash2, CheckCircle2, User, Key, Bell } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Shield, Download, Upload, ShieldAlert, Trash2, CheckCircle2, User } from 'lucide-react';
+import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
+import { exportBackup, restoreBackup } from '@/services/backup.functions';
 
 export const Route = createFileRoute('/settings')({
   component: () => (
@@ -20,32 +22,75 @@ function SettingsComponent() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState<'export' | 'restore' | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const triggerNotification = (message: string) => {
     setSuccessMessage(message);
     setTimeout(() => setSuccessMessage(null), 3000);
   };
 
-  const handleExportData = () => {
-    // Simulação de exportação de dados estruturados em JSON conforme o PRD
-    triggerNotification('✨ Todos os seus dados contábeis foram exportados com sucesso em formato JSON/CSV!');
-  };
-
-  const handleBackup = () => {
-    // Simulação de geração de backup local criptografado
-    triggerNotification('🔒 Backup de segurança gerado! O download do arquivo .fina-backup começará em instantes.');
+  const handleBackup = async () => {
+    setIsBusy('export');
+    try {
+      const payload = await exportBackup();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `gerentefina-backup-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Backup gerado com sucesso!', {
+        description: `${payload.accounts.length} contas · ${payload.categories.length} categorias · ${payload.transactions.length} lançamentos.`,
+      });
+      triggerNotification('🔒 Backup baixado. Guarde o arquivo em local seguro.');
+    } catch (err) {
+      toast.error('Falha ao gerar backup', {
+        description: err instanceof Error ? err.message : 'Erro desconhecido.',
+      });
+    } finally {
+      setIsBusy(null);
+    }
   };
 
   const handleRestore = () => {
-    // Simulação de leitura de arquivo de backup para restauração de estado
-    triggerNotification('🔄 Arquivo de backup validado. Seus saldos e faturas foram restaurados com sucesso.');
+    fileInputRef.current?.click();
+  };
+
+  const handleRestoreFile = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file) return;
+    setIsBusy('restore');
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const report = await restoreBackup({ data: { payload } });
+      toast.success('Restore concluído', {
+        description: `Contas: ${report.accounts_upserted} · Categorias: ${report.categories_upserted} · Transações: ${report.transactions_upserted}.`,
+      });
+      triggerNotification('🔄 Base restaurada com sucesso a partir do arquivo enviado.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Arquivo inválido.';
+      toast.error('Falha ao restaurar backup', { description: msg });
+    } finally {
+      setIsBusy(null);
+    }
   };
 
   const handleDeleteAccount = () => {
     if (confirmText.toLowerCase() === 'excluir definitivamente') {
       setShowDeleteModal(false);
       setConfirmText('');
-      alert('Conta deletada logicamente do Supabase. Redirecionando para a tela de Boas-Vindas...');
+      toast.warning('Exclusão solicitada', {
+        description: 'Fluxo de deleção definitiva ainda será plugado ao auth real.',
+      });
     }
   };
 
@@ -87,11 +132,12 @@ function SettingsComponent() {
                 Baixe instantaneamente um relatório compilado de todas as suas contas, cartões e lançamentos históricos em formatos portáveis JSON e CSV para auditorias externas.
               </p>
             </div>
-            <button 
-              onClick={handleExportData}
-              className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-colors"
+            <button
+              onClick={handleBackup}
+              disabled={isBusy !== null}
+              className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 border border-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-colors"
             >
-              Exportar Agora (JSON/CSV)
+              {isBusy === 'export' ? 'Exportando…' : 'Exportar Agora (JSON)'}
             </button>
           </div>
 
@@ -106,12 +152,27 @@ function SettingsComponent() {
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={handleRestore} className="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold rounded-xl border border-zinc-800 transition-colors">
-                Restaurar Backup
+              <button
+                onClick={handleRestore}
+                disabled={isBusy !== null}
+                className="py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-xs font-semibold rounded-xl border border-zinc-800 transition-colors"
+              >
+                {isBusy === 'restore' ? 'Restaurando…' : 'Restaurar Backup'}
               </button>
-              <button onClick={handleBackup} className="py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-md transition-colors">
-                Fazer Backup
+              <button
+                onClick={handleBackup}
+                disabled={isBusy !== null}
+                className="py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow-md transition-colors"
+              >
+                {isBusy === 'export' ? '…' : 'Fazer Backup'}
               </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={handleRestoreFile}
+              />
             </div>
           </div>
         </div>
