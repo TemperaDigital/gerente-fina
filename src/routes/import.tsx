@@ -48,7 +48,7 @@ import {
   checkImportDuplicates,
   commitImport,
   type CheckedImportRow,
-} from "@/services/import.functions";
+} from "@/lib/supabase/import.functions";
 
 const accountsQuery = () =>
   queryOptions({ queryKey: ["lookups", "accounts"], queryFn: () => getAccountsLookup() });
