@@ -5,6 +5,7 @@
  * Transferência / Pgto. de Fatura) sem modais de múltiplos passos.
  * Box de projeção de fatura aparece ao escolher cartão. Parcelamento e
  * Recorrência são acordeões inline.
+ * INCLUI: Criação rápida de categorias inline (UX Enhancement).
  */
 import { useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
@@ -18,6 +19,7 @@ import {
   Layers,
   Repeat,
   Sparkles,
+  PlusCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -27,13 +29,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { GlassCard, formatBRL } from "@/components/dashboard/primitives";
 import { getAccountsLookup, getCategoriesLookup, type AccountLookupDTO } from "@/services/lookups.functions";
 import { createTransactionEntry } from "@/services/transactions.functions";
 import { projectInvoiceForPurchase } from "@/services/invoice-projection.functions";
+// IMPORTANTE: Importação corrigida para 'createCategory'
+import { createCategory } from "@/services/categories.functions"; 
 import { toCents, fromCents } from "@/lib/finance/money";
-// IMPORTANTE: Trazendo o AppShell para manter o painel lateral fixo
 import { AppShell } from "@/components/app-shell";
 
 // ---------------------------------------------------------------------------
@@ -97,6 +101,10 @@ function NewTransactionPage() {
   const [intervalCount, setIntervalCount] = useState(1);
   const [endOn, setEndOn] = useState<string>("");
 
+  // Estado para UX de criação inline de categoria
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+
   const filteredCategories = useMemo(
     () => categories.filter((c) => (kind === "income" ? c.kind === "income" : c.kind === "expense")),
     [categories, kind],
@@ -126,13 +134,11 @@ function NewTransactionPage() {
     enabled: kind === "invoice_payment",
   });
 
-  // GATILHO AUTOMÁTICO CORRIGIDO COM OPTIONAL CHAINING (?.) PARA PASSAR NO BUILD
   const handleDescriptionChange = (val: string) => {
     setDescription(val);
     const termo = val.toLowerCase();
 
     if (termo.includes("mariareniele") || termo.includes("woshington")) {
-      // Encontra com segurança usando c.name?.toLowerCase()
       const targetCategory = categories.find(
         (c) => c.name?.toLowerCase().includes("mercearia") || c.name?.toLowerCase().includes("alimentação"),
       );
@@ -142,6 +148,23 @@ function NewTransactionPage() {
       setNotes("Compra de temperos e Graos");
     }
   };
+
+  // Mutação para criação de Categoria Inline
+  const createCategoryMut = useMutation({
+    mutationFn: (name: string) =>
+      // CORREÇÃO: Utilizando createCategory em vez de createCategoryEntry
+      createCategory({
+        data: { name, kind: kind === "income" ? "income" : "expense", color: "#6366f1" },
+      }),
+    onSuccess: async () => {
+      toast.success("Categoria criada com sucesso!");
+      await queryClient.invalidateQueries({ queryKey: ["lookups", "categories"] });
+      // Limpar modal
+      setNewCategoryName("");
+      setIsCategoryModalOpen(false);
+    },
+    onError: (e: Error) => toast.error(`Erro ao criar categoria: ${e.message}`),
+  });
 
   type CreatePayload = {
     kind: TxKind;
@@ -160,6 +183,7 @@ function NewTransactionPage() {
       end_on?: string;
     };
   };
+
   const createMut = useMutation({
     mutationFn: (payload: CreatePayload) => createTransactionEntry({ data: payload }),
     onSuccess: async (res) => {
@@ -207,6 +231,12 @@ function NewTransactionPage() {
     });
   }
 
+  function handleCreateCategoryInline(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCategoryName.trim()) return toast.error("O nome da categoria é obrigatório.");
+    createCategoryMut.mutate(newCategoryName.trim());
+  }
+
   return (
     <AppShell>
       <div className="relative min-h-screen overflow-hidden bg-zinc-950 text-foreground">
@@ -226,7 +256,7 @@ function NewTransactionPage() {
               variant="ghost"
               className="h-9 gap-2 rounded-full border border-white/10 bg-white/[0.04] text-foreground/70 hover:bg-white/10"
             >
-              <Link to="/_app/transactions">
+              <Link to="/transactions" search={{ month: occurredOn.slice(0, 7), page: 1 }}>
                 <ArrowLeft className="size-4" /> Voltar
               </Link>
             </Button>
@@ -234,7 +264,6 @@ function NewTransactionPage() {
             <div className="w-[88px]" />
           </header>
 
-          {/* Pílulas de seleção */}
           <KindPills
             value={kind}
             onChange={(k) => {
@@ -293,7 +322,20 @@ function NewTransactionPage() {
               )}
 
               {(kind === "income" || kind === "expense") && (
-                <Field label="Categoria">
+                <Field
+                  label="Categoria"
+                  action={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsCategoryModalOpen(true)}
+                      className="h-5 px-2 text-[10px] uppercase tracking-wider text-primary hover:bg-primary/20 hover:text-primary"
+                    >
+                      <PlusCircle className="mr-1 size-3" /> Nova
+                    </Button>
+                  }
+                >
                   <Select value={categoryId} onValueChange={setCategoryId}>
                     <SelectTrigger className="border-white/10 bg-white/[0.04]">
                       <SelectValue placeholder="Selecione..." />
@@ -346,7 +388,6 @@ function NewTransactionPage() {
               </Field>
             </GlassCard>
 
-            {/* Box de Projeção de Fatura */}
             {projectionEnabled && projection && (
               <GlassCard className="flex items-start gap-3 border-violet-400/30 p-4">
                 <Sparkles className="mt-0.5 size-5 shrink-0 text-violet-300" />
@@ -370,7 +411,6 @@ function NewTransactionPage() {
               </GlassCard>
             )}
 
-            {/* Modificadores inline */}
             {kind === "expense" && (
               <ModifierCard
                 icon={<Layers className="size-4 text-amber-300" />}
@@ -456,6 +496,47 @@ function NewTransactionPage() {
             </div>
           </form>
         </div>
+
+        {/* --- MODAL PARA CRIAÇÃO DE CATEGORIA INLINE --- */}
+        <Dialog open={isCategoryModalOpen} onOpenChange={setIsCategoryModalOpen}>
+          <DialogContent className="border-white/10 bg-zinc-950 text-foreground sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Nova Categoria de {kind === "income" ? "Receita" : "Despesa"}</DialogTitle>
+            </DialogHeader>
+            <form id="category-form" onSubmit={handleCreateCategoryInline} className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Nome da categoria</Label>
+                <Input
+                  id="name"
+                  placeholder="Ex: Combustível, Mercado..."
+                  className="border-white/10 bg-white/[0.04]"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            </form>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setIsCategoryModalOpen(false)}
+                className="border border-white/10 hover:bg-white/5"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                type="submit" 
+                form="category-form" 
+                disabled={createCategoryMut.isPending}
+                className="bg-primary hover:bg-primary/90"
+              >
+                {createCategoryMut.isPending ? "Criando..." : "Criar categoria"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </AppShell>
   );
@@ -510,10 +591,14 @@ function KindPills({ value, onChange }: { value: TxKind; onChange: (k: TxKind) =
   );
 }
 
-function Field({ label, children, inline }: { label: string; children: React.ReactNode; inline?: boolean }) {
+// ATUALIZADO: Agora aceita um 'action' (botão lateral)
+function Field({ label, children, inline, action }: { label: string; children: React.ReactNode; inline?: boolean; action?: React.ReactNode }) {
   return (
     <div className={inline ? "" : "space-y-1.5"}>
-      <Label className="text-[10px] uppercase tracking-wider text-foreground/60">{label}</Label>
+      <div className="flex items-center justify-between">
+        <Label className="text-[10px] uppercase tracking-wider text-foreground/60">{label}</Label>
+        {action && <div>{action}</div>}
+      </div>
       <div className={inline ? "mt-1" : ""}>{children}</div>
     </div>
   );
