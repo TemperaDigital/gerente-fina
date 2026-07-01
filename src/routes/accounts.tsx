@@ -45,6 +45,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { GlassCard, formatBRL } from "@/components/dashboard/primitives";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/app-shell";
 import {
   AccountForm,
@@ -218,24 +219,34 @@ function AccountsPage() {
                             </span>
                           </div>
                           <div className="flex gap-1">
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
-                              onClick={() => setEditing(a)}
-                              aria-label="Editar"
-                            >
-                              <Pencil className="size-3.5" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
-                              onClick={() => setArchiving(a)}
-                              aria-label="Arquivar"
-                            >
-                              <Archive className="size-3.5" />
-                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
+                                  onClick={() => setEditing(a)}
+                                  aria-label="Editar"
+                                >
+                                  <Pencil className="size-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Editar conta</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
+                                  onClick={() => setArchiving(a)}
+                                  aria-label="Arquivar"
+                                >
+                                  <Archive className="size-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Arquivar conta (some das listas, histórico é preservado)</TooltipContent>
+                            </Tooltip>
                           </div>
                         </div>
                         <div className="mt-3 truncate text-sm font-semibold">

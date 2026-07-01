@@ -35,6 +35,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   listCategories,
   createCategory,
@@ -225,12 +226,22 @@ function CategoriesComponent() {
                       <span className="font-semibold text-zinc-200 text-sm">{parent.name}</span>
                     </div>
                     <div className="flex items-center space-x-1">
-                      <button onClick={() => handleOpenEdit(parent)} className="text-zinc-500 hover:text-white p-1.5 rounded">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => setArchiving(parent)} className="text-zinc-600 hover:text-rose-400 p-1.5 rounded">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button onClick={() => handleOpenEdit(parent)} className="text-zinc-500 hover:text-white p-1.5 rounded">
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Editar categoria</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button onClick={() => setArchiving(parent)} className="text-zinc-600 hover:text-rose-400 p-1.5 rounded">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Arquivar categoria</TooltipContent>
+                      </Tooltip>
                     </div>
                   </div>
 
@@ -243,12 +254,22 @@ function CategoriesComponent() {
                             <span className="text-sm text-zinc-300 font-medium">{child.name}</span>
                           </div>
                           <div className="flex items-center space-x-1">
-                            <button onClick={() => handleOpenEdit(child)} className="text-zinc-500 hover:text-white p-1">
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => setArchiving(child)} className="text-zinc-600 hover:text-rose-400 p-1">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button onClick={() => handleOpenEdit(child)} className="text-zinc-500 hover:text-white p-1">
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>Editar categoria</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button onClick={() => setArchiving(child)} className="text-zinc-600 hover:text-rose-400 p-1">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>Arquivar categoria</TooltipContent>
+                            </Tooltip>
                           </div>
                         </div>
                       ))}
