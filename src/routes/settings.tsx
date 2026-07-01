@@ -3,9 +3,11 @@
  * Aba ativa controlada via search param ?tab=
  */
 import { createFileRoute } from '@tanstack/react-router';
-import { useState } from 'react';
-import { Shield, Download, Upload, ShieldAlert, Trash2, CheckCircle2, User, Key, Bell } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Shield, Download, Upload, ShieldAlert, Trash2, CheckCircle2, User } from 'lucide-react';
+import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
+import { exportBackup, restoreBackup } from '@/services/backup.functions';
 
 export const Route = createFileRoute('/settings')({
   component: () => (
