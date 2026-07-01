@@ -242,7 +242,7 @@ function TransactionsPage() {
               asChild
               className="h-9 gap-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
             >
-              <Link to="/transactions/new">
+              <Link to="/_app/transactions/new">
                 <Plus className="size-4" />
                 Novo lançamento
               </Link>

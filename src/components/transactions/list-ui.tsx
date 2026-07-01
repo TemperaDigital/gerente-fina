@@ -298,7 +298,7 @@ function TransactionRow({
   return (
     <li className="group relative">
       <Link
-        to="/transactions/edit/$id"
+        to="/_app/transactions/edit/$id"
         params={{ id: it.id }}
         className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 px-5 py-3 transition-colors hover:bg-white/[0.04]"
       >
