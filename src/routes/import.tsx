@@ -67,7 +67,9 @@ export const Route = createFileRoute("/import")({
     Promise.all([
       context.queryClient.ensureQueryData(accountsQuery()),
       context.queryClient.ensureQueryData(categoriesQuery()),
+      context.queryClient.ensureQueryData(defaultAccountQuery()),
     ]),
+
   errorComponent: ({ error }) => (
     <AppShell>
       <div className="mx-auto max-w-3xl px-4 py-10">
