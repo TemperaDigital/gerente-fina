@@ -43,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="pointer-events-none fixed inset-0 -z-10"
         style={{
           background:
-            "radial-gradient(800px 500px at 15% -10%, rgba(99,102,241,0.18), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,0.14), transparent 60%), radial-gradient(900px[...]
+            "radial-gradient(800px 500px at 15% -10%, rgba(99,102,241,0.18), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,0.14), transparent 60%), radial-gradient(900px 600px at 50% 110%, rgba(59,130,246,0.10), transparent 60%)",
         }}
       />
 
