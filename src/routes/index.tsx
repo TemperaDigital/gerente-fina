@@ -13,7 +13,7 @@ export const Route = createFileRoute("/")({
   beforeLoad: async () => {
     const { data } = await supabase.auth.getSession();
     if (data.session) {
-      throw redirect({ to: "/_app/dashboard" });
+      throw redirect({ to: "/dashboard" });
     }
   },
   component: WelcomeComponent,
@@ -36,12 +36,12 @@ function WelcomeComponent() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         toast.success("Bem-vindo de volta!");
-        navigate({ to: "/_app/dashboard" });
+        navigate({ to: "/dashboard" });
       } else {
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: window.location.origin + "/_app/dashboard" },
+          options: { emailRedirectTo: window.location.origin + "/dashboard" },
         });
         if (error) throw error;
         toast.success("Conta criada!", {
@@ -63,7 +63,7 @@ function WelcomeComponent() {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: window.location.origin + "/_app/dashboard" },
+        options: { redirectTo: window.location.origin + "/dashboard" },
       });
       if (error) throw error;
     } catch (err) {
