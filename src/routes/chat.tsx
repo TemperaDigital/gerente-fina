@@ -37,7 +37,7 @@ function ChatPage() {
       id: "welcome",
       role: "assistant",
       content:
-        "Olá! Sou o Gerente Fina, seu assistente de inteligência contábil. Você pode me dizer um gasto ou receita em linguagem natural — como "gastei 50 no posto ipiranga" — e eu registro direto no seu livro-caixa. Também respondo perguntas sobre suas finanças. Como posso ajudar?",
+        'Olá! Sou o Gerente Fina, seu assistente de inteligência contábil. Você pode me dizer um gasto ou receita em linguagem natural — como "gastei 50 no posto ipiranga" — e eu registro direto no seu livro-caixa. Também respondo perguntas sobre suas finanças. Como posso ajudar?',
       timestamp: new Date(),
     },
   ]);
