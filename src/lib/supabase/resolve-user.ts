@@ -1,58 +1,32 @@
 /**
- * Resolve o usuário ativo do sistema (modo monousuário).
+ * Resolve o ID do usuário autenticado da requisição atual.
  *
- * Enquanto o fluxo de auth não está plugado, garantimos que SEMPRE exista
- * pelo menos o usuário de testes "primopobre@gmail.com" no auth.users do
- * Supabase. Se ninguém estiver cadastrado, criamos o seed e usamos seu id.
+ * SERVER ONLY — deve ser chamado dentro de `.handler()` de uma server
+ * function (contexto de request do TanStack Start).
  *
- * SERVER ONLY — usa service_role via getSupabaseAdmin().
+ * Estratégia:
+ *   1. Lê o cookie `gerentefina-auth` (JWT access_token) sincronizado
+ *      pelo cliente via `onAuthStateChange` em `src/lib/supabase/client.ts`.
+ *   2. Valida o token com `supabaseAdmin.auth.getUser(token)` — re-verifica
+ *      com o Auth server, não confia no client.
+ *   3. Retorna `user.id`. Se ausente ou inválido, lança "UNAUTHENTICATED".
+ *
+ * NÃO usa mais o seed `primopobre@gmail.com`. Auth real é obrigatória.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { getCookie } from "@tanstack/react-start/server";
 
-const SEED_EMAIL = "primopobre@gmail.com";
-const SEED_PASSWORD = "PrimoPobre#2026!Seed";
-
-let cachedUserId: string | null = null;
+export const AUTH_COOKIE = "gerentefina-auth";
 
 export async function resolveActiveUserId(): Promise<string> {
-  if (cachedUserId) return cachedUserId;
+  const token = getCookie(AUTH_COOKIE);
+  if (!token) {
+    throw new Error("UNAUTHENTICATED");
+  }
   const { getSupabaseAdmin } = await import("./client.server");
   const sb = getSupabaseAdmin();
-
-  // 1) procura qualquer usuário existente
-  const { data, error } = await sb.auth.admin.listUsers({ page: 1, perPage: 50 });
-  if (error) throw new Error(`Falha ao listar usuários: ${error.message}`);
-
-  // 1a) prioriza o seed se existir
-  const seed = data.users?.find((u) => u.email?.toLowerCase() === SEED_EMAIL);
-  if (seed) {
-    cachedUserId = seed.id;
-    return seed.id;
-  }
-
-  // 1b) usa qualquer outro usuário já criado
-  const any = data.users?.[0];
-  if (any) {
-    cachedUserId = any.id;
-    return any.id;
-  }
-
-  // 2) cria o seed primopobre
-  cachedUserId = await createSeedUser(sb);
-  return cachedUserId;
-}
-
-async function createSeedUser(sb: SupabaseClient): Promise<string> {
-  const { data, error } = await sb.auth.admin.createUser({
-    email: SEED_EMAIL,
-    password: SEED_PASSWORD,
-    email_confirm: true,
-    user_metadata: { display_name: "Primo Pobre (Teste)", seed: true },
-  });
-  if (error || !data.user) {
-    throw new Error(
-      `Falha ao criar usuário seed (${SEED_EMAIL}): ${error?.message ?? "sem dados"}`,
-    );
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data?.user) {
+    throw new Error("UNAUTHENTICATED");
   }
   return data.user.id;
 }
