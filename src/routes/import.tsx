@@ -1,18 +1,40 @@
 /**
- * Rota /import — Motor Real de Importação de Extratos.
- * Integração com PapaParse, geração de hash e barramento de duplicados (UI em Vermelho).
+ * Rota /import — Importação e Conciliação de Extratos CSV.
+ *
+ * Fluxo em 3 etapas:
+ *   1. Selecionar conta destino (obrigatório — account_id é NOT NULL no schema)
+ *   2. Fazer upload do CSV e escolher categoria padrão para linhas sem match
+ *   3. Pré-visualizar com duplicatas marcadas → confirmar gravação
+ *
+ * Usa checkImportDuplicates + commitImport (src/services/import.functions.ts).
+ * Hash SHA-256 via WebCrypto — mesmo algoritmo da trigger do banco.
  */
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/lib/supabase/client";
+import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import Papa from "papaparse";
-import { Upload, FileText, CheckCircle, AlertTriangle, ArrowRight } from "lucide-react";
+import {
+  Upload,
+  FileText,
+  CheckCircle,
+  AlertTriangle,
+  ArrowRight,
+  RefreshCw,
+  Landmark,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -21,278 +43,271 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getAccountsLookup, getCategoriesLookup } from "@/services/lookups.functions";
+import {
+  checkImportDuplicates,
+  commitImport,
+  type CheckedImportRow,
+} from "@/services/import.functions";
 
-// ---------------------------------------------------------------------------
-// Interface das linhas processadas
-// ---------------------------------------------------------------------------
-interface ParsedTransaction {
-  date: string;
-  description: string;
-  amount: number;
-  kind: "income" | "expense";
-  dedup_hash: string;
-  isDuplicate: boolean;
-}
+const accountsQuery = () =>
+  queryOptions({ queryKey: ["lookups", "accounts"], queryFn: () => getAccountsLookup() });
+
+const categoriesQuery = () =>
+  queryOptions({ queryKey: ["lookups", "categories"], queryFn: () => getCategoriesLookup() });
 
 export const Route = createFileRoute("/import")({
-  head: () => ({
-    meta: [{ title: "Importar Extrato — Gerente Fina" }],
-  }),
-  component: ImportPage,
+  head: () => ({ meta: [{ title: "Importar Extrato — Gerente Fina" }] }),
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(accountsQuery()),
+      context.queryClient.ensureQueryData(categoriesQuery()),
+    ]),
+  errorComponent: ({ error }) => (
+    <AppShell>
+      <div className="mx-auto max-w-3xl px-4 py-10">
+        <GlassCard className="p-6 text-sm text-red-300">
+          Erro ao carregar importador: {error.message}
+        </GlassCard>
+      </div>
+    </AppShell>
+  ),
+  component: () => (
+    <AppShell>
+      <ImportPage />
+    </AppShell>
+  ),
 });
 
 function ImportPage() {
   const queryClient = useQueryClient();
-  const [transactions, setTransactions] = useState<ParsedTransaction[]>([]);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const { data: accounts } = useSuspenseQuery(accountsQuery());
+  const { data: categories } = useSuspenseQuery(categoriesQuery());
 
-  // Função para criar um hash único baseado nos dados da transação
-  const generateRowHash = (date: string, description: string, amount: number): string => {
-    const cleanDesc = description.toLowerCase().replace(/\s+/g, "");
-    const str = `${date}_${cleanDesc}_${amount.toFixed(2)}`;
-    // Um hash simples e rápido para comparação em memória e texto no Postgres
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash = hash & hash;
-    }
-    return `hash_${Math.abs(hash)}`;
-  };
+  const [accountId, setAccountId] = useState("");
+  const [defaultCategoryId, setDefaultCategoryId] = useState("");
+  const [rows, setRows] = useState<CheckedImportRow[]>([]);
+  const [isChecking, setIsChecking] = useState(false);
 
-  // Processador do Arquivo CSV
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const bankAccounts = accounts.filter((a) => a.type !== "credit_card");
+  const expenseCategories = categories.filter((c) => c.kind === "expense");
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
+    if (!accountId) { toast.error("Selecione a conta bancária antes do upload."); return; }
+    if (!defaultCategoryId) { toast.error("Selecione uma categoria padrão antes do upload."); return; }
 
-    setIsAnalyzing(true);
+    setIsChecking(true);
 
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
         try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) throw new Error("Usuário não logado");
+          const parsed: Array<{
+            occurred_on: string;
+            description: string;
+            amount_raw: string;
+            kind: "income" | "expense";
+            account_id: string;
+            category_id: string;
+          }> = [];
 
-          const parsedItems: ParsedTransaction[] = [];
-          const hashesToCheck: string[] = [];
+          for (const row of results.data as Record<string, string>[]) {
+            const rawDate = row.Data ?? row.date ?? row.Date ?? "";
+            const rawDesc = row.Descricao ?? row.description ?? row.Description ?? "";
+            const rawValue = row.Valor ?? row.amount ?? row.Amount ?? "";
+            if (!rawDate || !rawDesc || !rawValue) continue;
 
-          // 1. Parser bruto das linhas do arquivo
-          results.data.forEach((row: any) => {
-            // Mapeamento padrão de colunas (Data, Descricao, Valor)
-            const rawDate = row.Data || row.date || row.Date;
-            const rawDesc = row.Descricao || row.description || row.Description;
-            const rawValue = row.Valor || row.amount || row.Amount;
-
-            if (!rawDate || !rawDesc || !rawValue) return;
-
-            const amount = parseFloat(rawValue.replace(",", "."));
-            const kind = amount >= 0 ? "income" : "expense";
-            const cleanAmount = Math.abs(amount);
-
-            // Ajusta data para o formato YYYY-MM-DD
-            let formattedDate = rawDate;
-            if (rawDate.includes("/")) {
-              const [d, m, y] = rawDate.split("/");
-              formattedDate = `${y}-${m}-${d}`;
+            let occurred_on = rawDate.trim();
+            if (occurred_on.includes("/")) {
+              const [d, m, y] = occurred_on.split("/");
+              occurred_on = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
             }
 
-            const hash = generateRowHash(formattedDate, rawDesc, cleanAmount);
+            const numericStr = rawValue.trim().replace(",", ".");
+            const numeric = parseFloat(numericStr);
+            if (Number.isNaN(numeric)) continue;
 
-            parsedItems.push({
-              date: formattedDate,
-              description: rawDesc,
-              amount: cleanAmount,
-              kind,
-              dedup_hash: hash,
-              isDuplicate: false,
+            parsed.push({
+              occurred_on,
+              description: rawDesc.trim(),
+              amount_raw: Math.abs(numeric).toFixed(2),
+              kind: numeric >= 0 ? "income" : "expense",
+              account_id: accountId,
+              category_id: defaultCategoryId,
             });
+          }
 
-            hashesToCheck.push(hash);
-          });
-
-          if (hashesToCheck.length === 0) {
-            toast.error("Nenhum dado válido encontrado no arquivo.");
-            setIsAnalyzing(false);
+          if (parsed.length === 0) {
+            toast.error("Nenhuma linha válida. Verifique as colunas: Data, Descricao, Valor.");
+            setIsChecking(false);
             return;
           }
 
-          // 2. O CORAÇÃO DO DEDUP: Consulta em lote no banco pelas hashes existentes
-          const { data: existingTransactions, error } = await supabase
-            .from("transactions")
-            .select("dedup_hash")
-            .in("dedup_hash", hashesToCheck);
+          const checked = await checkImportDuplicates({
+            data: { account_id: accountId, rows: parsed },
+          });
 
-          if (error) throw error;
+          setRows(checked);
 
-          const existingHashes = new Set(existingTransactions?.map(t => t.dedup_hash) || []);
-
-          // 3. Marca as linhas duplicadas para a UI pintar de vermelho
-          const finalTransactions = parsedItems.map(item => ({
-            ...item,
-            isDuplicate: existingHashes.has(item.dedup_hash),
-          }));
-
-          setTransactions(finalTransactions);
-          
-          const dupCount = finalTransactions.filter(t => t.isDuplicate).length;
-          if (dupCount > 0) {
-            toast.warning(`${dupCount} transações duplicadas detectadas no extrato.`);
-          } else {
-            toast.success("Arquivo processado! Nenhuma duplicidade encontrada.");
-          }
-
-        } catch (err: any) {
-          toast.error(`Erro no processamento: ${err.message}`);
+          const dups = checked.filter((r) => r.is_duplicate).length;
+          if (dups > 0) toast.warning(`${dups} lançamento(s) já existem e serão ignorados.`);
+          else toast.success(`${checked.length} lançamentos validados — nenhuma duplicidade.`);
+        } catch (err: unknown) {
+          toast.error(`Erro: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
-          setIsAnalyzing(false);
+          setIsChecking(false);
         }
       },
-      error: (error) => {
-        toast.error(`Erro ao ler arquivo: ${error.message}`);
-        setIsAnalyzing(false);
-      }
+      error: (err) => { toast.error(`Erro ao ler arquivo: ${err.message}`); setIsChecking(false); },
     });
   };
 
-  // Mutation para salvar apenas o que NÃO for duplicado
-  const saveImportMutation = useMutation({
+  const commitMut = useMutation({
     mutationFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
-
-      // Filtra jogando fora os duplicados da inserção
-      const cleanRows = transactions.filter(t => !t.isDuplicate).map(t => ({
-        user_id: user.id,
-        description: t.description,
-        amount: t.amount,
-        kind: t.kind,
-        date: t.date,
-        dedup_hash: t.dedup_hash,
-      }));
-
-      if (cleanRows.length === 0) {
-        throw new Error("Nenhum lançamento novo para salvar.");
-      }
-
-      const { error } = await supabase.from("transactions").insert(cleanRows);
-      if (error) throw error;
+      const newRows = rows.filter((r) => !r.is_duplicate);
+      if (newRows.length === 0) throw new Error("Nenhum lançamento novo para importar.");
+      return commitImport({ data: { rows: newRows } });
     },
-    onSuccess: () => {
-      toast.success("Importação concluída com sucesso!");
+    onSuccess: (result) => {
+      toast.success(`${result.inserted} lançamento(s) integrados ao Livro-Caixa!`);
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      setTransactions([]);
+      setRows([]);
     },
-    onError: (err: Error) => {
-      toast.error(err.message);
-    }
+    onError: (err: Error) => toast.error(err.message),
   });
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-  const newRowsCount = transactions.filter(t => !t.isDuplicate).length;
+  const newCount = rows.filter((r) => !r.is_duplicate).length;
 
   return (
-    <AppShell>
-      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 space-y-6">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            Importador de Extratos
-          </h1>
-          <p className="mt-1 text-sm text-foreground/60">
-            Arraste seu arquivo bancário para conciliação automática via barramento de hash.
-          </p>
-        </header>
+    <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Importador de Extratos</h1>
+        <p className="mt-1 text-sm text-foreground/60">
+          Conciliação automática via SHA-256 — duplicatas detectadas antes de gravar.
+        </p>
+      </header>
 
-        {/* Zona de Upload */}
-        {transactions.length === 0 && (
-          <GlassCard className="p-12 text-center border border-dashed border-white/20 relative hover:border-primary/40 transition-colors">
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleFileUpload}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              disabled={isAnalyzing}
-            />
-            <Upload className="mx-auto size-12 opacity-40 mb-4 animate-pulse" />
-            <p className="text-sm font-medium text-foreground/80">
-              {isAnalyzing ? "Analisando duplicidades contra o banco..." : "Clique ou arraste seu arquivo CSV aqui"}
-            </p>
-            <p className="text-xs text-foreground/40 mt-1">Formatos aceitos: Padrão de colunas (Data, Descricao, Valor)</p>
-          </GlassCard>
-        )}
-
-        {/* Pré-visualização com Tratamento Visual de Duplicados */}
-        {transactions.length > 0 && (
-          <div className="space-y-4">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between bg-zinc-900/40 p-4 rounded-xl border border-white/5">
-              <div className="flex items-center gap-2 text-sm text-foreground/70">
-                <FileText className="size-4 text-primary" />
-                <span>{transactions.length} linhas lidas</span>
-                <span className="text-emerald-400 font-medium">({newRowsCount} novas)</span>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setTransactions([])} className="rounded-full">
-                  Cancelar
-                </Button>
-                <Button 
-                  size="sm" 
-                  onClick={() => saveImportMutation.mutate()} 
-                  disabled={saveImportMutation.isPending || newRowsCount === 0}
-                  className="rounded-full gap-1.5"
-                >
-                  Confirmar Conciliação <ArrowRight className="size-4" />
-                </Button>
-              </div>
-            </div>
-
-            <GlassCard className="overflow-hidden border border-white/10">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-white/10 bg-white/[0.02]">
-                    <TableHead className="text-foreground/80">Status</TableHead>
-                    <TableHead className="text-foreground/80">Data</TableHead>
-                    <TableHead className="text-foreground/80">Descrição</TableHead>
-                    <TableHead className="text-foreground/80 text-right">Valor</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions.map((t, idx) => (
-                    <TableRow 
-                      key={idx} 
-                      className={`border-white/5 transition-colors ${
-                        t.isDuplicate 
-                          ? "bg-red-500/10 hover:bg-red-500/15 text-red-300" 
-                          : "hover:bg-white/[0.02]"
-                      }`}
-                    >
-                      <TableCell className="font-medium">
-                        {t.isDuplicate ? (
-                          <span className="inline-flex items-center gap-1 text-xs text-red-400 font-semibold bg-red-500/20 px-2 py-0.5 rounded-full">
-                            <AlertTriangle className="size-3" /> Já Importado
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-semibold bg-emerald-500/20 px-2 py-0.5 rounded-full">
-                            <CheckCircle className="size-3" /> Pronto
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">{t.date}</TableCell>
-                      <TableCell className="max-w-xs truncate">{t.description}</TableCell>
-                      <TableCell className={`text-right font-mono font-medium ${t.kind === "income" ? "text-emerald-400" : ""}`}>
-                        {t.kind === "expense" ? "-" : "+"}{formatCurrency(t.amount)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </GlassCard>
+      {/* Etapa 1: Configuração */}
+      <GlassCard className="border border-white/10 p-6 space-y-4">
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground/80">
+          <Landmark className="size-4 text-primary" /> Etapa 1 — Configure a importação
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label>Conta bancária de destino</Label>
+            <Select value={accountId} onValueChange={setAccountId} disabled={rows.length > 0}>
+              <SelectTrigger><SelectValue placeholder="Selecione a conta..." /></SelectTrigger>
+              <SelectContent>
+                {bankAccounts.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-foreground/40">Todos os lançamentos serão vinculados a esta conta.</p>
           </div>
-        )}
-      </div>
-    </AppShell>
+          <div className="space-y-1.5">
+            <Label>Categoria padrão</Label>
+            <Select value={defaultCategoryId} onValueChange={setDefaultCategoryId} disabled={rows.length > 0}>
+              <SelectTrigger><SelectValue placeholder="Selecione a categoria..." /></SelectTrigger>
+              <SelectContent>
+                {expenseCategories.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-foreground/40">Pode reclassificar individualmente depois.</p>
+          </div>
+        </div>
+      </GlassCard>
+
+      {/* Etapa 2: Upload */}
+      {rows.length === 0 && (
+        <GlassCard className="p-12 text-center border border-dashed border-white/20 relative hover:border-primary/40 transition-colors">
+          <input
+            type="file"
+            accept=".csv"
+            onChange={handleFileUpload}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+            disabled={isChecking || !accountId || !defaultCategoryId}
+          />
+          {isChecking
+            ? <RefreshCw className="mx-auto size-12 opacity-50 mb-4 animate-spin text-primary" />
+            : <Upload className={`mx-auto size-12 mb-4 ${!accountId || !defaultCategoryId ? "opacity-20" : "opacity-40"}`} />
+          }
+          <p className="text-sm font-medium text-foreground/80">
+            {isChecking
+              ? "Cruzando hashes com o banco..."
+              : !accountId || !defaultCategoryId
+              ? "Preencha conta e categoria acima para habilitar o upload"
+              : "Clique ou arraste o arquivo CSV do seu banco"}
+          </p>
+          <p className="text-xs text-foreground/40 mt-1">Colunas esperadas: Data · Descricao · Valor</p>
+        </GlassCard>
+      )}
+
+      {/* Etapa 3: Pré-visualização */}
+      {rows.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between bg-zinc-900/60 p-4 rounded-xl border border-white/5">
+            <div className="flex items-center gap-2 text-sm text-foreground/70">
+              <FileText className="size-4 text-primary" />
+              {rows.length} linhas · <span className="text-emerald-400 font-semibold">{newCount} novos</span> · <span className="text-red-400 font-semibold">{rows.length - newCount} duplicatas</span>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setRows([])} className="rounded-full">Cancelar</Button>
+              <Button
+                size="sm"
+                onClick={() => commitMut.mutate()}
+                disabled={commitMut.isPending || newCount === 0}
+                className="rounded-full gap-1.5"
+              >
+                {commitMut.isPending && <RefreshCw className="size-3.5 animate-spin" />}
+                Gravar {newCount} lançamento(s) <ArrowRight className="size-4" />
+              </Button>
+            </div>
+          </div>
+
+          <GlassCard className="overflow-hidden border border-white/10">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-white/10 bg-white/[0.02]">
+                  <TableHead>Status</TableHead>
+                  <TableHead>Data</TableHead>
+                  <TableHead>Descrição</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead className="text-right">Valor</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r, i) => (
+                  <TableRow key={i} className={`border-white/5 ${r.is_duplicate ? "bg-red-500/10 text-red-300/60 line-through" : "hover:bg-white/[0.02]"}`}>
+                    <TableCell>
+                      {r.is_duplicate
+                        ? <span className="inline-flex items-center gap-1 text-[11px] text-red-400 font-bold bg-red-500/10 px-2 py-0.5 rounded-full"><AlertTriangle className="size-3" /> Duplicado</span>
+                        : <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full"><CheckCircle className="size-3" /> Novo</span>
+                      }
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-foreground/60">{r.occurred_on}</TableCell>
+                    <TableCell className="max-w-xs truncate font-medium">{r.description}</TableCell>
+                    <TableCell>
+                      <span className={`text-xs font-semibold ${r.kind === "income" ? "text-emerald-400" : "text-foreground/60"}`}>
+                        {r.kind === "income" ? "Receita" : "Despesa"}
+                      </span>
+                    </TableCell>
+                    <TableCell className={`text-right font-mono font-semibold ${r.kind === "income" ? "text-emerald-400" : "text-foreground/80"}`}>
+                      {r.kind === "income" ? "+" : "−"} R$ {r.amount_raw}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </GlassCard>
+        </div>
+      )}
+    </div>
   );
 }
