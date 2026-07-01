@@ -22,32 +22,75 @@ function SettingsComponent() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState<'export' | 'restore' | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const triggerNotification = (message: string) => {
     setSuccessMessage(message);
     setTimeout(() => setSuccessMessage(null), 3000);
   };
 
-  const handleExportData = () => {
-    // Simulação de exportação de dados estruturados em JSON conforme o PRD
-    triggerNotification('✨ Todos os seus dados contábeis foram exportados com sucesso em formato JSON/CSV!');
-  };
-
-  const handleBackup = () => {
-    // Simulação de geração de backup local criptografado
-    triggerNotification('🔒 Backup de segurança gerado! O download do arquivo .fina-backup começará em instantes.');
+  const handleBackup = async () => {
+    setIsBusy('export');
+    try {
+      const payload = await exportBackup();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `gerentefina-backup-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Backup gerado com sucesso!', {
+        description: `${payload.accounts.length} contas · ${payload.categories.length} categorias · ${payload.transactions.length} lançamentos.`,
+      });
+      triggerNotification('🔒 Backup baixado. Guarde o arquivo em local seguro.');
+    } catch (err) {
+      toast.error('Falha ao gerar backup', {
+        description: err instanceof Error ? err.message : 'Erro desconhecido.',
+      });
+    } finally {
+      setIsBusy(null);
+    }
   };
 
   const handleRestore = () => {
-    // Simulação de leitura de arquivo de backup para restauração de estado
-    triggerNotification('🔄 Arquivo de backup validado. Seus saldos e faturas foram restaurados com sucesso.');
+    fileInputRef.current?.click();
+  };
+
+  const handleRestoreFile = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file) return;
+    setIsBusy('restore');
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const report = await restoreBackup({ data: { payload } });
+      toast.success('Restore concluído', {
+        description: `Contas: ${report.accounts_upserted} · Categorias: ${report.categories_upserted} · Transações: ${report.transactions_upserted}.`,
+      });
+      triggerNotification('🔄 Base restaurada com sucesso a partir do arquivo enviado.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Arquivo inválido.';
+      toast.error('Falha ao restaurar backup', { description: msg });
+    } finally {
+      setIsBusy(null);
+    }
   };
 
   const handleDeleteAccount = () => {
     if (confirmText.toLowerCase() === 'excluir definitivamente') {
       setShowDeleteModal(false);
       setConfirmText('');
-      alert('Conta deletada logicamente do Supabase. Redirecionando para a tela de Boas-Vindas...');
+      toast.warning('Exclusão solicitada', {
+        description: 'Fluxo de deleção definitiva ainda será plugado ao auth real.',
+      });
     }
   };
 
