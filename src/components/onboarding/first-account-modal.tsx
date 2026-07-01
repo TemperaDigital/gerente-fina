@@ -37,7 +37,7 @@ export function FirstAccountModal({ open }: { open: boolean }) {
 
         <DialogFooter className="flex-col sm:flex-row gap-2">
           <Button asChild className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold">
-            <Link to="/_app/accounts">Cadastrar primeira conta</Link>
+            <Link to="/accounts">Cadastrar primeira conta</Link>
           </Button>
         </DialogFooter>
       </DialogContent>
