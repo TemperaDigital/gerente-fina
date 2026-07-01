@@ -66,7 +66,7 @@ const accountsQuery = () =>
   });
 
 
-export const Route = createFileRoute("/_app/accounts")({
+export const Route = createFileRoute("/accounts")({
   head: () => ({
     meta: [
       { title: "Contas — Gerente Fina" },
@@ -334,8 +334,7 @@ function AccountsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Arquivar conta</AlertDialogTitle>
             <AlertDialogDescription>
-              Deseja realmente arquivar {" "}
-              <span className="font-semibold text-foreground">
+              Deseja realmente arquivar <span className="font-semibold text-foreground">
                 {archiving?.name}
               </span>
               ? Os lançamentos históricos permanecem intactos.
