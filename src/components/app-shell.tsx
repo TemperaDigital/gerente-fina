@@ -41,13 +41,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="pointer-events-none fixed inset-0 -z-10"
         style={{
           background:
-            "radial-gradient(800px 500px at 15% -10%, rgba(99,102,241,0.18), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,0.14), transparent 60%), radial-gradient(900px 600px at 50% 110%, rgba(16,185,129,0.10), transparent 60%)",
+            "radial-gradient(800px 500px at 15% -10%, rgba(99,102,241,0.18), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,0.14), transparent 60%), radial-gradient(900px[...]
         }}
       />
 
       {/* Top bar mobile */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/5 bg-zinc-950/70 px-4 py-3 backdrop-blur-xl md:hidden">
-        <Link to="/_app/dashboard" className="text-base font-semibold tracking-tight">
+        <Link to="/dashboard" className="text-base font-semibold tracking-tight">
           Gerente <span className="text-primary">Fina</span>
         </Link>
         <button
@@ -92,7 +92,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Sidebar desktop */}
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-1 border-r border-white/5 px-3 py-6 md:flex">
           <Link
-            to="/_app/dashboard"
+            to="/dashboard"
             className="mb-6 px-3 text-lg font-semibold tracking-tight"
           >
             Gerente <span className="text-primary">Fina</span>
