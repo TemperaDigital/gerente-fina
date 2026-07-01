@@ -10,7 +10,7 @@
  * Hash SHA-256 via WebCrypto — mesmo algoritmo da trigger do banco.
  */
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import Papa from "papaparse";
 import {
