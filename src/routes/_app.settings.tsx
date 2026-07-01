@@ -209,6 +209,35 @@ function SettingsComponent() {
             </div>
           </div>
         </div>
+
+        {/* Progresso do restore */}
+        {restoreState !== 'idle' && (
+          <div className="mt-2 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className={restoreState === 'error' ? 'text-rose-400 font-semibold' : 'text-zinc-400'}>
+                {RESTORE_LABEL[restoreState]}
+              </span>
+              <span className="font-mono text-zinc-500">{RESTORE_PROGRESS[restoreState]}%</span>
+            </div>
+            <Progress value={RESTORE_PROGRESS[restoreState]} className={restoreState === 'error' ? 'bg-rose-950' : ''} />
+          </div>
+        )}
+      </div>
+
+      {/* SESSÃO / LOGOUT */}
+      <div className="bg-white/[0.02] border border-white/[0.06] backdrop-blur-xl rounded-2xl p-6 shadow-2xl flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-bold text-zinc-200 flex items-center gap-2">
+            <LogOut className="w-4 h-4 text-zinc-500" /> Sessão
+          </h2>
+          <p className="text-xs text-zinc-500 mt-1">Encerre a sessão atual com segurança.</p>
+        </div>
+        <button
+          onClick={handleSignOut}
+          className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl border border-zinc-700"
+        >
+          Sair
+        </button>
       </div>
 
       {/* BLOCO 2: PREFERÊNCIAS PLACEHOLDER (ZIMAOS STYLE UI) */}
