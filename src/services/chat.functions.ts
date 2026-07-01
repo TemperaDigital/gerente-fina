@@ -209,13 +209,32 @@ export const sendChatMessage = createServerFn({ method: "POST" })
         source: "manual",
       };
 
-      const { data: inserted, error: insErr } = await sb
+      const insertPromise = sb
         .from("transactions")
         .insert(insertPayload)
         .select("id, kind, amount, description, occurred_on")
         .single();
 
-      if (insErr) throw new Error(insErr.message);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout ao gravar (10s). Tente novamente.")), 10_000),
+      );
+
+      const { data: inserted, error: insErr } = await Promise.race([
+        insertPromise,
+        timeoutPromise,
+      ]);
+
+      if (insErr) {
+        const raw = insErr.message ?? String(insErr);
+        if (raw.includes("foreign key") || raw.includes("violates")) {
+          throw new Error("Conta ou categoria inválida (FK). Verifique cadastros em /accounts e /categories.");
+        }
+        if (raw.includes("dedup") || raw.includes("unique")) {
+          throw new Error("Lançamento duplicado — já existe uma transação idêntica.");
+        }
+        throw new Error(raw);
+      }
+
 
       const suffix = isTempero ? " (categorizado automaticamente em ALIMENTAÇÃO // mercearia — temperos e grãos)" : "";
       return {
