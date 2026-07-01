@@ -47,8 +47,13 @@ import { getAccountsLookup, getCategoriesLookup } from "@/services/lookups.funct
 import {
   checkImportDuplicates,
   commitImport,
+  getDefaultImportAccount,
   type CheckedImportRow,
 } from "@/lib/supabase/import.functions";
+
+const defaultAccountQuery = () =>
+  queryOptions({ queryKey: ["import", "default-account"], queryFn: () => getDefaultImportAccount() });
+
 
 const accountsQuery = () =>
   queryOptions({ queryKey: ["lookups", "accounts"], queryFn: () => getAccountsLookup() });
