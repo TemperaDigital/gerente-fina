@@ -2,12 +2,20 @@
  * Modal de boas-vindas para novos usuários (blank-state).
  * Dispara quando não há contas nem categorias cadastradas.
  */
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Sparkles, Wallet, Tags } from "lucide-react";
 
 export function FirstAccountModal({ open }: { open: boolean }) {
+  const location = useLocation();
+  const pathname = location?.pathname ?? "";
+
+  // If the modal is not open or the user is already viewing the accounts/categories
+  // pages, don't render the modal so they can interact with those screens.
+  if (!open) return null;
+  if (pathname.startsWith("/accounts") || pathname.startsWith("/categories")) return null;
+
   return (
     <Dialog open={open}>
       <DialogContent className="bg-zinc-950 border-white/10 text-zinc-100 sm:max-w-lg">
