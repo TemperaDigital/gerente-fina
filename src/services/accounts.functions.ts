@@ -26,6 +26,10 @@ export interface AccountWithBalanceDTO {
   transactions_count: number;
   last_movement_on: string | null;
   created_at: string;
+  // Novos campos para Saldo Inicial e Cheque Especial
+  initial_balance_cents?: number | null;
+  overdraft_limit_cents?: number | null;
+  overdraft_start_date?: string | null;
 }
 
 
@@ -46,7 +50,7 @@ export const listAccounts = createServerFn({ method: "GET" })
     let q = sb
       .from("accounts")
       .select(
-        "id, name, type, institution, color, icon, credit_limit_cents, closing_day, due_day, archived_at, created_at",
+        "id, name, type, institution, color, icon, credit_limit_cents, initial_balance_cents, overdraft_limit_cents, overdraft_start_date, closing_day, due_day, archived_at, created_at",
       )
       .order("name", { ascending: true });
     if (data.type) q = q.eq("type", data.type);
@@ -55,7 +59,7 @@ export const listAccounts = createServerFn({ method: "GET" })
     const { data: accts, error } = await q;
     if (error) throw new Error(error.message);
 
-    const ids = (accts ?? []).map((a) => a.id);
+    const ids = (accts ?? []).map((a: any) => a.id);
     const balanceMap = new Map<
       string,
       { balance: string; count: number; last: string | null }
@@ -80,7 +84,7 @@ export const listAccounts = createServerFn({ method: "GET" })
       }
     }
 
-    return (accts ?? []).map((a) => {
+    return (accts ?? []).map((a: any) => {
       const b = balanceMap.get(a.id);
       return {
         id: a.id,
@@ -97,6 +101,9 @@ export const listAccounts = createServerFn({ method: "GET" })
         transactions_count: b?.count ?? 0,
         last_movement_on: b?.last ?? null,
         created_at: a.created_at,
+        initial_balance_cents: a.initial_balance_cents ?? null,
+        overdraft_limit_cents: a.overdraft_limit_cents ?? null,
+        overdraft_start_date: a.overdraft_start_date ?? null,
       };
     });
   });
@@ -114,6 +121,8 @@ const CreateInput = z
     color: z.string().trim().max(20).optional().nullable(),
     icon: z.string().optional().nullable(),
     credit_limit_cents: z.number().int().nonnegative().optional().nullable(),
+    initial_balance_cents: z.number().int().optional().nullable(),
+    overdraft_limit_cents: z.number().int().nonnegative().optional().nullable(),
     closing_day: day.optional().nullable(),
     due_day: day.optional().nullable(),
   })
@@ -154,6 +163,8 @@ export const createAccount = createServerFn({ method: "POST" })
         color: data.color ?? null,
         icon: data.icon ?? null,
         credit_limit_cents: data.credit_limit_cents ?? null,
+        initial_balance_cents: data.initial_balance_cents ?? null,
+        overdraft_limit_cents: data.overdraft_limit_cents ?? null,
         closing_day: data.closing_day ?? null,
         due_day: data.due_day ?? null,
       })
@@ -171,6 +182,8 @@ const UpdateInput = z
     color: z.string().trim().max(20).optional().nullable(),
     icon: z.string().optional().nullable(),
     credit_limit_cents: z.number().int().nonnegative().optional().nullable(),
+    initial_balance_cents: z.number().int().optional().nullable(),
+    overdraft_limit_cents: z.number().int().nonnegative().optional().nullable(),
     closing_day: day.optional().nullable(),
     due_day: day.optional().nullable(),
   });
@@ -189,6 +202,8 @@ export const updateAccount = createServerFn({ method: "POST" })
         color: data.color ?? null,
         icon: data.icon ?? null,
         credit_limit_cents: data.credit_limit_cents ?? null,
+        initial_balance_cents: data.initial_balance_cents ?? null,
+        overdraft_limit_cents: data.overdraft_limit_cents ?? null,
         closing_day: data.closing_day ?? null,
         due_day: data.due_day ?? null,
       })
