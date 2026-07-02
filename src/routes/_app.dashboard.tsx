@@ -2,7 +2,7 @@
  * Rota /dashboard — Painel de Controle Principal.
  * Consome server functions (admin) que já lidam com auth seed e expurgo
  * contábil. Aritmética monetária via lib BigInt (sem Number cru).
- */
+ */import { AccountsWidget } from "@/components/dashboard/accounts-widget";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import {
@@ -174,67 +174,7 @@ function DashboardPage() {
         {/* Listagens */}
         <div className="grid gap-6 md:grid-cols-2">
           {/* Contas */}
-          <GlassCard className="flex flex-col justify-between border border-white/10 p-6">
-            <div>
-              <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                <h2 className="text-lg font-medium text-foreground/90">Minhas Contas</h2>
-                <span className="font-mono text-xs text-foreground/40">
-                  {summary.accounts.length} mapeadas
-                </span>
-              </div>
-
-              <div className="mt-4 divide-y divide-white/5">
-                {summary.accounts.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-foreground/40">
-                    Nenhuma conta cadastrada.
-                  </p>
-                ) : (
-                  summary.accounts.map((acc) => {
-                    const meta = ACCOUNT_META[acc.account_type] ?? ACCOUNT_META.bank;
-                    const Icon = meta.icon;
-                    const neg = isNegative(acc.balance);
-                    return (
-                      <div
-                        key={acc.account_id}
-                        className="flex items-center justify-between py-3.5 first:pt-0 last:pb-0"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="flex size-9 items-center justify-center rounded-lg bg-white/5 text-foreground/60">
-                            <Icon className="size-4" />
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-foreground/90">
-                              {acc.account_name}
-                            </p>
-                            <p className="text-xs text-foreground/40">{meta.label}</p>
-                          </div>
-                        </div>
-                        <span
-                          className={`font-mono text-sm font-semibold ${
-                            neg ? "text-red-400" : "text-foreground/80"
-                          }`}
-                        >
-                          {BRL(acc.balance)}
-                        </span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="mt-6 border-t border-white/5 pt-4">
-              <Link to="/accounts">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-between text-xs text-primary hover:bg-primary/5"
-                >
-                  Gerenciar contas <ArrowRight className="size-3" />
-                </Button>
-              </Link>
-            </div>
-          </GlassCard>
+          <AccountsWidget accounts={summary?.accounts ?? []} />
 
           {/* Orçamentos */}
           <GlassCard className="flex flex-col justify-between border border-white/10 p-6">
