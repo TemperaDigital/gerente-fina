@@ -38,23 +38,46 @@ export const listInvoiceMasters = createServerFn({ method: "GET" }).handler(
     if (ids.length > 0) {
       const { data: invs } = await sb
         .from("credit_card_invoices")
-        .select("id, account_id, reference_month, closing_date, due_date, total_amount")
+        .select("id, account_id, reference_month, closing_date, due_date")
         .in("account_id", ids)
         .eq("status", "open");
-      for (const inv of (invs ?? []) as Array<{
+
+      const invRows = (invs ?? []) as Array<{
         id: string;
         account_id: string;
         reference_month: string;
         closing_date: string;
         due_date: string;
-        total_amount: string;
-      }>) {
+      }>;
+      const invIds = invRows.map((i) => i.id);
+      const totals = new Map<string, number>();
+      if (invIds.length > 0) {
+        const { data: exp } = await sb
+          .from("transactions")
+          .select("invoice_id, amount")
+          .in("invoice_id", invIds)
+          .eq("kind", "expense");
+        for (const r of (exp ?? []) as Array<{ invoice_id: string; amount: string }>) {
+          totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + Number(r.amount));
+        }
+        const { data: pay } = await sb
+          .from("transactions")
+          .select("paid_invoice_id, amount")
+          .in("paid_invoice_id", invIds)
+          .eq("kind", "invoice_payment")
+          .eq("type", "credit");
+        for (const r of (pay ?? []) as Array<{ paid_invoice_id: string; amount: string }>) {
+          totals.set(r.paid_invoice_id, (totals.get(r.paid_invoice_id) ?? 0) - Number(r.amount));
+        }
+      }
+
+      for (const inv of invRows) {
         openMap.set(inv.account_id, {
           id: inv.id,
           reference_month: inv.reference_month,
           closing_date: inv.closing_date,
           due_date: inv.due_date,
-          total_amount: inv.total_amount ?? "0.00",
+          total_amount: Math.max(0, totals.get(inv.id) ?? 0).toFixed(2),
         });
       }
     }
