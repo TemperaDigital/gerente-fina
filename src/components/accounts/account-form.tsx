@@ -32,6 +32,8 @@ export interface AccountFormValues {
   credit_limit_cents: number | null;
   closing_day: number | null;
   due_day: number | null;
+  initial_balance_cents: number | null;
+  overdraft_limit_cents: number | null;
 }
 
 export interface AccountFormPayload {
@@ -43,6 +45,8 @@ export interface AccountFormPayload {
   credit_limit_cents: number | null;
   closing_day: number | null;
   due_day: number | null;
+  initial_balance_cents: number | null;
+  overdraft_limit_cents: number | null;
 }
 
 interface Props {
@@ -98,6 +102,12 @@ export function AccountForm({
   const [limitStr, setLimitStr] = useState(
     centsToBRLInput(initial?.credit_limit_cents ?? null),
   );
+  const [initialBalanceStr, setInitialBalanceStr] = useState(
+    centsToBRLInput(initial?.initial_balance_cents ?? null),
+  );
+  const [overdraftLimitStr, setOverdraftLimitStr] = useState(
+    centsToBRLInput(initial?.overdraft_limit_cents ?? null),
+  );
   const [closingDay, setClosingDay] = useState<string>(
     initial?.closing_day ? String(initial.closing_day) : "",
   );
@@ -110,7 +120,18 @@ export function AccountForm({
   const isCard = type === "credit_card";
 
   const errors = useMemo(() => {
-    const e: Partial<Record<"name" | "institution" | "limit" | "closing" | "due", string>> = {};
+    const e: Partial<
+      Record<
+        | "name"
+        | "institution"
+        | "limit"
+        | "closing"
+        | "due"
+        | "initialBalance"
+        | "overdraftLimit",
+        string
+      >
+    > = {};
     const trimmedName = name.trim();
     if (!trimmedName) e.name = "Informe um nome para a conta.";
     else if (trimmedName.length > 60) e.name = "Máximo de 60 caracteres.";
@@ -126,8 +147,25 @@ export function AccountForm({
       if (!dueDay) e.due = "Selecione o dia de vencimento.";
       else if (due < 1 || due > 31) e.due = "Dia inválido (1–31).";
     }
+    if (!isCard) {
+      if (initialBalanceStr && brlInputToCents(initialBalanceStr) === null) {
+        e.initialBalance = "Valor inválido (ex: 123,45).";
+      }
+      if (overdraftLimitStr && brlInputToCents(overdraftLimitStr) === null) {
+        e.overdraftLimit = "Valor inválido (ex: 123,45).";
+      }
+    }
     return e;
-  }, [name, institution, isCard, limitStr, closingDay, dueDay]);
+  }, [
+    name,
+    institution,
+    isCard,
+    limitStr,
+    closingDay,
+    dueDay,
+    initialBalanceStr,
+    overdraftLimitStr,
+  ]);
 
   const hasErrors = Object.keys(errors).length > 0;
 
@@ -149,6 +187,10 @@ export function AccountForm({
       setClosingDay("");
       setDueDay("");
       setTouched((t) => ({ ...t, limit: false, closing: false, due: false }));
+    } else {
+      setInitialBalanceStr("");
+      setOverdraftLimitStr("");
+      setTouched((t) => ({ ...t, initialBalance: false, overdraftLimit: false }));
     }
   }
 
@@ -165,6 +207,8 @@ export function AccountForm({
       credit_limit_cents: isCard ? brlInputToCents(limitStr) : null,
       closing_day: isCard ? Number(closingDay) : null,
       due_day: isCard ? Number(dueDay) : null,
+      initial_balance_cents: !isCard ? brlInputToCents(initialBalanceStr) : null,
+      overdraft_limit_cents: type === "bank" ? brlInputToCents(overdraftLimitStr) : null,
     });
   }
 
@@ -229,6 +273,45 @@ export function AccountForm({
           aria-invalid={!!show("institution")}
         />
       </Field>
+
+      {!isCard && (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Saldo Inicial (R$)" error={show("initialBalance")}>
+            <Input
+              inputMode="decimal"
+              placeholder="0,00"
+              className={cn(
+                "border-white/10 bg-white/[0.04]",
+                show("initialBalance") && "border-rose-400/60 focus-visible:ring-rose-400/40",
+              )}
+              value={initialBalanceStr}
+              onChange={(e) => setInitialBalanceStr(e.target.value)}
+              onBlur={() => markTouched("initialBalance")}
+              aria-invalid={!!show("initialBalance")}
+            />
+          </Field>
+          {type === "bank" && (
+            <Field
+              label="Limite de Cheque Especial (R$)"
+              error={show("overdraftLimit")}
+            >
+              <Input
+                inputMode="decimal"
+                placeholder="0,00"
+                className={cn(
+                  "border-white/10 bg-white/[0.04]",
+                  show("overdraftLimit") &&
+                    "border-rose-400/60 focus-visible:ring-rose-400/40",
+                )}
+                value={overdraftLimitStr}
+                onChange={(e) => setOverdraftLimitStr(e.target.value)}
+                onBlur={() => markTouched("overdraftLimit")}
+                aria-invalid={!!show("overdraftLimit")}
+              />
+            </Field>
+          )}
+        </div>
+      )}
 
       {isCard && (
         <>
@@ -358,4 +441,3 @@ function Field({
     </div>
   );
 }
-
