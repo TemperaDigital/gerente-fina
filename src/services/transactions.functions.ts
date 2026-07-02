@@ -453,28 +453,92 @@ export const createTransactionEntry = createServerFn({ method: "POST" })
       return { created_count: 2, transfer_id, warnings };
     }
 
-    // -------- INVOICE PAYMENT ---------------------------------------------
+    // -------- INVOICE PAYMENT (2 pernas atômicas + fechamento) -------------
+    // Perna 1: DÉBITO na conta corrente/caixa (saída de dinheiro).
+    // Perna 2: CRÉDITO na conta do cartão (abate o saldo devedor).
+    // Ambas compartilham `paid_invoice_id` para amarração e auditoria.
     if (data.kind === "invoice_payment") {
-      const { error } = await sb.from("transactions").insert({
+      // Descobre o cartão dono da fatura.
+      const { data: inv, error: invErr } = await sb
+        .from("credit_card_invoices")
+        .select("id, account_id, user_id")
+        .eq("id", data.paid_invoice_id!)
+        .maybeSingle();
+      if (invErr) throw new Error(invErr.message);
+      if (!inv) throw new Error("Fatura não encontrada.");
+      if ((inv as { account_id: string }).account_id === data.account_id) {
+        throw new Error(
+          "A conta de origem do pagamento não pode ser o próprio cartão. Selecione uma conta corrente ou dinheiro.",
+        );
+      }
+
+      const commonBase = {
         user_id: userId,
-        account_id: data.account_id,
-        kind: "invoice_payment",
-        type: "debit",
+        kind: "invoice_payment" as const,
         amount: data.amount,
         occurred_on: data.occurred_on,
         description: data.description,
         notes: data.notes ?? null,
         paid_invoice_id: data.paid_invoice_id!,
-        source: "manual",
-      });
-      if (error) throw new Error(error.message);
-      // Atualiza fatura → status paid + paid_at (informativo; cálculo de total
-      // continua sendo derivado por trigger/view).
+        source: "manual" as const,
+      };
+
+      // Leg 1 — saída (débito) na conta de origem.
+      const { data: leg1, error: e1 } = await sb
+        .from("transactions")
+        .insert({ ...commonBase, account_id: data.account_id, type: "debit" })
+        .select("id")
+        .single();
+      if (e1) throw new Error(`Falha na perna de origem: ${e1.message}`);
+
+      // Leg 2 — entrada (crédito) no cartão, abatendo a dívida.
+      const { error: e2 } = await sb
+        .from("transactions")
+        .insert({
+          ...commonBase,
+          account_id: (inv as { account_id: string }).account_id,
+          type: "credit",
+        });
+      if (e2) {
+        // Compensa a perna 1 para manter integridade contábil.
+        await sb.from("transactions").delete().eq("id", (leg1 as { id: string }).id);
+        throw new Error(`Falha na perna do cartão: ${e2.message}`);
+      }
+
+      // Recalcula saldo da fatura e marca como paga se totalmente quitada.
+      const invoiceId = data.paid_invoice_id!;
+      const { data: expRows } = await sb
+        .from("transactions")
+        .select("amount")
+        .eq("invoice_id", invoiceId)
+        .eq("kind", "expense");
+      const { data: payRows } = await sb
+        .from("transactions")
+        .select("amount")
+        .eq("paid_invoice_id", invoiceId)
+        .eq("kind", "invoice_payment")
+        .eq("type", "credit");
+      const expenseSum = (expRows ?? []).reduce(
+        (acc, r) => acc + Number((r as { amount: string }).amount),
+        0,
+      );
+      const paidSum = (payRows ?? []).reduce(
+        (acc, r) => acc + Number((r as { amount: string }).amount),
+        0,
+      );
+      const outstanding = Math.max(0, expenseSum - paidSum);
+      // Persistimos o saldo devedor remanescente em `total_amount` (informativo)
+      // e marcamos como 'paid' quando zera.
       await sb
         .from("credit_card_invoices")
-        .update({ status: "paid", paid_at: new Date().toISOString() })
-        .eq("id", data.paid_invoice_id!);
-      return { created_count: 1, warnings };
+        .update({
+          total_amount: outstanding.toFixed(2),
+          status: outstanding <= 0.005 ? "paid" : "open",
+          paid_at: outstanding <= 0.005 ? new Date().toISOString() : null,
+        })
+        .eq("id", invoiceId);
+
+      return { created_count: 2, warnings };
     }
 
     // -------- INCOME / EXPENSE --------------------------------------------

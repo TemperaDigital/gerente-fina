@@ -127,7 +127,7 @@ export const getOpenCreditCardInvoices = createServerFn({ method: "GET" })
     const { data, error } = await sb
       .from("credit_card_invoices")
       .select(
-        `id, account_id, reference_month, closing_date, due_date, total_amount,
+        `id, account_id, reference_month, closing_date, due_date,
          accounts:account_id ( name )`,
       )
       .eq("status", "open")
@@ -135,20 +135,48 @@ export const getOpenCreditCardInvoices = createServerFn({ method: "GET" })
 
     if (error) throw new Error(error.message);
 
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+    const invoiceIds = (data ?? []).map((r) => (r as { id: string }).id);
+    // Total real: soma de despesas atreladas à fatura menos pagamentos (perna credit).
+    const totals = new Map<string, number>();
+    if (invoiceIds.length > 0) {
+      const { data: expenseRows } = await sb
+        .from("transactions")
+        .select("invoice_id, amount")
+        .in("invoice_id", invoiceIds)
+        .eq("kind", "expense");
+      for (const r of (expenseRows ?? []) as Array<{ invoice_id: string; amount: string }>) {
+        totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + Number(r.amount));
+      }
+      const { data: paymentRows } = await sb
+        .from("transactions")
+        .select("paid_invoice_id, amount, type")
+        .in("paid_invoice_id", invoiceIds)
+        .eq("kind", "invoice_payment")
+        .eq("type", "credit");
+      for (const r of (paymentRows ?? []) as Array<{
+        paid_invoice_id: string;
+        amount: string;
+      }>) {
+        totals.set(r.paid_invoice_id, (totals.get(r.paid_invoice_id) ?? 0) - Number(r.amount));
+      }
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
     const items: OpenInvoiceDTO[] = (data ?? []).map((r) => {
       const row = r as Record<string, unknown> & {
         accounts?: { name?: string | null } | null;
       };
+      const id = row.id as string;
       const closing_date = row.closing_date as string;
+      const total = Math.max(0, totals.get(id) ?? 0);
       return {
-        invoice_id: row.id as string,
+        invoice_id: id,
         account_id: row.account_id as string,
         account_name: row.accounts?.name ?? "Cartão",
         reference_month: row.reference_month as string,
         closing_date,
         due_date: row.due_date as string,
-        total_amount: (row.total_amount as string) ?? "0.00",
+        total_amount: total.toFixed(2),
         past_closing: today > closing_date,
       };
     });
