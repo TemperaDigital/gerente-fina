@@ -113,7 +113,7 @@ export function AccountsWidget({ accounts }: AccountsWidgetProps) {
                   )}
                 >
                   {/* formatBRL espera o valor decimal real, dividimos os centavos por 100 */}
-                  {formatBRL(balanceCents / 100)}
+                  {formatBRL((balanceCents / 100).toFixed(2))}
                 </div>
               </div>
 
