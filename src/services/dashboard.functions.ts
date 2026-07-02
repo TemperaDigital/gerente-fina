@@ -104,8 +104,60 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
   });
 
 // -----------------------------------------------------------------------------
-// getOpenCreditCardInvoices — widget de cartões no Dashboard
+// getMonthlyDreHistory — últimos N meses para o gráfico de barras do Dashboard
 // -----------------------------------------------------------------------------
+
+export interface MonthlyDreDTO {
+  reference_month: string; // YYYY-MM-DD (primeiro dia do mês)
+  label: string;           // "Jan/25", "Fev/25", etc.
+  income: number;
+  expense: number;
+  net_result: number;
+}
+
+export const getMonthlyDreHistory = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => {
+    const raw = input as { months?: number } | undefined;
+    return { months: typeof raw?.months === "number" ? raw.months : 6 };
+  })
+  .handler(async ({ data }): Promise<MonthlyDreDTO[]> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    // Pega os últimos N meses em ordem cronológica
+    const since = new Date();
+    since.setUTCMonth(since.getUTCMonth() - (data.months - 1));
+    since.setUTCDate(1);
+    const sinceStr = since.toISOString().slice(0, 10);
+
+    const { data: rows, error } = await sb
+      .from("monthly_dre")
+      .select("reference_month, income, expense, net_result")
+      .gte("reference_month", sinceStr)
+      .order("reference_month", { ascending: true });
+
+    if (error) throw new Error(error.message);
+
+    // Preenche meses sem movimento com zeros para a linha do gráfico ficar contínua
+    const result: MonthlyDreDTO[] = [];
+    for (let i = 0; i < data.months; i++) {
+      const d = new Date();
+      d.setUTCMonth(d.getUTCMonth() - (data.months - 1 - i));
+      d.setUTCDate(1);
+      const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+      const match = (rows ?? []).find((r) => r.reference_month === key);
+      result.push({
+        reference_month: key,
+        label: d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" })
+               .replace(".", "").replace(" de ", "/"),
+        income: Number(match?.income ?? 0),
+        expense: Number(match?.expense ?? 0),
+        net_result: Number(match?.net_result ?? 0),
+      });
+    }
+    return result;
+  });
+
 
 export interface OpenInvoiceDTO {
   invoice_id: string;
@@ -127,7 +179,7 @@ export const getOpenCreditCardInvoices = createServerFn({ method: "GET" })
     const { data, error } = await sb
       .from("credit_card_invoices")
       .select(
-        `id, account_id, reference_month, closing_date, due_date, total_amount,
+        `id, account_id, reference_month, closing_date, due_date,
          accounts:account_id ( name )`,
       )
       .eq("status", "open")
@@ -135,20 +187,48 @@ export const getOpenCreditCardInvoices = createServerFn({ method: "GET" })
 
     if (error) throw new Error(error.message);
 
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+    const invoiceIds = (data ?? []).map((r) => (r as { id: string }).id);
+    // Total real: soma de despesas atreladas à fatura menos pagamentos (perna credit).
+    const totals = new Map<string, number>();
+    if (invoiceIds.length > 0) {
+      const { data: expenseRows } = await sb
+        .from("transactions")
+        .select("invoice_id, amount")
+        .in("invoice_id", invoiceIds)
+        .eq("kind", "expense");
+      for (const r of (expenseRows ?? []) as Array<{ invoice_id: string; amount: string }>) {
+        totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + Number(r.amount));
+      }
+      const { data: paymentRows } = await sb
+        .from("transactions")
+        .select("paid_invoice_id, amount, type")
+        .in("paid_invoice_id", invoiceIds)
+        .eq("kind", "invoice_payment")
+        .eq("type", "credit");
+      for (const r of (paymentRows ?? []) as Array<{
+        paid_invoice_id: string;
+        amount: string;
+      }>) {
+        totals.set(r.paid_invoice_id, (totals.get(r.paid_invoice_id) ?? 0) - Number(r.amount));
+      }
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
     const items: OpenInvoiceDTO[] = (data ?? []).map((r) => {
       const row = r as Record<string, unknown> & {
         accounts?: { name?: string | null } | null;
       };
+      const id = row.id as string;
       const closing_date = row.closing_date as string;
+      const total = Math.max(0, totals.get(id) ?? 0);
       return {
-        invoice_id: row.id as string,
+        invoice_id: id,
         account_id: row.account_id as string,
         account_name: row.accounts?.name ?? "Cartão",
         reference_month: row.reference_month as string,
         closing_date,
         due_date: row.due_date as string,
-        total_amount: (row.total_amount as string) ?? "0.00",
+        total_amount: total.toFixed(2),
         past_closing: today > closing_date,
       };
     });
