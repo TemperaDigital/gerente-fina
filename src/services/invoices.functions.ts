@@ -129,25 +129,47 @@ export const getInvoiceDetail = createServerFn({ method: "GET" })
 
     const { data: monthsRaw, error: mErr } = await sb
       .from("credit_card_invoices")
-      .select("id, reference_month, closing_date, due_date, status, total_amount")
+      .select("id, reference_month, closing_date, due_date, status")
       .eq("account_id", data.account_id)
       .order("reference_month", { ascending: false });
     if (mErr) throw new Error(mErr.message);
 
-    const months: InvoiceMonthRefDTO[] = ((monthsRaw ?? []) as Array<{
+    const rawRows = (monthsRaw ?? []) as Array<{
       id: string;
       reference_month: string;
       closing_date: string;
       due_date: string;
       status: InvoiceMonthRefDTO["status"];
-      total_amount: string;
-    }>).map((m) => ({
+    }>;
+    const invIds = rawRows.map((m) => m.id);
+    const totals = new Map<string, number>();
+    if (invIds.length > 0) {
+      const { data: exp } = await sb
+        .from("transactions")
+        .select("invoice_id, amount")
+        .in("invoice_id", invIds)
+        .eq("kind", "expense");
+      for (const r of (exp ?? []) as Array<{ invoice_id: string; amount: string }>) {
+        totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + Number(r.amount));
+      }
+      const { data: pay } = await sb
+        .from("transactions")
+        .select("paid_invoice_id, amount")
+        .in("paid_invoice_id", invIds)
+        .eq("kind", "invoice_payment")
+        .eq("type", "credit");
+      for (const r of (pay ?? []) as Array<{ paid_invoice_id: string; amount: string }>) {
+        totals.set(r.paid_invoice_id, (totals.get(r.paid_invoice_id) ?? 0) - Number(r.amount));
+      }
+    }
+
+    const months: InvoiceMonthRefDTO[] = rawRows.map((m) => ({
       invoice_id: m.id,
       reference_month: m.reference_month,
       closing_date: m.closing_date,
       due_date: m.due_date,
       status: m.status,
-      total_amount: m.total_amount ?? "0.00",
+      total_amount: Math.max(0, totals.get(m.id) ?? 0).toFixed(2),
     }));
 
     let current: InvoiceMonthRefDTO | null = null;
