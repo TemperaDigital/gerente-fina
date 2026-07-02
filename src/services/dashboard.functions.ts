@@ -104,8 +104,60 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
   });
 
 // -----------------------------------------------------------------------------
-// getOpenCreditCardInvoices — widget de cartões no Dashboard
+// getMonthlyDreHistory — últimos N meses para o gráfico de barras do Dashboard
 // -----------------------------------------------------------------------------
+
+export interface MonthlyDreDTO {
+  reference_month: string; // YYYY-MM-DD (primeiro dia do mês)
+  label: string;           // "Jan/25", "Fev/25", etc.
+  income: number;
+  expense: number;
+  net_result: number;
+}
+
+export const getMonthlyDreHistory = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => {
+    const raw = input as { months?: number } | undefined;
+    return { months: typeof raw?.months === "number" ? raw.months : 6 };
+  })
+  .handler(async ({ data }): Promise<MonthlyDreDTO[]> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    // Pega os últimos N meses em ordem cronológica
+    const since = new Date();
+    since.setUTCMonth(since.getUTCMonth() - (data.months - 1));
+    since.setUTCDate(1);
+    const sinceStr = since.toISOString().slice(0, 10);
+
+    const { data: rows, error } = await sb
+      .from("monthly_dre")
+      .select("reference_month, income, expense, net_result")
+      .gte("reference_month", sinceStr)
+      .order("reference_month", { ascending: true });
+
+    if (error) throw new Error(error.message);
+
+    // Preenche meses sem movimento com zeros para a linha do gráfico ficar contínua
+    const result: MonthlyDreDTO[] = [];
+    for (let i = 0; i < data.months; i++) {
+      const d = new Date();
+      d.setUTCMonth(d.getUTCMonth() - (data.months - 1 - i));
+      d.setUTCDate(1);
+      const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+      const match = (rows ?? []).find((r) => r.reference_month === key);
+      result.push({
+        reference_month: key,
+        label: d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" })
+               .replace(".", "").replace(" de ", "/"),
+        income: Number(match?.income ?? 0),
+        expense: Number(match?.expense ?? 0),
+        net_result: Number(match?.net_result ?? 0),
+      });
+    }
+    return result;
+  });
+
 
 export interface OpenInvoiceDTO {
   invoice_id: string;
