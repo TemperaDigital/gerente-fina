@@ -122,7 +122,7 @@ export function AccountsWidget({ accounts }: AccountsWidgetProps) {
                 <div className="mt-4 border-t border-white/5 pt-3">
                   <div className="flex justify-between text-xs">
                     <span className="flex items-center gap-1 text-foreground/60">
-                      <ShieldAlert className="size-3.5 text-amber-400" /> Limite: {formatBRL(overdraftLimitCents / 100)}
+                      <ShieldAlert className="size-3.5 text-amber-400" /> Limite: {formatBRL((overdraftLimitCents / 100).toFixed(2))}
                     </span>
                     <span
                       className={cn(
