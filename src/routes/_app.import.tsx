@@ -68,6 +68,12 @@ import {
   getDefaultImportAccount,
   type SmartImportRow,
 } from "@/lib/supabase/import.functions";
+import { detectCsvSchema } from "@/lib/supabase/csv-schema.functions";
+import {
+  parseCsvDate,
+  parseCsvAmount,
+  extractInstallmentHint,
+} from "@/lib/finance/csv-mapping";
 
 // ---------------------------------------------------------------------------
 // Estado editável por linha
@@ -76,6 +82,29 @@ import {
 interface EditableRow extends SmartImportRow {
   include: boolean;
   category_choice: string;
+  /** Parcelamento detectado na descrição original (ex: "3/12") — metadado, não persistido. */
+  installment_hint: { current: number; total: number } | null;
+}
+
+/** Nomes de coluna já suportados sem precisar de detecção via IA (economiza a chamada). */
+const KNOWN_DATE_KEYS = ["Data", "date", "Date"];
+const KNOWN_DESCRIPTION_KEYS = ["Descricao", "description", "Description"];
+const KNOWN_AMOUNT_KEYS = ["Valor", "amount", "Amount"];
+
+function detectKnownColumns(
+  keys: string[],
+): { dateKey: string; descKey: string; amountKey: string } | null {
+  const dateKey = KNOWN_DATE_KEYS.find((k) => keys.includes(k));
+  const descKey = KNOWN_DESCRIPTION_KEYS.find((k) => keys.includes(k));
+  const amountKey = KNOWN_AMOUNT_KEYS.find((k) => keys.includes(k));
+  if (!dateKey || !descKey || !amountKey) return null;
+  return { dateKey, descKey, amountKey };
+}
+
+/** Mesma semântica de sinal usada há tempos na tela: reaproveitada por todo formato de arquivo. */
+function resolveLineKind(isCreditCardMode: boolean, isNegative: boolean): "income" | "expense" {
+  if (isCreditCardMode) return isNegative ? "income" : "expense";
+  return isNegative ? "expense" : "income";
 }
 
 const defaultAccountQuery = () =>
@@ -185,28 +214,98 @@ function ImportPage() {
       skipEmptyLines: true,
       complete: async (results) => {
         try {
+          const rawRows = results.data as Record<string, string>[];
+          if (rawRows.length === 0) {
+            toast.error("Arquivo vazio ou sem linhas reconhecíveis.");
+            return;
+          }
+
+          // Colunas já conhecidas (Data/Descricao/Valor em pt/en) não precisam
+          // de detecção por IA — só CSVs de formato desconhecido chamam a IA,
+          // e apenas UMA VEZ por arquivo (nunca por linha).
+          const knownCols = detectKnownColumns(Object.keys(rawRows[0]));
+
+          let dateKey: string;
+          let descKey: string;
+          let amountKey: string;
+          let dateFormat: "DD/MM/YYYY" | "YYYY-MM-DD" | "MM/DD/YYYY" | "DD/MM/YY" = "DD/MM/YYYY";
+          let negativeConvention: "minus_prefix" | "minus_suffix" | "parentheses" | "none" =
+            "minus_prefix";
+
+          if (knownCols) {
+            dateKey = knownCols.dateKey;
+            descKey = knownCols.descKey;
+            amountKey = knownCols.amountKey;
+          } else {
+            toast.info("Detectando colunas do arquivo com IA...", { id: "schema" });
+            const sample = rawRows.slice(0, 5);
+            const schemaMap = await detectCsvSchema({ data: { sample_rows: sample } });
+            toast.dismiss("schema");
+
+            dateKey = schemaMap.date_key;
+            descKey = schemaMap.description_key;
+            amountKey = schemaMap.amount_key;
+            dateFormat = schemaMap.date_format;
+            negativeConvention = schemaMap.negative_convention;
+
+            const looksLikeCardButAccountIsBank =
+              !isCreditCard && schemaMap.statement_type === "credit_card_invoice";
+            const looksLikeBankButAccountIsCard =
+              isCreditCard && schemaMap.statement_type === "bank_statement";
+            if (looksLikeCardButAccountIsBank || looksLikeBankButAccountIsCard) {
+              toast.warning(
+                `O arquivo parece ser ${
+                  schemaMap.statement_type === "credit_card_invoice"
+                    ? "uma fatura de cartão"
+                    : "um extrato bancário"
+                }, mas o destino selecionado é ${isCreditCard ? "um cartão" : "uma conta bancária"}. Confira antes de continuar.`,
+              );
+            }
+          }
+
           const parsed: Array<{
             occurred_on: string;
             description: string;
             amount_raw: string;
             kind: "income" | "expense";
           }> = [];
+          const hints: Array<{ current: number; total: number } | null> = [];
           let skippedPayments = 0;
+          let skippedInvalid = 0;
 
-          for (const row of results.data as Record<string, string>[]) {
-            const rawDate = row.Data ?? row.date ?? row.Date ?? "";
-            const rawDesc = row.Descricao ?? row.description ?? row.Description ?? "";
-            const rawValue = row.Valor ?? row.amount ?? row.Amount ?? "";
-            if (!rawDate || !rawDesc || !rawValue) continue;
-
-            let occurred_on = rawDate.trim();
-            if (occurred_on.includes("/")) {
-              const [d, m, y] = occurred_on.split("/");
-              occurred_on = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+          for (const row of rawRows) {
+            const rawDate = row[dateKey] ?? "";
+            const rawDesc = row[descKey] ?? "";
+            const rawValue = row[amountKey] ?? "";
+            if (!rawDate || !rawDesc || !rawValue) {
+              skippedInvalid++;
+              continue;
             }
 
-            const numeric = parseFloat(String(rawValue).trim().replace(",", "."));
-            if (Number.isNaN(numeric)) continue;
+            let occurred_on: string;
+            let absAmount: string;
+            let isNegative: boolean;
+            try {
+              occurred_on = knownCols
+                ? rawDate.trim().includes("/")
+                  ? (() => {
+                      const [d, m, y] = rawDate.trim().split("/");
+                      return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+                    })()
+                  : rawDate.trim()
+                : parseCsvDate(rawDate, dateFormat);
+
+              ({ absAmount, isNegative } = knownCols
+                ? (() => {
+                    const numeric = parseFloat(String(rawValue).trim().replace(",", "."));
+                    if (Number.isNaN(numeric)) throw new Error("valor inválido");
+                    return { absAmount: Math.abs(numeric).toFixed(2), isNegative: numeric < 0 };
+                  })()
+                : parseCsvAmount(rawValue, negativeConvention));
+            } catch {
+              skippedInvalid++;
+              continue;
+            }
 
             // MODO FATURA: pula linhas de pagamento de fatura (fluxo neutro)
             if (isCreditCard && isInvoicePaymentLine(rawDesc)) {
@@ -214,25 +313,18 @@ function ImportPage() {
               continue;
             }
 
-            // Semântica de sinais:
-            //   extrato bancário → positivo = receita
-            //   fatura de cartão → positivo = compra (despesa); negativo = estorno
-            const kind: "income" | "expense" = isCreditCard
-              ? numeric >= 0
-                ? "expense"
-                : "income"
-              : numeric >= 0
-              ? "income"
-              : "expense";
-
             parsed.push({
               occurred_on,
               description: rawDesc.trim(),
-              amount_raw: Math.abs(numeric).toFixed(2),
-              kind,
+              amount_raw: absAmount,
+              kind: resolveLineKind(isCreditCard, isNegative),
             });
+            hints.push(extractInstallmentHint(rawDesc));
           }
 
+          if (skippedInvalid > 0) {
+            toast.info(`${skippedInvalid} linha(s) ignoradas por dado inválido ou incompleto.`);
+          }
           if (skippedPayments > 0) {
             toast.info(
               `${skippedPayments} linha(s) de pagamento de fatura ignoradas — pagamentos são lançados pela tela de Cartões.`,
@@ -240,7 +332,7 @@ function ImportPage() {
           }
 
           if (parsed.length === 0) {
-            toast.error("Nenhuma linha válida. Verifique as colunas: Data, Descricao, Valor.");
+            toast.error("Nenhuma linha válida encontrada no arquivo.");
             return;
           }
 
@@ -251,7 +343,7 @@ function ImportPage() {
           toast.dismiss("classify");
 
           // Converte para estado editável, pré-preenchendo com a sugestão da IA
-          const editable: EditableRow[] = classified.map((r) => ({
+          const editable: EditableRow[] = classified.map((r, i) => ({
             ...r,
             include: !r.is_duplicate,
             category_choice: r.suggested_category_id
@@ -259,6 +351,7 @@ function ImportPage() {
               : r.suggested_new_category
               ? `new:${r.suggested_new_category}`
               : "",
+            installment_hint: hints[i] ?? null,
           }));
 
           setRows(editable);
@@ -274,6 +367,7 @@ function ImportPage() {
           );
         } catch (err: unknown) {
           toast.dismiss("classify");
+          toast.dismiss("schema");
           toast.error(`Erro: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
           setIsClassifying(false);
@@ -440,7 +534,9 @@ function ImportPage() {
               ? "Clique ou arraste o arquivo CSV da fatura do cartão"
               : "Clique ou arraste o arquivo CSV do seu banco"}
           </p>
-          <p className="text-xs text-foreground/40 mt-1">Colunas esperadas: Data · Descricao · Valor</p>
+          <p className="text-xs text-foreground/40 mt-1">
+            Reconhece automaticamente as colunas de qualquer banco (ou use Data · Descricao · Valor)
+          </p>
         </GlassCard>
       )}
 
@@ -571,6 +667,11 @@ function ImportPage() {
                                 <Pencil className="size-3 text-foreground/20 group-hover:text-foreground/60 shrink-0" />
                               )}
                             </button>
+                          )}
+                          {r.installment_hint && (
+                            <span className="ml-1.5 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border text-violet-400 bg-violet-500/10 border-violet-500/20">
+                              {r.installment_hint.current}/{r.installment_hint.total}
+                            </span>
                           )}
                         </TableCell>
 
