@@ -12,10 +12,23 @@
  * MODO FATURA (conta tipo credit_card):
  *   - Semântica de sinais INVERTIDA: positivo = compra (despesa),
  *     negativo = estorno/crédito (receita). Em extrato bancário é o oposto.
- *   - Linhas de "pagamento de fatura" são puladas automaticamente — pagamento
- *     é fluxo neutro (invoice_payment) e deve ser lançado pela tela própria.
  *   - O vínculo com a fatura correta (regra do meio do mês) é feito pela
  *     trigger tg_attach_credit_card_invoice no banco — zero lógica aqui.
+ *
+ * PAGAMENTO DE FATURA (correção contábil):
+ *   - Pagamento de fatura NÃO é receita nem despesa — é uma LIQUIDAÇÃO
+ *     (dinheiro sai da conta corrente, abate a dívida do cartão). Linhas
+ *     detectadas por isInvoicePaymentLine NÃO entram na tabela normal —
+ *     ficam isoladas na seção "Pagamento(s) de Fatura Detectado(s)".
+ *   - A fatura sendo quitada quase nunca é a que está sendo importada agora
+ *     — é a anterior, já fechada. suggestInvoiceForPayment() sugere a fatura
+ *     mais provável (maior due_date <= data do pagamento), mas a conta de
+ *     origem NUNCA é sugerida — o extrato não informa isso, exige escolha
+ *     humana sempre.
+ *   - Ao confirmar, cada linha de pagamento vira uma chamada independente a
+ *     createTransactionEntry(kind: "invoice_payment"), que já orquestra a
+ *     RPC atômica e idempotente pay_credit_card_invoice — o importador NUNCA
+ *     chama a RPC diretamente nem duplica essa lógica.
  *
  * Nota de design: o dedup_hash é calculado sobre a linha ORIGINAL do extrato.
  * Edições de descrição/tipo na pré-visualização NÃO recalculam o hash — isso é
@@ -70,6 +83,12 @@ import {
 } from "@/lib/supabase/import.functions";
 import { detectCsvSchema } from "@/lib/supabase/csv-schema.functions";
 import { extractPdfStatement } from "@/lib/supabase/pdf-statement.functions";
+import { createTransactionEntry } from "@/services/transactions.functions";
+import {
+  listInvoicesForPayment,
+  type InvoiceForPaymentDTO,
+} from "@/services/invoices.functions";
+import { suggestInvoiceForPayment } from "@/lib/finance/invoice-payment-match";
 import {
   parseCsvDate,
   parseCsvAmount,
@@ -85,6 +104,20 @@ interface EditableRow extends SmartImportRow {
   category_choice: string;
   /** Parcelamento detectado na descrição original (ex: "3/12") — metadado, não persistido. */
   installment_hint: { current: number; total: number } | null;
+}
+
+/**
+ * Linha detectada como pagamento de fatura — NUNCA passa por
+ * classifyAndCheckImport/commitSmartImport. Exige conta de origem e fatura
+ * escolhidas manualmente antes de poder ser confirmada.
+ */
+interface PaymentRow {
+  key: string;
+  occurred_on: string;
+  description: string;
+  amount_raw: string;
+  source_account_id: string;
+  paid_invoice_id: string;
 }
 
 /** Nomes de coluna já suportados sem precisar de detecção via IA (economiza a chamada). */
@@ -180,6 +213,11 @@ function ImportPage() {
   const [pdfPassword, setPdfPassword] = useState("");
   const [pdfPasswordWrong, setPdfPasswordWrong] = useState(false);
 
+  // Pagamento(s) de fatura detectado(s) — isolados da tabela normal.
+  const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([]);
+  const [cardInvoices, setCardInvoices] = useState<InvoiceForPaymentDTO[]>([]);
+  const [bulkSourceAccountId, setBulkSourceAccountId] = useState("");
+
   useEffect(() => {
     if (!accountId && defaultAccount?.id) setAccountId(defaultAccount.id);
   }, [defaultAccount, accountId]);
@@ -221,10 +259,32 @@ function ImportPage() {
   }, [rows]);
 
   // ---------------------------------------------------------------------------
-  // Etapa final compartilhada por TODO formato de arquivo (CSV, PDF...):
-  // manda para a IA classificar e prepara o estado editável da pré-visualização.
+  // Resolve os rascunhos de pagamento de fatura: busca as faturas do cartão
+  // UMA VEZ e aplica a sugestão automática (nunca sugere a conta de origem —
+  // isso o extrato não informa, exige escolha humana sempre).
   // ---------------------------------------------------------------------------
-  async function classifyParsedRows(
+  async function resolvePaymentDrafts(
+    drafts: Array<{ occurred_on: string; description: string; amount_raw: string }>,
+  ): Promise<PaymentRow[]> {
+    if (drafts.length === 0) return [];
+    const invoices = await listInvoicesForPayment({ data: { account_id: accountId } });
+    setCardInvoices(invoices);
+    return drafts.map((d) => ({
+      key: crypto.randomUUID(),
+      occurred_on: d.occurred_on,
+      description: d.description,
+      amount_raw: d.amount_raw,
+      source_account_id: "",
+      paid_invoice_id: suggestInvoiceForPayment(invoices, d.occurred_on) ?? "",
+    }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Etapa final compartilhada por TODO formato de arquivo (CSV, PDF...):
+  // separa pagamentos de fatura (seção própria) do restante (vai para a IA
+  // classificar) e prepara os dois estados editáveis da pré-visualização.
+  // ---------------------------------------------------------------------------
+  async function finishUpload(
     parsed: Array<{
       occurred_on: string;
       description: string;
@@ -232,9 +292,26 @@ function ImportPage() {
       kind: "income" | "expense";
     }>,
     hints: Array<{ current: number; total: number } | null>,
+    paymentDrafts: Array<{ occurred_on: string; description: string; amount_raw: string }>,
   ) {
-    if (parsed.length === 0) {
+    if (parsed.length === 0 && paymentDrafts.length === 0) {
       toast.error("Nenhuma linha válida encontrada no arquivo.");
+      return;
+    }
+
+    if (paymentDrafts.length > 0) {
+      const resolved = await resolvePaymentDrafts(paymentDrafts);
+      setPaymentRows(resolved);
+      toast.info(
+        `${resolved.length} pagamento(s) de fatura detectado(s) — revise a conta de origem e a fatura na seção própria abaixo.`,
+      );
+    } else {
+      setPaymentRows([]);
+      setCardInvoices([]);
+    }
+
+    if (parsed.length === 0) {
+      setRows([]);
       return;
     }
 
@@ -267,6 +344,15 @@ function ImportPage() {
         (pending > 0 ? `, ${pending} aguardando categoria manual` : "") +
         (dups > 0 ? `, ${dups} duplicatas ignoradas` : "") + ".",
     );
+  }
+
+  function patchPaymentRow(key: string, patch: Partial<PaymentRow>) {
+    setPaymentRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }
+
+  function applyBulkSourceAccount(id: string) {
+    setBulkSourceAccountId(id);
+    setPaymentRows((prev) => prev.map((r) => ({ ...r, source_account_id: id })));
   }
 
   /** Avisa quando o tipo de documento detectado não bate com a conta selecionada. */
@@ -324,11 +410,15 @@ function ImportPage() {
         kind: "income" | "expense";
       }> = [];
       const hints: Array<{ current: number; total: number } | null> = [];
-      let skippedPayments = 0;
+      const paymentDrafts: Array<{ occurred_on: string; description: string; amount_raw: string }> = [];
 
       for (const row of result.rows ?? []) {
         if (isCreditCard && isInvoicePaymentLine(row.description)) {
-          skippedPayments++;
+          paymentDrafts.push({
+            occurred_on: row.occurred_on,
+            description: row.description.trim(),
+            amount_raw: row.amount_raw,
+          });
           continue;
         }
         parsed.push({
@@ -340,13 +430,7 @@ function ImportPage() {
         hints.push(extractInstallmentHint(row.description));
       }
 
-      if (skippedPayments > 0) {
-        toast.info(
-          `${skippedPayments} linha(s) de pagamento de fatura ignoradas — pagamentos são lançados pela tela de Cartões.`,
-        );
-      }
-
-      await classifyParsedRows(parsed, hints);
+      await finishUpload(parsed, hints, paymentDrafts);
     } catch (err: unknown) {
       toast.error(`Erro ao processar PDF: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -422,7 +506,7 @@ function ImportPage() {
             kind: "income" | "expense";
           }> = [];
           const hints: Array<{ current: number; total: number } | null> = [];
-          let skippedPayments = 0;
+          const paymentDrafts: Array<{ occurred_on: string; description: string; amount_raw: string }> = [];
           let skippedInvalid = 0;
 
           for (const row of rawRows) {
@@ -459,9 +543,10 @@ function ImportPage() {
               continue;
             }
 
-            // MODO FATURA: pula linhas de pagamento de fatura (fluxo neutro)
+            // MODO FATURA: pagamento de fatura vai para a seção própria, não
+            // para a tabela normal (não é receita nem despesa — é liquidação)
             if (isCreditCard && isInvoicePaymentLine(rawDesc)) {
-              skippedPayments++;
+              paymentDrafts.push({ occurred_on, description: rawDesc.trim(), amount_raw: absAmount });
               continue;
             }
 
@@ -477,13 +562,8 @@ function ImportPage() {
           if (skippedInvalid > 0) {
             toast.info(`${skippedInvalid} linha(s) ignoradas por dado inválido ou incompleto.`);
           }
-          if (skippedPayments > 0) {
-            toast.info(
-              `${skippedPayments} linha(s) de pagamento de fatura ignoradas — pagamentos são lançados pela tela de Cartões.`,
-            );
-          }
 
-          await classifyParsedRows(parsed, hints);
+          await finishUpload(parsed, hints, paymentDrafts);
         } catch (err: unknown) {
           toast.dismiss("classify");
           toast.dismiss("schema");
@@ -517,41 +597,122 @@ function ImportPage() {
   // ---------------------------------------------------------------------------
   const included = rows.filter((r) => r.include && !r.is_duplicate);
   const pendingCategory = included.filter((r) => !r.category_choice).length;
-  const readyToCommit = included.length > 0 && pendingCategory === 0;
+  const paymentRowsPending = paymentRows.filter(
+    (r) => !r.source_account_id || !r.paid_invoice_id,
+  ).length;
+  const hasSomethingToCommit = included.length > 0 || paymentRows.length > 0;
+  const readyToCommit =
+    hasSomethingToCommit && pendingCategory === 0 && paymentRowsPending === 0;
+
+  interface PaymentOutcome {
+    description: string;
+    ok: boolean;
+    was_duplicate?: boolean;
+    reason?: string;
+  }
 
   const commitMut = useMutation({
-    mutationFn: () =>
-      commitSmartImport({
-        data: {
-          rows: included.map((r) => ({
-            occurred_on: r.occurred_on,
-            description: r.description,
-            amount_raw: r.amount_raw,
-            kind: r.kind,
-            account_id: r.account_id,
-            dedup_hash: r.dedup_hash,
-            category_id: r.category_choice.startsWith("cat:")
-              ? r.category_choice.slice(4)
-              : null,
-            new_category_name: r.category_choice.startsWith("new:")
-              ? r.category_choice.slice(4)
-              : null,
-            notes: r.notes ?? null,
-          })),
-        },
-      }),
-    onSuccess: (result) => {
-      toast.success(
-        `${result.inserted} lançamento(s) importados` +
-          (result.categories_created > 0
-            ? ` · ${result.categories_created} categoria(s) nova(s) criada(s)`
-            : "") + "!",
-      );
+    mutationFn: async () => {
+      let smartResult: { inserted: number; categories_created: number } | null = null;
+      if (included.length > 0) {
+        smartResult = await commitSmartImport({
+          data: {
+            rows: included.map((r) => ({
+              occurred_on: r.occurred_on,
+              description: r.description,
+              amount_raw: r.amount_raw,
+              kind: r.kind,
+              account_id: r.account_id,
+              dedup_hash: r.dedup_hash,
+              category_id: r.category_choice.startsWith("cat:")
+                ? r.category_choice.slice(4)
+                : null,
+              new_category_name: r.category_choice.startsWith("new:")
+                ? r.category_choice.slice(4)
+                : null,
+              notes: r.notes ?? null,
+            })),
+          },
+        });
+      }
+
+      // Cada pagamento de fatura é uma chamada INDEPENDENTE — uma falha não
+      // derruba as demais. idempotency_key é determinístico (não randômico):
+      // reimportar o mesmo arquivo com as mesmas escolhas não duplica o
+      // pagamento, a RPC devolve was_duplicate=true.
+      let paymentOutcomes: PaymentOutcome[] = [];
+      if (paymentRows.length > 0) {
+        const settled = await Promise.allSettled(
+          paymentRows.map((r) =>
+            createTransactionEntry({
+              data: {
+                kind: "invoice_payment",
+                amount: r.amount_raw,
+                occurred_on: r.occurred_on,
+                description: r.description,
+                account_id: r.source_account_id,
+                paid_invoice_id: r.paid_invoice_id,
+                idempotency_key: `import:${r.paid_invoice_id}:${r.source_account_id}:${r.occurred_on}:${r.amount_raw}`,
+              },
+            }),
+          ),
+        );
+        paymentOutcomes = settled.map((s, i) => {
+          if (s.status === "fulfilled") {
+            return {
+              description: paymentRows[i].description,
+              ok: true,
+              was_duplicate: s.value.was_duplicate,
+            };
+          }
+          return {
+            description: paymentRows[i].description,
+            ok: false,
+            reason: s.reason instanceof Error ? s.reason.message : String(s.reason),
+          };
+        });
+      }
+
+      return { smartResult, paymentOutcomes };
+    },
+    onSuccess: ({ smartResult, paymentOutcomes }) => {
+      if (smartResult) {
+        toast.success(
+          `${smartResult.inserted} lançamento(s) importados` +
+            (smartResult.categories_created > 0
+              ? ` · ${smartResult.categories_created} categoria(s) nova(s) criada(s)`
+              : "") + "!",
+        );
+      }
+
+      if (paymentOutcomes.length > 0) {
+        const succeeded = paymentOutcomes.filter((p) => p.ok);
+        const failed = paymentOutcomes.filter((p) => !p.ok);
+        const duplicates = succeeded.filter((p) => p.was_duplicate).length;
+
+        if (failed.length === 0) {
+          toast.success(
+            `${succeeded.length} pagamento(s) de fatura processado(s) com sucesso` +
+              (duplicates > 0 ? ` (${duplicates} já existia(m) — ignorado(s))` : "") +
+              ".",
+          );
+        } else {
+          toast.error(
+            `${succeeded.length} pagamento(s) processado(s), ${failed.length} falharam: ` +
+              failed.map((f) => `"${f.description}": ${f.reason}`).join(" · "),
+          );
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["lookups", "categories"] });
       queryClient.invalidateQueries({ queryKey: ["categories"] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
       setRows([]);
+      setPaymentRows([]);
+      setCardInvoices([]);
+      setBulkSourceAccountId("");
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -577,7 +738,11 @@ function ImportPage() {
           <Landmark className="size-4 text-primary" /> Destino da importação
         </div>
         <div className="max-w-sm">
-          <Select value={accountId} onValueChange={setAccountId} disabled={rows.length > 0}>
+          <Select
+            value={accountId}
+            onValueChange={setAccountId}
+            disabled={rows.length > 0 || paymentRows.length > 0}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Selecione conta ou cartão..." />
             </SelectTrigger>
@@ -610,7 +775,8 @@ function ImportPage() {
               <span className="font-semibold text-violet-300">Modo fatura ativo:</span>{" "}
               valores positivos serão tratados como <strong>compras (despesas)</strong> e
               negativos como <strong>estornos</strong>. Linhas de pagamento de fatura são
-              ignoradas automaticamente. Cada compra será vinculada à fatura correta
+              isoladas numa seção própria — não são receita nem despesa, exigem confirmar a
+              conta de origem e a fatura quitada. Cada compra será vinculada à fatura correta
               (fechamento dia {selectedAccount?.closing_day}, vencimento dia {selectedAccount?.due_day}).
             </span>
           </div>
@@ -630,7 +796,7 @@ function ImportPage() {
       </GlassCard>
 
       {/* Etapa 2: Upload (ou prompt de senha, se o PDF pedir) */}
-      {rows.length === 0 && pdfPendingFile && (
+      {rows.length === 0 && paymentRows.length === 0 && pdfPendingFile && (
         <GlassCard className="p-6 border border-amber-500/30 space-y-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-amber-300">
             <AlertTriangle className="size-4" /> PDF protegido por senha
@@ -672,7 +838,7 @@ function ImportPage() {
         </GlassCard>
       )}
 
-      {rows.length === 0 && !pdfPendingFile && (
+      {rows.length === 0 && paymentRows.length === 0 && !pdfPendingFile && (
         <GlassCard className="p-12 text-center border border-dashed border-white/20 relative hover:border-primary/40 transition-colors">
           <input
             type="file"
@@ -703,8 +869,100 @@ function ImportPage() {
       )}
 
       {/* Etapa 3: Pré-visualização editável */}
-      {rows.length > 0 && (
+      {(rows.length > 0 || paymentRows.length > 0) && (
         <div className="space-y-4">
+
+          {/* Pagamento(s) de Fatura Detectado(s) — NUNCA vão na tabela normal:
+              não são receita nem despesa, são liquidação (RPC pay_credit_card_invoice) */}
+          {paymentRows.length > 0 && (
+            <GlassCard className="border border-violet-500/30 bg-violet-500/5 p-5 space-y-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-violet-300">
+                <CreditCard className="size-4" /> Pagamento(s) de Fatura Detectado(s) (
+                {paymentRows.length})
+              </div>
+              <p className="text-xs text-foreground/60 leading-relaxed">
+                Pagamento de fatura não é receita nem despesa — é uma liquidação entre a conta de
+                origem e o cartão. A fatura sugerida é a mais provável, mas SEMPRE confira; a conta
+                de origem nunca é sugerida automaticamente (o extrato não informa isso).
+              </p>
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 max-w-lg">
+                <span className="text-xs text-foreground/60 shrink-0">
+                  Aplicar esta conta a todos os pagamentos detectados:
+                </span>
+                <Select value={bulkSourceAccountId} onValueChange={applyBulkSourceAccount}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Selecionar conta de origem..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {bankAccounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                {paymentRows.map((r) => (
+                  <div
+                    key={r.key}
+                    className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-3 grid gap-2 sm:grid-cols-[auto_1fr_1fr_1fr] sm:items-center"
+                  >
+                    <div className="text-xs font-mono text-foreground/60 whitespace-nowrap">
+                      {r.occurred_on}
+                    </div>
+                    <div className="text-xs min-w-0">
+                      <p className="font-medium truncate">{r.description}</p>
+                      <p className="text-foreground/40 font-mono">R$ {BRL(r.amount_raw)}</p>
+                    </div>
+                    <Select
+                      value={r.source_account_id}
+                      onValueChange={(v) => patchPaymentRow(r.key, { source_account_id: v })}
+                    >
+                      <SelectTrigger
+                        className={`h-8 text-xs ${
+                          !r.source_account_id ? "border-amber-500/50 text-amber-400" : ""
+                        }`}
+                      >
+                        <SelectValue placeholder="⚠ Conta de origem..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {bankAccounts.map((a) => (
+                          <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={r.paid_invoice_id}
+                      onValueChange={(v) => patchPaymentRow(r.key, { paid_invoice_id: v })}
+                    >
+                      <SelectTrigger
+                        className={`h-8 text-xs ${
+                          !r.paid_invoice_id ? "border-amber-500/50 text-amber-400" : ""
+                        }`}
+                      >
+                        <SelectValue placeholder="⚠ Fatura sendo quitada..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cardInvoices.length === 0 ? (
+                          <div className="px-2 py-1.5 text-xs text-foreground/40">
+                            Nenhuma fatura disponível
+                          </div>
+                        ) : (
+                          cardInvoices.map((inv) => (
+                            <SelectItem key={inv.id} value={inv.id}>
+                              {inv.reference_month.slice(0, 7)} · vence {inv.due_date} ·{" "}
+                              {inv.status === "closed" ? "fechada" : "aberta"}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+              </div>
+            </GlassCard>
+          )}
 
           {/* Banner de categorias novas propostas */}
           {proposedNewCategories.length > 0 && (
@@ -733,14 +991,43 @@ function ImportPage() {
             <div className="flex items-center gap-2 text-sm text-foreground/70">
               <FileText className="size-4 text-primary" />
               <span>
-                {included.length} de {rows.length} selecionadas
-                {pendingCategory > 0 && (
-                  <span className="text-amber-400 font-semibold"> · {pendingCategory} sem categoria</span>
+                {rows.length > 0 && (
+                  <>
+                    {included.length} de {rows.length} selecionadas
+                    {pendingCategory > 0 && (
+                      <span className="text-amber-400 font-semibold">
+                        {" "}
+                        · {pendingCategory} sem categoria
+                      </span>
+                    )}
+                  </>
+                )}
+                {paymentRows.length > 0 && (
+                  <span className={rows.length > 0 ? "ml-1" : ""}>
+                    {rows.length > 0 ? "· " : ""}
+                    {paymentRows.length} pagamento(s) de fatura
+                    {paymentRowsPending > 0 && (
+                      <span className="text-amber-400 font-semibold">
+                        {" "}
+                        ({paymentRowsPending} pendente(s) de conta/fatura)
+                      </span>
+                    )}
+                  </span>
                 )}
               </span>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setRows([])} className="rounded-full">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setRows([]);
+                  setPaymentRows([]);
+                  setCardInvoices([]);
+                  setBulkSourceAccountId("");
+                }}
+                className="rounded-full"
+              >
                 Cancelar
               </Button>
               <Button
@@ -750,12 +1037,14 @@ function ImportPage() {
                 className="rounded-full gap-1.5"
               >
                 {commitMut.isPending && <RefreshCw className="size-3.5 animate-spin" />}
-                Confirmar importação ({included.length}) <ArrowRight className="size-4" />
+                Confirmar importação ({included.length + paymentRows.length}){" "}
+                <ArrowRight className="size-4" />
               </Button>
             </div>
           </div>
 
           {/* Tabela editável */}
+          {rows.length > 0 && (
           <GlassCard className="overflow-hidden border border-white/10">
             <div className="overflow-x-auto">
               <Table>
@@ -918,6 +1207,7 @@ function ImportPage() {
               </Table>
             </div>
           </GlassCard>
+          )}
         </div>
       )}
     </div>

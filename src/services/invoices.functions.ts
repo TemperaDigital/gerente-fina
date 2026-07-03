@@ -93,6 +93,39 @@ export const listInvoiceMasters = createServerFn({ method: "GET" }).handler(
   },
 );
 
+// ---------------------------------------------------------------------------
+// listInvoicesForPayment — usado pelo Importador para o seletor "fatura
+// sendo quitada" na seção de Pagamento(s) de Fatura Detectado(s). Só traz
+// faturas 'open'/'closed' (as únicas candidatas plausíveis a estarem sendo
+// pagas agora) — casa com a regra de suggestInvoiceForPayment().
+// ---------------------------------------------------------------------------
+export interface InvoiceForPaymentDTO {
+  id: string;
+  reference_month: string;
+  closing_date: string;
+  due_date: string;
+  status: "open" | "closed";
+}
+
+const ForPaymentInput = z.object({ account_id: z.string().uuid() });
+
+export const listInvoicesForPayment = createServerFn({ method: "GET" })
+  .inputValidator((i: unknown) => ForPaymentInput.parse(i))
+  .handler(async ({ data }): Promise<InvoiceForPaymentDTO[]> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    const { data: rows, error } = await sb
+      .from("credit_card_invoices")
+      .select("id, reference_month, closing_date, due_date, status")
+      .eq("account_id", data.account_id)
+      .in("status", ["open", "closed"])
+      .order("due_date", { ascending: false });
+    if (error) throw new Error(error.message);
+
+    return (rows ?? []) as InvoiceForPaymentDTO[];
+  });
+
 export interface InvoiceMonthRefDTO {
   invoice_id: string;
   reference_month: string;
