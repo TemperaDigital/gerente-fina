@@ -130,66 +130,93 @@ export const extractPdfStatement = createServerFn({ method: "POST" })
     const MAX_CHARS = 18_000;
     const textForAI = text.length > MAX_CHARS ? text.slice(0, MAX_CHARS) : text;
 
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: textForAI },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "extract_pdf_statement",
-              description:
-                "Retorna os lançamentos extraídos do documento + metadados de formato.",
-              parameters: {
-                type: "object",
-                properties: {
-                  document_date: { type: "string", description: "YYYY-MM-DD" },
-                  statement_type: {
-                    type: "string",
-                    enum: ["bank_statement", "credit_card_invoice"],
-                  },
-                  negative_convention: {
-                    type: "string",
-                    enum: ["minus_prefix", "minus_suffix", "parentheses", "none"],
-                  },
-                  transactions: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        day: { type: "integer" },
-                        month: { type: "integer" },
-                        description: { type: "string" },
-                        amount_text: { type: "string" },
+    // Timeout explícito: sem isso, uma trava no gateway prenderia a requisição
+    // indefinidamente e o usuário só veria um erro genérico de rede no browser.
+    const AI_TIMEOUT_MS = 30_000;
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), AI_TIMEOUT_MS);
+
+    let resp: Response;
+    try {
+      resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        signal: timeoutController.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: textForAI },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "extract_pdf_statement",
+                description:
+                  "Retorna os lançamentos extraídos do documento + metadados de formato.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    document_date: { type: "string", description: "YYYY-MM-DD" },
+                    statement_type: {
+                      type: "string",
+                      enum: ["bank_statement", "credit_card_invoice"],
+                    },
+                    negative_convention: {
+                      type: "string",
+                      enum: ["minus_prefix", "minus_suffix", "parentheses", "none"],
+                    },
+                    transactions: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          day: { type: "integer" },
+                          month: { type: "integer" },
+                          description: { type: "string" },
+                          amount_text: { type: "string" },
+                        },
+                        required: ["day", "month", "description", "amount_text"],
                       },
-                      required: ["day", "month", "description", "amount_text"],
                     },
                   },
+                  required: [
+                    "document_date",
+                    "statement_type",
+                    "negative_convention",
+                    "transactions",
+                  ],
                 },
-                required: [
-                  "document_date",
-                  "statement_type",
-                  "negative_convention",
-                  "transactions",
-                ],
               },
             },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: "extract_pdf_statement" } },
-      }),
-    });
+          ],
+          tool_choice: { type: "function", function: { name: "extract_pdf_statement" } },
+        }),
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new Error(
+          `Tempo esgotado ao consultar a IA (${AI_TIMEOUT_MS / 1000}s). Tente novamente em instantes.`,
+        );
+      }
+      throw new Error(
+        `Falha de rede ao consultar a IA: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!resp.ok) {
+      if (resp.status === 429) {
+        throw new Error("Limite de requisições da IA atingido. Tente novamente em instantes.");
+      }
+      if (resp.status === 402) {
+        throw new Error("Créditos da IA esgotados. Adicione créditos no workspace da Lovable.");
+      }
       const errText = await resp.text().catch(() => "");
       throw new Error(`Falha ao consultar a IA (${resp.status}): ${errText.slice(0, 200)}`);
     }
