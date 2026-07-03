@@ -307,8 +307,24 @@ function NewTransactionPage() {
                 />
               </Field>
 
-              <Field label={kind === "transfer" ? "Conta de origem" : "Conta"}>
-                <AccountSelect accounts={accounts} value={accountId} onChange={setAccountId} />
+              <Field
+                label={
+                  kind === "transfer"
+                    ? "Conta de origem"
+                    : kind === "invoice_payment"
+                      ? "Conta de origem (débito)"
+                      : "Conta"
+                }
+              >
+                <AccountSelect
+                  accounts={
+                    kind === "invoice_payment"
+                      ? accounts.filter((a) => a.type !== "credit_card")
+                      : accounts
+                  }
+                  value={accountId}
+                  onChange={setAccountId}
+                />
               </Field>
 
               {kind === "transfer" && (
@@ -318,6 +334,18 @@ function NewTransactionPage() {
                     value={counterpartId}
                     onChange={setCounterpartId}
                   />
+                </Field>
+              )}
+
+              {kind === "invoice_payment" && (
+                <Field label="Categoria">
+                  <div className="flex items-center gap-2 rounded-md border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-sm text-violet-200">
+                    <CardIcon className="size-4" />
+                    <span className="font-medium">Fatura de cartões</span>
+                    <span className="ml-auto text-[10px] uppercase tracking-wider text-violet-300/70">
+                      fixa
+                    </span>
+                  </div>
                 </Field>
               )}
 
