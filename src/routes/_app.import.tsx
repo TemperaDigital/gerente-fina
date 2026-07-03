@@ -1,37 +1,55 @@
 /**
- * Rota /import — Importação e Conciliação de Extratos CSV.
+ * Rota /import — Importador Inteligente de Extratos e Faturas (Partes 2+3).
  *
- * Fluxo em 3 etapas:
- *   1. Selecionar conta destino (obrigatório — account_id é NOT NULL no schema)
- *   2. Fazer upload do CSV e escolher categoria padrão para linhas sem match
- *   3. Pré-visualizar com duplicatas marcadas → confirmar gravação
+ * Fluxo:
+ *   1. Selecionar conta destino — BANCO/DINHEIRO (extrato) ou CARTÃO (fatura)
+ *   2. Upload CSV → classifyAndCheckImport (hash + dedup + classificação IA)
+ *   3. Pré-visualização EDITÁVEL: categoria sugerida por linha (corrigível),
+ *      badges de confiança, categorias novas propostas em destaque,
+ *      descrição/tipo editáveis, incluir/excluir linha
+ *   4. commitSmartImport → cria categorias novas aprovadas + grava lançamentos
  *
- * Usa checkImportDuplicates + commitImport (src/services/import.functions.ts).
- * Hash SHA-256 via WebCrypto — mesmo algoritmo da trigger do banco.
+ * MODO FATURA (conta tipo credit_card):
+ *   - Semântica de sinais INVERTIDA: positivo = compra (despesa),
+ *     negativo = estorno/crédito (receita). Em extrato bancário é o oposto.
+ *   - Linhas de "pagamento de fatura" são puladas automaticamente — pagamento
+ *     é fluxo neutro (invoice_payment) e deve ser lançado pela tela própria.
+ *   - O vínculo com a fatura correta (regra do meio do mês) é feito pela
+ *     trigger tg_attach_credit_card_invoice no banco — zero lógica aqui.
+ *
+ * Nota de design: o dedup_hash é calculado sobre a linha ORIGINAL do extrato.
+ * Edições de descrição/tipo na pré-visualização NÃO recalculam o hash — isso é
+ * intencional: o hash identifica a linha do banco de origem, garantindo que o
+ * mesmo extrato reimportado seja barrado mesmo que o usuário tenha editado.
  */
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import Papa from "papaparse";
 import {
   Upload,
   FileText,
-  CheckCircle,
   AlertTriangle,
   ArrowRight,
   RefreshCw,
   Landmark,
+  Sparkles,
+  Pencil,
+  CreditCard,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
-import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -45,15 +63,23 @@ import {
 } from "@/components/ui/table";
 import { getAccountsLookup, getCategoriesLookup } from "@/services/lookups.functions";
 import {
-  checkImportDuplicates,
-  commitImport,
+  classifyAndCheckImport,
+  commitSmartImport,
   getDefaultImportAccount,
-  type CheckedImportRow,
+  type SmartImportRow,
 } from "@/lib/supabase/import.functions";
+
+// ---------------------------------------------------------------------------
+// Estado editável por linha
+// category_choice: "cat:<uuid>" | "new:<nome>" | "" (pendente)
+// ---------------------------------------------------------------------------
+interface EditableRow extends SmartImportRow {
+  include: boolean;
+  category_choice: string;
+}
 
 const defaultAccountQuery = () =>
   queryOptions({ queryKey: ["import", "default-account"], queryFn: () => getDefaultImportAccount() });
-
 
 const accountsQuery = () =>
   queryOptions({ queryKey: ["lookups", "accounts"], queryFn: () => getAccountsLookup() });
@@ -69,7 +95,6 @@ export const Route = createFileRoute("/_app/import")({
       context.queryClient.ensureQueryData(categoriesQuery()),
       context.queryClient.ensureQueryData(defaultAccountQuery()),
     ]),
-
   errorComponent: ({ error }) => (
     <AppShell>
       <div className="mx-auto max-w-3xl px-4 py-10">
@@ -86,6 +111,12 @@ export const Route = createFileRoute("/_app/import")({
   ),
 });
 
+const CONFIDENCE_META = {
+  high: { label: "Alta", cls: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" },
+  medium: { label: "Média", cls: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
+  low: { label: "Baixa", cls: "text-zinc-400 bg-zinc-500/10 border-zinc-500/20" },
+} as const;
+
 function ImportPage() {
   const queryClient = useQueryClient();
   const { data: accounts } = useSuspenseQuery(accountsQuery());
@@ -93,26 +124,61 @@ function ImportPage() {
   const { data: defaultAccount } = useSuspenseQuery(defaultAccountQuery());
 
   const [accountId, setAccountId] = useState(defaultAccount?.id ?? "");
-  const [defaultCategoryId, setDefaultCategoryId] = useState("");
-  const [rows, setRows] = useState<CheckedImportRow[]>([]);
-  const [isChecking, setIsChecking] = useState(false);
+  const [rows, setRows] = useState<EditableRow[]>([]);
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
 
-  // Pré-seleciona conta padrão assim que resolvida (mantém sincronia com Chat IA)
   useEffect(() => {
     if (!accountId && defaultAccount?.id) setAccountId(defaultAccount.id);
   }, [defaultAccount, accountId]);
 
-
   const bankAccounts = accounts.filter((a) => a.type !== "credit_card");
-  const expenseCategories = categories.filter((c) => c.kind === "expense");
+  const cardAccounts = accounts.filter((a) => a.type === "credit_card");
 
+  const selectedAccount = accounts.find((a) => a.id === accountId) ?? null;
+  const isCreditCard = selectedAccount?.type === "credit_card";
+  const cardMissingConfig =
+    isCreditCard && (!selectedAccount?.closing_day || !selectedAccount?.due_day);
+
+  /** Linhas de pagamento de fatura não devem virar lançamento no cartão. */
+  function isInvoicePaymentLine(description: string): boolean {
+    const n = description
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    return (
+      (n.includes("pagamento") || n.includes("pgto")) &&
+      (n.includes("fatura") || n.includes("recebido") || n.includes("debito automatico"))
+    );
+  }
+
+  // Categorias novas propostas (agrupadas por nome+kind) entre as linhas incluídas
+  const proposedNewCategories = useMemo(() => {
+    const map = new Map<string, { name: string; kind: string; count: number }>();
+    for (const r of rows) {
+      if (!r.include || r.is_duplicate) continue;
+      if (r.category_choice.startsWith("new:")) {
+        const name = r.category_choice.slice(4);
+        const key = `${name.toLowerCase()}|${r.kind}`;
+        const cur = map.get(key);
+        if (cur) cur.count++;
+        else map.set(key, { name, kind: r.kind, count: 1 });
+      }
+    }
+    return Array.from(map.values());
+  }, [rows]);
+
+  // ---------------------------------------------------------------------------
+  // Upload → parse → classificação IA
+  // ---------------------------------------------------------------------------
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!accountId) { toast.error("Selecione a conta bancária antes do upload."); return; }
-    if (!defaultCategoryId) { toast.error("Selecione uma categoria padrão antes do upload."); return; }
-
-    setIsChecking(true);
+    if (!accountId) {
+      toast.error("Selecione a conta bancária antes do upload.");
+      return;
+    }
+    setIsClassifying(true);
 
     Papa.parse(file, {
       header: true,
@@ -124,9 +190,8 @@ function ImportPage() {
             description: string;
             amount_raw: string;
             kind: "income" | "expense";
-            account_id: string;
-            category_id: string;
           }> = [];
+          let skippedPayments = 0;
 
           for (const row of results.data as Record<string, string>[]) {
             const rawDate = row.Data ?? row.date ?? row.Date ?? "";
@@ -140,102 +205,215 @@ function ImportPage() {
               occurred_on = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
             }
 
-            const numericStr = rawValue.trim().replace(",", ".");
-            const numeric = parseFloat(numericStr);
+            const numeric = parseFloat(String(rawValue).trim().replace(",", "."));
             if (Number.isNaN(numeric)) continue;
+
+            // MODO FATURA: pula linhas de pagamento de fatura (fluxo neutro)
+            if (isCreditCard && isInvoicePaymentLine(rawDesc)) {
+              skippedPayments++;
+              continue;
+            }
+
+            // Semântica de sinais:
+            //   extrato bancário → positivo = receita
+            //   fatura de cartão → positivo = compra (despesa); negativo = estorno
+            const kind: "income" | "expense" = isCreditCard
+              ? numeric >= 0
+                ? "expense"
+                : "income"
+              : numeric >= 0
+              ? "income"
+              : "expense";
 
             parsed.push({
               occurred_on,
               description: rawDesc.trim(),
               amount_raw: Math.abs(numeric).toFixed(2),
-              kind: numeric >= 0 ? "income" : "expense",
-              account_id: accountId,
-              category_id: defaultCategoryId,
+              kind,
             });
+          }
+
+          if (skippedPayments > 0) {
+            toast.info(
+              `${skippedPayments} linha(s) de pagamento de fatura ignoradas — pagamentos são lançados pela tela de Cartões.`,
+            );
           }
 
           if (parsed.length === 0) {
             toast.error("Nenhuma linha válida. Verifique as colunas: Data, Descricao, Valor.");
-            setIsChecking(false);
             return;
           }
 
-          const checked = await checkImportDuplicates({
+          toast.info(`Analisando ${parsed.length} linhas com IA...`, { id: "classify" });
+          const classified = await classifyAndCheckImport({
             data: { account_id: accountId, rows: parsed },
           });
+          toast.dismiss("classify");
 
-          setRows(checked);
+          // Converte para estado editável, pré-preenchendo com a sugestão da IA
+          const editable: EditableRow[] = classified.map((r) => ({
+            ...r,
+            include: !r.is_duplicate,
+            category_choice: r.suggested_category_id
+              ? `cat:${r.suggested_category_id}`
+              : r.suggested_new_category
+              ? `new:${r.suggested_new_category}`
+              : "",
+          }));
 
-          const dups = checked.filter((r) => r.is_duplicate).length;
-          if (dups > 0) toast.warning(`${dups} lançamento(s) já existem e serão ignorados.`);
-          else toast.success(`${checked.length} lançamentos validados — nenhuma duplicidade.`);
+          setRows(editable);
+
+          const dups = editable.filter((r) => r.is_duplicate).length;
+          const classifiedCount = editable.filter((r) => !r.is_duplicate && r.category_choice).length;
+          const pending = editable.filter((r) => !r.is_duplicate && !r.category_choice).length;
+
+          toast.success(
+            `${classified.length} linhas: ${classifiedCount} classificadas pela IA` +
+              (pending > 0 ? `, ${pending} aguardando categoria manual` : "") +
+              (dups > 0 ? `, ${dups} duplicatas ignoradas` : "") + ".",
+          );
         } catch (err: unknown) {
+          toast.dismiss("classify");
           toast.error(`Erro: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
-          setIsChecking(false);
+          setIsClassifying(false);
         }
       },
-      error: (err) => { toast.error(`Erro ao ler arquivo: ${err.message}`); setIsChecking(false); },
+      error: (err) => {
+        toast.error(`Erro ao ler arquivo: ${err.message}`);
+        setIsClassifying(false);
+      },
     });
+    e.target.value = "";
   };
 
+  // ---------------------------------------------------------------------------
+  // Edição por linha
+  // ---------------------------------------------------------------------------
+  function patchRow(idx: number, patch: Partial<EditableRow>) {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+
+  function changeKind(idx: number, kind: "income" | "expense") {
+    // Trocar o tipo invalida a categoria escolhida (kinds diferentes)
+    patchRow(idx, { kind, category_choice: "" });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Confirmação
+  // ---------------------------------------------------------------------------
+  const included = rows.filter((r) => r.include && !r.is_duplicate);
+  const pendingCategory = included.filter((r) => !r.category_choice).length;
+  const readyToCommit = included.length > 0 && pendingCategory === 0;
+
   const commitMut = useMutation({
-    mutationFn: async () => {
-      const newRows = rows.filter((r) => !r.is_duplicate);
-      if (newRows.length === 0) throw new Error("Nenhum lançamento novo para importar.");
-      return commitImport({ data: { rows: newRows } });
-    },
+    mutationFn: () =>
+      commitSmartImport({
+        data: {
+          rows: included.map((r) => ({
+            occurred_on: r.occurred_on,
+            description: r.description,
+            amount_raw: r.amount_raw,
+            kind: r.kind,
+            account_id: r.account_id,
+            dedup_hash: r.dedup_hash,
+            category_id: r.category_choice.startsWith("cat:")
+              ? r.category_choice.slice(4)
+              : null,
+            new_category_name: r.category_choice.startsWith("new:")
+              ? r.category_choice.slice(4)
+              : null,
+            notes: r.notes ?? null,
+          })),
+        },
+      }),
     onSuccess: (result) => {
-      toast.success(`${result.inserted} lançamento(s) integrados ao Livro-Caixa!`);
+      toast.success(
+        `${result.inserted} lançamento(s) importados` +
+          (result.categories_created > 0
+            ? ` · ${result.categories_created} categoria(s) nova(s) criada(s)`
+            : "") + "!",
+      );
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["lookups", "categories"] });
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
       setRows([]);
     },
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const newCount = rows.filter((r) => !r.is_duplicate).length;
+  const BRL = (v: string) =>
+    Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2 });
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Importador de Extratos</h1>
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl flex items-center gap-2">
+          Importador Inteligente
+          <Sparkles className="size-5 text-primary" />
+        </h1>
         <p className="mt-1 text-sm text-foreground/60">
-          Conciliação automática via SHA-256 — duplicatas detectadas antes de gravar.
+          A IA classifica cada lançamento nas suas categorias — revise, corrija e confirme.
         </p>
       </header>
 
-      {/* Etapa 1: Configuração */}
-      <GlassCard className="border border-white/10 p-6 space-y-4">
+      {/* Etapa 1: Conta ou Cartão */}
+      <GlassCard className="border border-white/10 p-5 space-y-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-foreground/80">
-          <Landmark className="size-4 text-primary" /> Etapa 1 — Configure a importação
+          <Landmark className="size-4 text-primary" /> Destino da importação
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label>Conta bancária de destino</Label>
-            <Select value={accountId} onValueChange={setAccountId} disabled={rows.length > 0}>
-              <SelectTrigger><SelectValue placeholder="Selecione a conta..." /></SelectTrigger>
-              <SelectContent>
-                {bankAccounts.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-[11px] text-foreground/40">Todos os lançamentos serão vinculados a esta conta.</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Categoria padrão</Label>
-            <Select value={defaultCategoryId} onValueChange={setDefaultCategoryId} disabled={rows.length > 0}>
-              <SelectTrigger><SelectValue placeholder="Selecione a categoria..." /></SelectTrigger>
-              <SelectContent>
-                {expenseCategories.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-[11px] text-foreground/40">Pode reclassificar individualmente depois.</p>
-          </div>
+        <div className="max-w-sm">
+          <Select value={accountId} onValueChange={setAccountId} disabled={rows.length > 0}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione conta ou cartão..." />
+            </SelectTrigger>
+            <SelectContent>
+              {bankAccounts.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Contas (extrato bancário)</SelectLabel>
+                  {bankAccounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+              {cardAccounts.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Cartões (fatura)</SelectLabel>
+                  {cardAccounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>💳 {a.name}</SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+            </SelectContent>
+          </Select>
         </div>
+
+        {/* Banner: modo fatura ativo */}
+        {isCreditCard && !cardMissingConfig && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 text-xs text-foreground/70 leading-relaxed">
+            <CreditCard className="size-4 text-violet-400 shrink-0 mt-0.5" />
+            <span>
+              <span className="font-semibold text-violet-300">Modo fatura ativo:</span>{" "}
+              valores positivos serão tratados como <strong>compras (despesas)</strong> e
+              negativos como <strong>estornos</strong>. Linhas de pagamento de fatura são
+              ignoradas automaticamente. Cada compra será vinculada à fatura correta
+              (fechamento dia {selectedAccount?.closing_day}, vencimento dia {selectedAccount?.due_day}).
+            </span>
+          </div>
+        )}
+
+        {/* Alerta: cartão sem dias configurados */}
+        {cardMissingConfig && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-300 leading-relaxed">
+            <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+            <span>
+              Este cartão não tem <strong>dia de fechamento</strong> e <strong>dia de vencimento</strong>{" "}
+              configurados — as compras serão importadas, mas <strong>não serão vinculadas a nenhuma
+              fatura</strong>. Configure em Cartões antes de importar para o vínculo automático funcionar.
+            </span>
+          </div>
+        )}
       </GlassCard>
 
       {/* Etapa 2: Upload */}
@@ -246,125 +424,239 @@ function ImportPage() {
             accept=".csv"
             onChange={handleFileUpload}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
-            disabled={isChecking || !accountId || !defaultCategoryId}
+            disabled={isClassifying || !accountId}
           />
-          {isChecking
-            ? <RefreshCw className="mx-auto size-12 opacity-50 mb-4 animate-spin text-primary" />
-            : <Upload className={`mx-auto size-12 mb-4 ${!accountId || !defaultCategoryId ? "opacity-20" : "opacity-40"}`} />
-          }
+          {isClassifying ? (
+            <RefreshCw className="mx-auto size-12 opacity-50 mb-4 animate-spin text-primary" />
+          ) : (
+            <Upload className={`mx-auto size-12 mb-4 ${!accountId ? "opacity-20" : "opacity-40"}`} />
+          )}
           <p className="text-sm font-medium text-foreground/80">
-            {isChecking
-              ? "Cruzando hashes com o banco..."
-              : !accountId || !defaultCategoryId
-              ? "Preencha conta e categoria acima para habilitar o upload"
+            {isClassifying
+              ? "Classificando lançamentos com IA..."
+              : !accountId
+              ? "Selecione o destino acima para habilitar o upload"
+              : isCreditCard
+              ? "Clique ou arraste o arquivo CSV da fatura do cartão"
               : "Clique ou arraste o arquivo CSV do seu banco"}
           </p>
           <p className="text-xs text-foreground/40 mt-1">Colunas esperadas: Data · Descricao · Valor</p>
         </GlassCard>
       )}
 
-      {/* Etapa 3: Pré-visualização */}
+      {/* Etapa 3: Pré-visualização editável */}
       {rows.length > 0 && (
         <div className="space-y-4">
+
+          {/* Banner de categorias novas propostas */}
+          {proposedNewCategories.length > 0 && (
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 flex items-start gap-3">
+              <Sparkles className="size-4 text-primary shrink-0 mt-0.5" />
+              <div className="text-xs text-foreground/70 leading-relaxed">
+                <span className="font-semibold text-foreground/90">
+                  A IA propôs {proposedNewCategories.length} categoria(s) nova(s):
+                </span>{" "}
+                {proposedNewCategories.map((c, i) => (
+                  <span key={c.name + c.kind}>
+                    {i > 0 && " · "}
+                    <span className="font-semibold text-primary">{c.name}</span>
+                    <span className="text-foreground/40"> ({c.count} lançamento{c.count > 1 ? "s" : ""})</span>
+                  </span>
+                ))}
+                <span className="block mt-1 text-foreground/40">
+                  Elas serão criadas automaticamente na confirmação. Para trocar, use o seletor da linha.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Barra de ações */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-zinc-900/60 p-4 rounded-xl border border-white/5">
-            <div className="grid grid-cols-3 gap-2 text-xs sm:flex sm:items-center sm:gap-3 sm:text-sm text-foreground/70">
-              <div className="flex items-center gap-1.5"><FileText className="size-4 text-primary shrink-0" /> <span className="font-semibold">{rows.length}</span> linhas</div>
-              <div className="text-emerald-400 font-semibold">{newCount} novos</div>
-              <div className="text-red-400 font-semibold">{rows.length - newCount} duplicatas</div>
+            <div className="flex items-center gap-2 text-sm text-foreground/70">
+              <FileText className="size-4 text-primary" />
+              <span>
+                {included.length} de {rows.length} selecionadas
+                {pendingCategory > 0 && (
+                  <span className="text-amber-400 font-semibold"> · {pendingCategory} sem categoria</span>
+                )}
+              </span>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setRows([])} className="rounded-full flex-1 sm:flex-none">Cancelar</Button>
+              <Button variant="outline" size="sm" onClick={() => setRows([])} className="rounded-full">
+                Cancelar
+              </Button>
               <Button
                 size="sm"
                 onClick={() => commitMut.mutate()}
-                disabled={commitMut.isPending || newCount === 0}
-                className="rounded-full gap-1.5 flex-1 sm:flex-none"
+                disabled={commitMut.isPending || !readyToCommit}
+                className="rounded-full gap-1.5"
               >
                 {commitMut.isPending && <RefreshCw className="size-3.5 animate-spin" />}
-                Gravar {newCount} <ArrowRight className="size-4" />
+                Confirmar importação ({included.length}) <ArrowRight className="size-4" />
               </Button>
             </div>
           </div>
 
-          {/* Mobile: cards empilhados */}
-          <div className="grid gap-2 sm:hidden">
-            {rows.map((r, i) => (
-              <div
-                key={i}
-                className={`rounded-xl border p-3 space-y-2 ${
-                  r.is_duplicate
-                    ? "border-red-500/40 bg-red-500/10 opacity-70"
-                    : "border-white/10 bg-white/[0.02]"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  {r.is_duplicate
-                    ? <span className="inline-flex items-center gap-1 text-[11px] text-red-300 font-bold bg-red-500/20 px-2 py-0.5 rounded-full"><AlertTriangle className="size-3" /> Duplicado</span>
-                    : <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full"><CheckCircle className="size-3" /> Novo</span>
-                  }
-                  <span className={`font-mono text-sm font-semibold whitespace-nowrap ${r.kind === "income" ? "text-emerald-400" : "text-foreground/90"}`}>
-                    {r.kind === "income" ? "+" : "−"} R$ {r.amount_raw}
-                  </span>
-                </div>
-                <p className="text-sm font-medium line-clamp-2 min-w-0">{r.description}</p>
-                <div className="flex items-center justify-between text-[11px] text-foreground/50">
-                  <span className="font-mono">{r.occurred_on}</span>
-                  <span className={`font-semibold ${r.kind === "income" ? "text-emerald-400" : "text-foreground/60"}`}>
-                    {r.kind === "income" ? "Receita" : "Despesa"}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Desktop: tabela */}
-          <GlassCard className="hidden sm:block overflow-hidden border border-white/10">
-            <div className="max-h-[600px] overflow-auto">
+          {/* Tabela editável */}
+          <GlassCard className="overflow-hidden border border-white/10">
+            <div className="overflow-x-auto">
               <Table>
-                <TableHeader className="sticky top-0 bg-zinc-950/95 backdrop-blur z-10">
-                  <TableRow className="border-white/10">
-                    <TableHead className="w-28">Status</TableHead>
-                    <TableHead className="w-28 whitespace-nowrap">Data</TableHead>
-                    <TableHead>Descrição</TableHead>
-                    <TableHead className="w-24">Tipo</TableHead>
-                    <TableHead className="w-32 text-right whitespace-nowrap">Valor</TableHead>
+                <TableHeader>
+                  <TableRow className="border-white/10 bg-white/[0.02]">
+                    <TableHead className="w-10"></TableHead>
+                    <TableHead>Data</TableHead>
+                    <TableHead className="min-w-[180px]">Descrição</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead className="min-w-[200px]">Categoria (IA)</TableHead>
+                    <TableHead>Confiança</TableHead>
+                    <TableHead className="text-right">Valor</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((r, i) => (
-                    <TableRow
-                      key={i}
-                      className={`border-white/5 ${
-                        r.is_duplicate
-                          ? "bg-red-500/10 text-red-300/70"
-                          : "hover:bg-white/[0.02]"
-                      }`}
-                    >
-                      <TableCell>
-                        {r.is_duplicate
-                          ? <span className="inline-flex items-center gap-1 text-[11px] text-red-300 font-bold bg-red-500/20 px-2 py-0.5 rounded-full"><AlertTriangle className="size-3" /> Duplicado</span>
-                          : <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full"><CheckCircle className="size-3" /> Novo</span>
-                        }
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-foreground/60 whitespace-nowrap">{r.occurred_on}</TableCell>
-                      <TableCell className="min-w-0 max-w-md truncate font-medium">{r.description}</TableCell>
-                      <TableCell>
-                        <span className={`text-xs font-semibold ${r.kind === "income" ? "text-emerald-400" : "text-foreground/60"}`}>
-                          {r.kind === "income" ? "Receita" : "Despesa"}
-                        </span>
-                      </TableCell>
-                      <TableCell className={`text-right font-mono font-semibold whitespace-nowrap ${r.kind === "income" ? "text-emerald-400" : "text-foreground/80"}`}>
-                        {r.kind === "income" ? "+" : "−"} R$ {r.amount_raw}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {rows.map((r, idx) => {
+                    const isDup = r.is_duplicate;
+                    const conf = CONFIDENCE_META[r.confidence];
+                    const kindCategories = categories.filter((c) => c.kind === r.kind);
+                    const isEditing = editingIdx === idx;
+
+                    return (
+                      <TableRow
+                        key={r.dedup_hash + idx}
+                        className={`border-white/5 ${
+                          isDup
+                            ? "bg-red-500/10 text-red-300/50 line-through"
+                            : !r.include
+                            ? "opacity-40"
+                            : "hover:bg-white/[0.02]"
+                        }`}
+                      >
+                        {/* Incluir */}
+                        <TableCell>
+                          {isDup ? (
+                            <span title="Duplicata — já existe no banco">
+                              <AlertTriangle className="size-4 text-red-400" />
+                            </span>
+                          ) : (
+                            <Checkbox
+                              checked={r.include}
+                              onCheckedChange={(v) => patchRow(idx, { include: v === true })}
+                            />
+                          )}
+                        </TableCell>
+
+                        {/* Data */}
+                        <TableCell className="font-mono text-xs text-foreground/60 whitespace-nowrap">
+                          {r.occurred_on}
+                        </TableCell>
+
+                        {/* Descrição editável */}
+                        <TableCell>
+                          {isEditing && !isDup ? (
+                            <Input
+                              value={r.description}
+                              onChange={(e) => patchRow(idx, { description: e.target.value })}
+                              onBlur={() => setEditingIdx(null)}
+                              onKeyDown={(e) => e.key === "Enter" && setEditingIdx(null)}
+                              autoFocus
+                              className="h-7 text-xs"
+                            />
+                          ) : (
+                            <button
+                              className="group flex items-center gap-1.5 text-left max-w-[240px]"
+                              onClick={() => !isDup && setEditingIdx(idx)}
+                              disabled={isDup}
+                            >
+                              <span className="truncate font-medium text-xs">{r.description}</span>
+                              {!isDup && (
+                                <Pencil className="size-3 text-foreground/20 group-hover:text-foreground/60 shrink-0" />
+                              )}
+                            </button>
+                          )}
+                        </TableCell>
+
+                        {/* Tipo */}
+                        <TableCell>
+                          {isDup ? (
+                            <span className="text-xs">{r.kind === "income" ? "Receita" : "Despesa"}</span>
+                          ) : (
+                            <Select
+                              value={r.kind}
+                              onValueChange={(v) => changeKind(idx, v as "income" | "expense")}
+                            >
+                              <SelectTrigger className="h-7 w-[110px] text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="expense">🛑 Despesa</SelectItem>
+                                <SelectItem value="income">🟢 Receita</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </TableCell>
+
+                        {/* Categoria */}
+                        <TableCell>
+                          {isDup ? (
+                            <span className="text-xs text-foreground/30">—</span>
+                          ) : (
+                            <Select
+                              value={r.category_choice}
+                              onValueChange={(v) => patchRow(idx, { category_choice: v })}
+                            >
+                              <SelectTrigger
+                                className={`h-7 text-xs ${
+                                  !r.category_choice ? "border-amber-500/50 text-amber-400" : ""
+                                }`}
+                              >
+                                <SelectValue placeholder="⚠ Selecionar..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {/* Categoria nova proposta pela IA para ESTA linha */}
+                                {r.suggested_new_category && (
+                                  <SelectItem value={`new:${r.suggested_new_category}`}>
+                                    ✨ Nova: {r.suggested_new_category}
+                                  </SelectItem>
+                                )}
+                                {kindCategories.map((c) => (
+                                  <SelectItem key={c.id} value={`cat:${c.id}`}>
+                                    {c.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </TableCell>
+
+                        {/* Confiança */}
+                        <TableCell>
+                          {isDup || !r.category_choice ? (
+                            <span className="text-xs text-foreground/20">—</span>
+                          ) : (
+                            <span
+                              className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full border ${conf.cls}`}
+                            >
+                              {conf.label}
+                            </span>
+                          )}
+                        </TableCell>
+
+                        {/* Valor */}
+                        <TableCell
+                          className={`text-right font-mono font-semibold text-xs whitespace-nowrap ${
+                            r.kind === "income" ? "text-emerald-400" : "text-foreground/80"
+                          }`}
+                        >
+                          {r.kind === "income" ? "+" : "−"} R$ {BRL(r.amount_raw)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
           </GlassCard>
         </div>
       )}
-
     </div>
   );
 }

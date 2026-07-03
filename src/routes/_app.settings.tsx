@@ -10,6 +10,7 @@ import { AppShell } from '@/components/app-shell';
 import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/lib/supabase/client';
 import { exportBackup, restoreBackup } from '@/services/backup.functions';
+import { RulesManagerSection } from '@/components/settings/rules-manager-section';
 
 export const Route = createFileRoute('/_app/settings')({
   component: () => (
@@ -223,6 +224,9 @@ function SettingsComponent() {
           </div>
         )}
       </div>
+
+      {/* REGRAS DE CLASSIFICAÇÃO APRENDIDAS PELO IMPORTADOR */}
+      <RulesManagerSection />
 
       {/* SESSÃO / LOGOUT */}
       <div className="bg-white/[0.02] border border-white/[0.06] backdrop-blur-xl rounded-2xl p-6 shadow-2xl flex items-center justify-between">
