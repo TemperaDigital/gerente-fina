@@ -10,7 +10,7 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Plus, Folder, ChevronDown, ChevronRight, Edit2, Trash2, Tag, Layers } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, Edit2, Trash2, Tag } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/app-shell";
@@ -43,6 +43,7 @@ import {
   archiveCategory,
   type CategoryDTO,
 } from "@/services/categories.functions";
+import { IconPicker, CategoryIcon, CATEGORY_COLORS } from "@/components/categories/icon-picker";
 
 const categoriesQuery = () =>
   queryOptions({ queryKey: ["categories", "all"], queryFn: () => listCategories() });
@@ -84,6 +85,8 @@ function CategoriesComponent() {
   const [catName, setCatName] = useState("");
   const [catKind, setCatKind] = useState<"expense" | "income">("expense");
   const [catParentId, setCatParentId] = useState<string>("none");
+  const [catIcon, setCatIcon] = useState<string | null>(null);
+  const [catColor, setCatColor] = useState<string | null>(null);
   const [archiving, setArchiving] = useState<CategoryDTO | null>(null);
 
   async function refresh() {
@@ -92,8 +95,13 @@ function CategoriesComponent() {
   }
 
   const createMut = useMutation({
-    mutationFn: (payload: { name: string; kind: "income" | "expense"; parent_id: string | null }) =>
-      createCategory({ data: payload }),
+    mutationFn: (payload: {
+      name: string;
+      kind: "income" | "expense";
+      parent_id: string | null;
+      icon: string | null;
+      color: string | null;
+    }) => createCategory({ data: payload }),
     onSuccess: async () => {
       toast.success("Categoria criada.");
       setShowModal(false);
@@ -103,8 +111,14 @@ function CategoriesComponent() {
   });
 
   const updateMut = useMutation({
-    mutationFn: (payload: { id: string; name: string; kind: "income" | "expense"; parent_id: string | null }) =>
-      updateCategory({ data: payload }),
+    mutationFn: (payload: {
+      id: string;
+      name: string;
+      kind: "income" | "expense";
+      parent_id: string | null;
+      icon: string | null;
+      color: string | null;
+    }) => updateCategory({ data: payload }),
     onSuccess: async () => {
       toast.success("Categoria atualizada.");
       setShowModal(false);
@@ -138,6 +152,8 @@ function CategoriesComponent() {
     setCatName("");
     setCatKind(activeTab);
     setCatParentId("none");
+    setCatIcon(null);
+    setCatColor(null);
     setShowModal(true);
   }
 
@@ -147,6 +163,8 @@ function CategoriesComponent() {
     setCatName(category.name);
     setCatKind(category.kind);
     setCatParentId(category.parent_id ?? "none");
+    setCatIcon(category.icon ?? null);
+    setCatColor(category.color ?? null);
     setShowModal(true);
   }
 
@@ -156,6 +174,8 @@ function CategoriesComponent() {
       name: catName.trim(),
       kind: catKind,
       parent_id: catParentId === "none" ? null : catParentId,
+      icon: catIcon,
+      color: catColor,
     };
     if (modalMode === "create") {
       createMut.mutate(payload);
@@ -222,7 +242,11 @@ function CategoriesComponent() {
                       >
                         {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                       </button>
-                      <Folder className="w-5 h-5 text-indigo-400" />
+                      <CategoryIcon
+                        icon={parent.icon}
+                        color={parent.color ?? "#818cf8"}
+                        className="w-5 h-5"
+                      />
                       <span className="font-semibold text-zinc-200 text-sm">{parent.name}</span>
                     </div>
                     <div className="flex items-center space-x-1">
@@ -250,7 +274,11 @@ function CategoriesComponent() {
                       {children.map((child) => (
                         <div key={child.id} className="flex items-center justify-between py-3 hover:bg-white/[0.01] transition-colors">
                           <div className="flex items-center space-x-2.5">
-                            <Layers className="w-3.5 h-3.5 text-zinc-600" />
+                            <CategoryIcon
+                              icon={child.icon}
+                              color={child.color ?? "#71717a"}
+                              className="w-3.5 h-3.5"
+                            />
                             <span className="text-sm text-zinc-300 font-medium">{child.name}</span>
                           </div>
                           <div className="flex items-center space-x-1">
@@ -322,6 +350,29 @@ function CategoriesComponent() {
                     ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Label>Ícone</Label>
+                {catIcon && (
+                  <span
+                    className="flex size-6 items-center justify-center rounded-md bg-white/5 border border-white/10"
+                    title="Pré-visualização"
+                  >
+                    <CategoryIcon
+                      icon={catIcon}
+                      color={catColor ?? CATEGORY_COLORS[0]}
+                      className="size-3.5"
+                    />
+                  </span>
+                )}
+              </div>
+              <IconPicker
+                value={catIcon}
+                color={catColor}
+                onChangeIcon={setCatIcon}
+                onChangeColor={setCatColor}
+              />
             </div>
           </div>
           <DialogFooter>

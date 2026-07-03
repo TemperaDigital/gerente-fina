@@ -234,3 +234,63 @@ export const getOpenCreditCardInvoices = createServerFn({ method: "GET" })
     });
     return items;
   });
+
+// -----------------------------------------------------------------------------
+// getCategoryBreakdown — donut "para onde foi meu dinheiro" no Dashboard
+// Consome a view monthly_dre_by_category + enriquece com icon/color da categoria
+// -----------------------------------------------------------------------------
+
+export interface CategoryBreakdownDTO {
+  category_id: string;
+  category_name: string;
+  total_amount: number;
+  transactions_count: number;
+  icon: string | null;
+  color: string | null;
+}
+
+export const getCategoryBreakdown = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => {
+    const raw = input as { month?: string; kind?: "income" | "expense" } | undefined;
+    return {
+      month:
+        typeof raw?.month === "string" && /^\d{4}-\d{2}$/.test(raw.month)
+          ? raw.month
+          : new Date().toISOString().slice(0, 7),
+      kind: raw?.kind === "income" ? ("income" as const) : ("expense" as const),
+    };
+  })
+  .handler(async ({ data }): Promise<CategoryBreakdownDTO[]> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    const referenceMonth = `${data.month}-01`;
+
+    const { data: rows, error } = await sb
+      .from("monthly_dre_by_category")
+      .select("category_id, category_name, total_amount, transactions_count")
+      .eq("reference_month", referenceMonth)
+      .eq("kind", data.kind)
+      .order("total_amount", { ascending: false });
+
+    if (error) throw new Error(error.message);
+    if (!rows?.length) return [];
+
+    // Enriquece com icon/color das categorias (uma query em lote)
+    const catIds = rows.map((r) => r.category_id);
+    const { data: cats } = await sb
+      .from("categories")
+      .select("id, icon, color")
+      .in("id", catIds);
+
+    const catMap = new Map((cats ?? []).map((c) => [c.id, c]));
+
+    return rows.map((r) => ({
+      category_id: r.category_id,
+      category_name: r.category_name,
+      total_amount: Number(r.total_amount),
+      transactions_count: Number(r.transactions_count),
+      icon: catMap.get(r.category_id)?.icon ?? null,
+      color: catMap.get(r.category_id)?.color ?? null,
+    }));
+  });

@@ -15,21 +15,23 @@ import {
   Tags,
   Menu,
   MessageSquare,
+  FileUp,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/transactions", label: "Lançamentos", icon: ArrowLeftRight },
-  { to: "/accounts", label: "Contas", icon: Wallet },
-  { to: "/credit-cards", label: "Cartões", icon: CreditCard },
-  { to: "/categories", label: "Categorias", icon: Tags },
-  { to: "/installments", label: "Parcelas & Dívidas", icon: Layers },
-  { to: "/budgets", label: "Orçamentos", icon: Target },
-  { to: "/forecast", label: "Previsão", icon: LineChart },
-  { to: "/chat", label: "Chat IA", icon: MessageSquare },
-  { to: "/settings", label: "Configurações", icon: SettingsIcon },
+  { to: "/dashboard",    label: "Dashboard",        icon: LayoutDashboard },
+  { to: "/transactions", label: "Lançamentos",       icon: ArrowLeftRight },
+  { to: "/accounts",     label: "Contas",            icon: Wallet },
+  { to: "/credit-cards", label: "Cartões",           icon: CreditCard },
+  { to: "/import",       label: "Importar Extrato",  icon: FileUp },
+  { to: "/categories",   label: "Categorias",        icon: Tags },
+  { to: "/installments", label: "Parcelas & Dívidas",icon: Layers },
+  { to: "/budgets",      label: "Orçamentos",        icon: Target },
+  { to: "/forecast",     label: "Previsão",          icon: LineChart },
+  { to: "/chat",         label: "Chat IA",           icon: MessageSquare },
+  { to: "/settings",     label: "Configurações",     icon: SettingsIcon },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {

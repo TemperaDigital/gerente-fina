@@ -6,8 +6,10 @@
  *     O parâmetro ?month=YYYY-MM é repassado para getDashboardSummary e controla
  *     KPIs + widget de orçamentos. O gráfico sempre mostra os últimos 6 meses.
  */
+import { useEffect, useRef } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Wallet,
   Target,
@@ -18,11 +20,13 @@ import {
   ChevronRight,
   CalendarDays,
   BarChart3,
+  PieChart as PieChartIcon,
 } from "lucide-react";
 
 import { GlassCard } from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
 import { CashflowChart } from "@/components/dashboard/cashflow-chart";
+import { CategoryDonut } from "@/components/dashboard/category-donut";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { AccountsWidget } from "@/components/dashboard/accounts-widget";
@@ -30,8 +34,10 @@ import {
   getDashboardSummary,
   getOpenCreditCardInvoices,
   getMonthlyDreHistory,
+  getCategoryBreakdown,
 } from "@/services/dashboard.functions";
 import { listBudgets } from "@/services/budgets.functions";
+import { materializeDueRecurrences } from "@/services/recurrence-materializer.functions";
 import { toCents, fromCents, safePercent } from "@/lib/finance/money";
 
 // ---------------------------------------------------------------------------
@@ -82,6 +88,12 @@ const dreHistoryQuery = () =>
     staleTime: 5 * 60 * 1000,
   });
 
+const breakdownQuery = (month: string) =>
+  queryOptions({
+    queryKey: ["dashboard", "breakdown", month],
+    queryFn: () => getCategoryBreakdown({ data: { month, kind: "expense" } }),
+  });
+
 // ---------------------------------------------------------------------------
 // Route
 // ---------------------------------------------------------------------------
@@ -106,6 +118,7 @@ export const Route = createFileRoute("/_app/dashboard")({
       context.queryClient.ensureQueryData(invoicesQuery()),
       context.queryClient.ensureQueryData(budgetsQuery(month)),
       context.queryClient.ensureQueryData(dreHistoryQuery()),
+      context.queryClient.ensureQueryData(breakdownQuery(month)),
     ]);
   },
 
@@ -136,11 +149,34 @@ const BRL = (value: string | number | null | undefined) =>
 function DashboardPage() {
   const { month } = Route.useSearch();
   const navigate = useNavigate({ from: "/_app/dashboard" });
+  const queryClient = useQueryClient();
 
   const { data: summary } = useSuspenseQuery(summaryQuery(month));
   const { data: invoices } = useSuspenseQuery(invoicesQuery());
   const { data: budgets } = useSuspenseQuery(budgetsQuery(month));
   const { data: dreHistory } = useSuspenseQuery(dreHistoryQuery());
+  const { data: breakdown } = useSuspenseQuery(breakdownQuery(month));
+
+  // Materializa recorrências vencidas (salário, contas fixas...) uma vez por
+  // montagem — silencioso quando não há nada novo, nunca derruba o dashboard.
+  const materializedRef = useRef(false);
+  useEffect(() => {
+    if (materializedRef.current) return;
+    materializedRef.current = true;
+
+    materializeDueRecurrences({ data: {} })
+      .then((result) => {
+        if (result.created > 0) {
+          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+          toast.success(
+            `${result.created} lançamento(s) recorrente(s) gerado(s) automaticamente (salário, contas fixas, assinaturas...).`,
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("Falha ao materializar recorrências:", err);
+      });
+  }, [queryClient]);
 
   const topBudgets = budgets.slice(0, 5);
   const isNegative = (v: string) => toCents(v) < 0n;
@@ -283,23 +319,44 @@ function DashboardPage() {
           </GlassCard>
         </div>
 
-        {/* C2 — Gráfico de barras Receitas × Despesas (últimos 6 meses) */}
-        <GlassCard className="border border-white/10 p-5 sm:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="size-4 text-primary shrink-0" />
-              <h2 className="text-sm font-semibold text-foreground/80">
-                Fluxo de Caixa — Últimos 6 meses
-              </h2>
+        {/* Gráficos: barras (histórico) + donut (mês atual) */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* C2 — Gráfico de barras Receitas × Despesas (últimos 6 meses) */}
+          <GlassCard className="border border-white/10 p-5 sm:p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="size-4 text-primary shrink-0" />
+                <h2 className="text-sm font-semibold text-foreground/80">
+                  Fluxo de Caixa — Últimos 6 meses
+                </h2>
+              </div>
+              <Link to="/forecast">
+                <Button variant="ghost" size="sm" className="text-xs text-primary gap-1 px-2">
+                  Previsão <ArrowRight className="size-3" />
+                </Button>
+              </Link>
             </div>
-            <Link to="/forecast">
-              <Button variant="ghost" size="sm" className="text-xs text-primary gap-1 px-2">
-                Previsão <ArrowRight className="size-3" />
-              </Button>
-            </Link>
-          </div>
-          <CashflowChart data={dreHistory} height={220} />
-        </GlassCard>
+            <CashflowChart data={dreHistory} height={220} />
+          </GlassCard>
+
+          {/* Donut — despesas por categoria do mês selecionado */}
+          <GlassCard className="border border-white/10 p-5 sm:p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <PieChartIcon className="size-4 text-primary shrink-0" />
+                <h2 className="text-sm font-semibold text-foreground/80">
+                  Despesas por categoria — {monthLabel(month)}
+                </h2>
+              </div>
+              <Link to="/transactions" search={{ month }}>
+                <Button variant="ghost" size="sm" className="text-xs text-primary gap-1 px-2">
+                  Detalhar <ArrowRight className="size-3" />
+                </Button>
+              </Link>
+            </div>
+            <CategoryDonut data={breakdown} />
+          </GlassCard>
+        </div>
 
         {/* Contas + Orçamentos */}
         <div className="grid gap-6 md:grid-cols-2">
