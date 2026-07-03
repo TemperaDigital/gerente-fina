@@ -20,6 +20,9 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# PDFs reais usados para testar a extração da Fase C (importador) — nunca commitar
+test-fixtures/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
