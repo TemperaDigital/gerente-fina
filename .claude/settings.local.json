@@ -6,7 +6,8 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(tee /tmp/claude-1001/-home-td-fguerra-Documentos-GitHub-gerente-fina/ef2a5f4b-e2c2-4046-9613-d266e4631ad1/scratchpad/tsc_phaseB.log)"
     ]
   }
 }

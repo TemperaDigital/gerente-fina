@@ -68,6 +68,13 @@ import {
   getDefaultImportAccount,
   type SmartImportRow,
 } from "@/lib/supabase/import.functions";
+import { detectCsvSchema } from "@/lib/supabase/csv-schema.functions";
+import { extractPdfStatement } from "@/lib/supabase/pdf-statement.functions";
+import {
+  parseCsvDate,
+  parseCsvAmount,
+  extractInstallmentHint,
+} from "@/lib/finance/csv-mapping";
 
 // ---------------------------------------------------------------------------
 // Estado editável por linha
@@ -76,6 +83,44 @@ import {
 interface EditableRow extends SmartImportRow {
   include: boolean;
   category_choice: string;
+  /** Parcelamento detectado na descrição original (ex: "3/12") — metadado, não persistido. */
+  installment_hint: { current: number; total: number } | null;
+}
+
+/** Nomes de coluna já suportados sem precisar de detecção via IA (economiza a chamada). */
+const KNOWN_DATE_KEYS = ["Data", "date", "Date"];
+const KNOWN_DESCRIPTION_KEYS = ["Descricao", "description", "Description"];
+const KNOWN_AMOUNT_KEYS = ["Valor", "amount", "Amount"];
+
+function detectKnownColumns(
+  keys: string[],
+): { dateKey: string; descKey: string; amountKey: string } | null {
+  const dateKey = KNOWN_DATE_KEYS.find((k) => keys.includes(k));
+  const descKey = KNOWN_DESCRIPTION_KEYS.find((k) => keys.includes(k));
+  const amountKey = KNOWN_AMOUNT_KEYS.find((k) => keys.includes(k));
+  if (!dateKey || !descKey || !amountKey) return null;
+  return { dateKey, descKey, amountKey };
+}
+
+/** Mesma semântica de sinal usada há tempos na tela: reaproveitada por todo formato de arquivo. */
+function resolveLineKind(isCreditCardMode: boolean, isNegative: boolean): "income" | "expense" {
+  if (isCreditCardMode) return isNegative ? "income" : "expense";
+  return isNegative ? "expense" : "income";
+}
+
+/** Converte um arquivo lido no browser para base64 (chunked — evita estourar a call stack). */
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function isPdfFile(file: File): boolean {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
 const defaultAccountQuery = () =>
@@ -128,6 +173,13 @@ function ImportPage() {
   const [isClassifying, setIsClassifying] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
 
+  // PDF protegido por senha: o arquivo pendente fica em memória local só para
+  // permitir "Tentar novamente"; a SENHA nunca é persistida (nem banco, nem
+  // log, nem cache/estado global) — vive só aqui e é limpa a cada tentativa.
+  const [pdfPendingFile, setPdfPendingFile] = useState<File | null>(null);
+  const [pdfPassword, setPdfPassword] = useState("");
+  const [pdfPasswordWrong, setPdfPasswordWrong] = useState(false);
+
   useEffect(() => {
     if (!accountId && defaultAccount?.id) setAccountId(defaultAccount.id);
   }, [defaultAccount, accountId]);
@@ -169,6 +221,140 @@ function ImportPage() {
   }, [rows]);
 
   // ---------------------------------------------------------------------------
+  // Etapa final compartilhada por TODO formato de arquivo (CSV, PDF...):
+  // manda para a IA classificar e prepara o estado editável da pré-visualização.
+  // ---------------------------------------------------------------------------
+  async function classifyParsedRows(
+    parsed: Array<{
+      occurred_on: string;
+      description: string;
+      amount_raw: string;
+      kind: "income" | "expense";
+    }>,
+    hints: Array<{ current: number; total: number } | null>,
+  ) {
+    if (parsed.length === 0) {
+      toast.error("Nenhuma linha válida encontrada no arquivo.");
+      return;
+    }
+
+    toast.info(`Analisando ${parsed.length} linhas com IA...`, { id: "classify" });
+    const classified = await classifyAndCheckImport({
+      data: { account_id: accountId, rows: parsed },
+    });
+    toast.dismiss("classify");
+
+    // Converte para estado editável, pré-preenchendo com a sugestão da IA
+    const editable: EditableRow[] = classified.map((r, i) => ({
+      ...r,
+      include: !r.is_duplicate,
+      category_choice: r.suggested_category_id
+        ? `cat:${r.suggested_category_id}`
+        : r.suggested_new_category
+        ? `new:${r.suggested_new_category}`
+        : "",
+      installment_hint: hints[i] ?? null,
+    }));
+
+    setRows(editable);
+
+    const dups = editable.filter((r) => r.is_duplicate).length;
+    const classifiedCount = editable.filter((r) => !r.is_duplicate && r.category_choice).length;
+    const pending = editable.filter((r) => !r.is_duplicate && !r.category_choice).length;
+
+    toast.success(
+      `${classified.length} linhas: ${classifiedCount} classificadas pela IA` +
+        (pending > 0 ? `, ${pending} aguardando categoria manual` : "") +
+        (dups > 0 ? `, ${dups} duplicatas ignoradas` : "") + ".",
+    );
+  }
+
+  /** Avisa quando o tipo de documento detectado não bate com a conta selecionada. */
+  function warnStatementTypeMismatch(statementType: "bank_statement" | "credit_card_invoice") {
+    const looksLikeCardButAccountIsBank = !isCreditCard && statementType === "credit_card_invoice";
+    const looksLikeBankButAccountIsCard = isCreditCard && statementType === "bank_statement";
+    if (looksLikeCardButAccountIsBank || looksLikeBankButAccountIsCard) {
+      toast.warning(
+        `O arquivo parece ser ${
+          statementType === "credit_card_invoice" ? "uma fatura de cartão" : "um extrato bancário"
+        }, mas o destino selecionado é ${isCreditCard ? "um cartão" : "uma conta bancária"}. Confira antes de continuar.`,
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Upload PDF → extração de texto + IA no servidor → mesmo pipeline de sempre
+  // ---------------------------------------------------------------------------
+  async function handlePdfFile(file: File, password?: string) {
+    setIsClassifying(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const file_base64 = arrayBufferToBase64(buf);
+      const result = await extractPdfStatement({ data: { file_base64, password } });
+
+      // A senha nunca sobrevive além desta tentativa — limpa já na volta,
+      // sucesso ou falha, e o usuário digita de novo se precisar tentar outra vez.
+      setPdfPassword("");
+
+      if (result.requires_password) {
+        setPdfPendingFile(file);
+        setPdfPasswordWrong(!!result.password_incorrect);
+        toast.error(
+          result.password_incorrect
+            ? "Senha incorreta. Tente novamente."
+            : "Este PDF é protegido por senha. Digite a senha para continuar.",
+        );
+        return;
+      }
+
+      setPdfPendingFile(null);
+      setPdfPasswordWrong(false);
+
+      if (result.skipped_count && result.skipped_count > 0) {
+        toast.info(
+          `${result.skipped_count} lançamento(s) ignorado(s) por data/valor incompatível com o formato detectado.`,
+        );
+      }
+      if (result.statement_type) warnStatementTypeMismatch(result.statement_type);
+
+      const parsed: Array<{
+        occurred_on: string;
+        description: string;
+        amount_raw: string;
+        kind: "income" | "expense";
+      }> = [];
+      const hints: Array<{ current: number; total: number } | null> = [];
+      let skippedPayments = 0;
+
+      for (const row of result.rows ?? []) {
+        if (isCreditCard && isInvoicePaymentLine(row.description)) {
+          skippedPayments++;
+          continue;
+        }
+        parsed.push({
+          occurred_on: row.occurred_on,
+          description: row.description.trim(),
+          amount_raw: row.amount_raw,
+          kind: resolveLineKind(isCreditCard, row.is_negative),
+        });
+        hints.push(extractInstallmentHint(row.description));
+      }
+
+      if (skippedPayments > 0) {
+        toast.info(
+          `${skippedPayments} linha(s) de pagamento de fatura ignoradas — pagamentos são lançados pela tela de Cartões.`,
+        );
+      }
+
+      await classifyParsedRows(parsed, hints);
+    } catch (err: unknown) {
+      toast.error(`Erro ao processar PDF: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsClassifying(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Upload → parse → classificação IA
   // ---------------------------------------------------------------------------
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -178,6 +364,13 @@ function ImportPage() {
       toast.error("Selecione a conta bancária antes do upload.");
       return;
     }
+
+    if (isPdfFile(file)) {
+      e.target.value = "";
+      await handlePdfFile(file);
+      return;
+    }
+
     setIsClassifying(true);
 
     Papa.parse(file, {
@@ -185,28 +378,86 @@ function ImportPage() {
       skipEmptyLines: true,
       complete: async (results) => {
         try {
+          const rawRows = results.data as Record<string, string>[];
+          if (rawRows.length === 0) {
+            toast.error("Arquivo vazio ou sem linhas reconhecíveis.");
+            return;
+          }
+
+          // Colunas já conhecidas (Data/Descricao/Valor em pt/en) não precisam
+          // de detecção por IA — só CSVs de formato desconhecido chamam a IA,
+          // e apenas UMA VEZ por arquivo (nunca por linha).
+          const knownCols = detectKnownColumns(Object.keys(rawRows[0]));
+
+          let dateKey: string;
+          let descKey: string;
+          let amountKey: string;
+          let dateFormat: "DD/MM/YYYY" | "YYYY-MM-DD" | "MM/DD/YYYY" | "DD/MM/YY" = "DD/MM/YYYY";
+          let negativeConvention: "minus_prefix" | "minus_suffix" | "parentheses" | "none" =
+            "minus_prefix";
+
+          if (knownCols) {
+            dateKey = knownCols.dateKey;
+            descKey = knownCols.descKey;
+            amountKey = knownCols.amountKey;
+          } else {
+            toast.info("Detectando colunas do arquivo com IA...", { id: "schema" });
+            const sample = rawRows.slice(0, 5);
+            const schemaMap = await detectCsvSchema({ data: { sample_rows: sample } });
+            toast.dismiss("schema");
+
+            dateKey = schemaMap.date_key;
+            descKey = schemaMap.description_key;
+            amountKey = schemaMap.amount_key;
+            dateFormat = schemaMap.date_format;
+            negativeConvention = schemaMap.negative_convention;
+
+            warnStatementTypeMismatch(schemaMap.statement_type);
+          }
+
           const parsed: Array<{
             occurred_on: string;
             description: string;
             amount_raw: string;
             kind: "income" | "expense";
           }> = [];
+          const hints: Array<{ current: number; total: number } | null> = [];
           let skippedPayments = 0;
+          let skippedInvalid = 0;
 
-          for (const row of results.data as Record<string, string>[]) {
-            const rawDate = row.Data ?? row.date ?? row.Date ?? "";
-            const rawDesc = row.Descricao ?? row.description ?? row.Description ?? "";
-            const rawValue = row.Valor ?? row.amount ?? row.Amount ?? "";
-            if (!rawDate || !rawDesc || !rawValue) continue;
-
-            let occurred_on = rawDate.trim();
-            if (occurred_on.includes("/")) {
-              const [d, m, y] = occurred_on.split("/");
-              occurred_on = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+          for (const row of rawRows) {
+            const rawDate = row[dateKey] ?? "";
+            const rawDesc = row[descKey] ?? "";
+            const rawValue = row[amountKey] ?? "";
+            if (!rawDate || !rawDesc || !rawValue) {
+              skippedInvalid++;
+              continue;
             }
 
-            const numeric = parseFloat(String(rawValue).trim().replace(",", "."));
-            if (Number.isNaN(numeric)) continue;
+            let occurred_on: string;
+            let absAmount: string;
+            let isNegative: boolean;
+            try {
+              occurred_on = knownCols
+                ? rawDate.trim().includes("/")
+                  ? (() => {
+                      const [d, m, y] = rawDate.trim().split("/");
+                      return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+                    })()
+                  : rawDate.trim()
+                : parseCsvDate(rawDate, dateFormat);
+
+              ({ absAmount, isNegative } = knownCols
+                ? (() => {
+                    const numeric = parseFloat(String(rawValue).trim().replace(",", "."));
+                    if (Number.isNaN(numeric)) throw new Error("valor inválido");
+                    return { absAmount: Math.abs(numeric).toFixed(2), isNegative: numeric < 0 };
+                  })()
+                : parseCsvAmount(rawValue, negativeConvention));
+            } catch {
+              skippedInvalid++;
+              continue;
+            }
 
             // MODO FATURA: pula linhas de pagamento de fatura (fluxo neutro)
             if (isCreditCard && isInvoicePaymentLine(rawDesc)) {
@@ -214,66 +465,28 @@ function ImportPage() {
               continue;
             }
 
-            // Semântica de sinais:
-            //   extrato bancário → positivo = receita
-            //   fatura de cartão → positivo = compra (despesa); negativo = estorno
-            const kind: "income" | "expense" = isCreditCard
-              ? numeric >= 0
-                ? "expense"
-                : "income"
-              : numeric >= 0
-              ? "income"
-              : "expense";
-
             parsed.push({
               occurred_on,
               description: rawDesc.trim(),
-              amount_raw: Math.abs(numeric).toFixed(2),
-              kind,
+              amount_raw: absAmount,
+              kind: resolveLineKind(isCreditCard, isNegative),
             });
+            hints.push(extractInstallmentHint(rawDesc));
           }
 
+          if (skippedInvalid > 0) {
+            toast.info(`${skippedInvalid} linha(s) ignoradas por dado inválido ou incompleto.`);
+          }
           if (skippedPayments > 0) {
             toast.info(
               `${skippedPayments} linha(s) de pagamento de fatura ignoradas — pagamentos são lançados pela tela de Cartões.`,
             );
           }
 
-          if (parsed.length === 0) {
-            toast.error("Nenhuma linha válida. Verifique as colunas: Data, Descricao, Valor.");
-            return;
-          }
-
-          toast.info(`Analisando ${parsed.length} linhas com IA...`, { id: "classify" });
-          const classified = await classifyAndCheckImport({
-            data: { account_id: accountId, rows: parsed },
-          });
-          toast.dismiss("classify");
-
-          // Converte para estado editável, pré-preenchendo com a sugestão da IA
-          const editable: EditableRow[] = classified.map((r) => ({
-            ...r,
-            include: !r.is_duplicate,
-            category_choice: r.suggested_category_id
-              ? `cat:${r.suggested_category_id}`
-              : r.suggested_new_category
-              ? `new:${r.suggested_new_category}`
-              : "",
-          }));
-
-          setRows(editable);
-
-          const dups = editable.filter((r) => r.is_duplicate).length;
-          const classifiedCount = editable.filter((r) => !r.is_duplicate && r.category_choice).length;
-          const pending = editable.filter((r) => !r.is_duplicate && !r.category_choice).length;
-
-          toast.success(
-            `${classified.length} linhas: ${classifiedCount} classificadas pela IA` +
-              (pending > 0 ? `, ${pending} aguardando categoria manual` : "") +
-              (dups > 0 ? `, ${dups} duplicatas ignoradas` : "") + ".",
-          );
+          await classifyParsedRows(parsed, hints);
         } catch (err: unknown) {
           toast.dismiss("classify");
+          toast.dismiss("schema");
           toast.error(`Erro: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
           setIsClassifying(false);
@@ -416,12 +629,54 @@ function ImportPage() {
         )}
       </GlassCard>
 
-      {/* Etapa 2: Upload */}
-      {rows.length === 0 && (
+      {/* Etapa 2: Upload (ou prompt de senha, se o PDF pedir) */}
+      {rows.length === 0 && pdfPendingFile && (
+        <GlassCard className="p-6 border border-amber-500/30 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-300">
+            <AlertTriangle className="size-4" /> PDF protegido por senha
+          </div>
+          <p className="text-xs text-foreground/60">
+            {pdfPasswordWrong
+              ? "Senha incorreta — tente novamente."
+              : `"${pdfPendingFile.name}" exige uma senha para ser aberto.`}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2 max-w-md">
+            <Input
+              type="password"
+              value={pdfPassword}
+              onChange={(e) => setPdfPassword(e.target.value)}
+              placeholder="Digite a senha do arquivo"
+              autoFocus
+              disabled={isClassifying}
+            />
+            <Button
+              onClick={() => handlePdfFile(pdfPendingFile, pdfPassword)}
+              disabled={isClassifying || !pdfPassword}
+              className="shrink-0 gap-1.5"
+            >
+              {isClassifying && <RefreshCw className="size-3.5 animate-spin" />}
+              Tentar novamente
+            </Button>
+            <Button
+              variant="outline"
+              disabled={isClassifying}
+              onClick={() => {
+                setPdfPendingFile(null);
+                setPdfPassword("");
+                setPdfPasswordWrong(false);
+              }}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </GlassCard>
+      )}
+
+      {rows.length === 0 && !pdfPendingFile && (
         <GlassCard className="p-12 text-center border border-dashed border-white/20 relative hover:border-primary/40 transition-colors">
           <input
             type="file"
-            accept=".csv"
+            accept=".csv,.pdf"
             onChange={handleFileUpload}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
             disabled={isClassifying || !accountId}
@@ -433,14 +688,17 @@ function ImportPage() {
           )}
           <p className="text-sm font-medium text-foreground/80">
             {isClassifying
-              ? "Classificando lançamentos com IA..."
+              ? "Processando lançamentos com IA..."
               : !accountId
               ? "Selecione o destino acima para habilitar o upload"
               : isCreditCard
-              ? "Clique ou arraste o arquivo CSV da fatura do cartão"
-              : "Clique ou arraste o arquivo CSV do seu banco"}
+              ? "Clique ou arraste o arquivo CSV ou PDF da fatura do cartão"
+              : "Clique ou arraste o arquivo CSV ou PDF do seu banco"}
           </p>
-          <p className="text-xs text-foreground/40 mt-1">Colunas esperadas: Data · Descricao · Valor</p>
+          <p className="text-xs text-foreground/40 mt-1">
+            Reconhece automaticamente as colunas do CSV de qualquer banco, ou o texto de um PDF de
+            extrato/fatura (ou use Data · Descricao · Valor)
+          </p>
         </GlassCard>
       )}
 
@@ -571,6 +829,11 @@ function ImportPage() {
                                 <Pencil className="size-3 text-foreground/20 group-hover:text-foreground/60 shrink-0" />
                               )}
                             </button>
+                          )}
+                          {r.installment_hint && (
+                            <span className="ml-1.5 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border text-violet-400 bg-violet-500/10 border-violet-500/20">
+                              {r.installment_hint.current}/{r.installment_hint.total}
+                            </span>
                           )}
                         </TableCell>
 
