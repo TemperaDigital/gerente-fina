@@ -18,10 +18,15 @@ import { hashTransaction } from "@/lib/finance/hash";
 import { normalizeAmount } from "@/lib/finance/money";
 import {
   normalizePattern,
+  derivePattern,
   matchDescription,
   loadUserRules,
   learnClassificationRules,
 } from "@/lib/supabase/rules.functions";
+import { extractInstallmentHint } from "@/lib/finance/csv-mapping";
+import { estimateInstallmentSeries } from "@/lib/finance/installment-split";
+import { computeInvoiceDueDate } from "@/lib/finance/invoice-due";
+import { computeNextRun } from "@/lib/finance/recurrence-schedule";
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -213,6 +218,34 @@ export interface SmartImportRow {
   /** Confiança da IA na sugestão. */
   confidence: "high" | "medium" | "low";
   notes?: string | null;
+  /**
+   * Parcelamento já cadastrado que corresponde a esta linha (mesma conta,
+   * mesma quantidade de parcelas, descrição normalizada semelhante) — quando
+   * presente, a UI oferece "Vincular ao parcelamento existente". NUNCA cria
+   * estrutura nova quando já existe uma correspondente.
+   */
+  matched_installment_purchase_id: string | null;
+  matched_installment_purchase_description: string | null;
+  /**
+   * true somente quando a linha é a parcela 1/N (início real da compra) e
+   * NENHUM parcelamento correspondente foi encontrado — UI oferece
+   * "Criar novo parcelamento". Parcelas no meio da série (ex: 8/10) sem
+   * correspondência NÃO oferecem criação — evita reconstruir histórico.
+   */
+  offer_create_installment: boolean;
+  /**
+   * Recorrência já cadastrada que corresponde a esta linha — vínculo
+   * SILENCIOSO (sem ação de UI): o motor de materialização já cuida dos
+   * próximos meses, esta ocorrência só entra vinculada a ela.
+   */
+  matched_recurrence_id: string | null;
+  /**
+   * true quando a linha parece assinatura/recorrente (categoria
+   * "assinaturas" OU descrição+valor idênticos em meses anteriores já
+   * importados) mas NENHUMA recorrência correspondente foi encontrada — UI
+   * oferece "Converter em recorrência mensal".
+   */
+  offer_convert_recurrence: boolean;
 }
 
 const SmartClassifyInput = z.object({
@@ -412,6 +445,96 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
       ruleMatches.set(index, match);
     });
 
+    // 2.6. Vínculo estrutural (parcelamento/recorrência) — NUNCA cria
+    //      estrutura nova sem antes tentar casar com uma já existente.
+    const { data: accountRow } = await sb
+      .from("accounts")
+      .select("type, closing_day, due_day")
+      .eq("id", data.account_id)
+      .maybeSingle();
+    const isCardAccount = accountRow?.type === "credit_card";
+
+    const { data: purchaseCandidates } = isCardAccount
+      ? await sb
+          .from("installment_purchases")
+          .select("id, description, installments_count")
+          .eq("account_id", data.account_id)
+          .eq("status", "active")
+      : { data: [] as Array<{ id: string; description: string; installments_count: number }> };
+
+    const { data: recurrenceCandidates } = await sb
+      .from("recurrences")
+      .select("id, description, kind")
+      .eq("account_id", data.account_id)
+      .eq("active", true);
+
+    // Últimas transações da conta — heurística "descrição+valor repetidos em
+    // meses anteriores" para sugerir recorrência quando a categoria não
+    // deixa isso óbvio por si só.
+    const { data: priorTx } = await sb
+      .from("transactions")
+      .select("description, amount, kind, occurred_on")
+      .eq("account_id", data.account_id)
+      .order("occurred_on", { ascending: false })
+      .limit(500);
+
+    const installmentMatches = new Map<
+      number,
+      { purchase_id: string; description: string }
+    >();
+    const installmentCreateOffers = new Set<number>();
+    const recurrenceMatches = new Map<number, string>();
+    const recurrenceConvertOffers = new Set<number>();
+
+    rowsWithHash.forEach((row, index) => {
+      if (existingSet.has(row.dedup_hash)) return;
+
+      const hint = extractInstallmentHint(row.description);
+      if (hint && isCardAccount) {
+        const rowPattern = derivePattern(row.description).pattern;
+        const match = (purchaseCandidates ?? []).find(
+          (p) =>
+            p.installments_count === hint.total &&
+            derivePattern(p.description).pattern === rowPattern,
+        );
+        if (match) {
+          installmentMatches.set(index, { purchase_id: match.id, description: match.description });
+        } else if (hint.current === 1) {
+          installmentCreateOffers.add(index);
+        }
+        return; // linha de parcelamento nunca também vira candidata a recorrência
+      }
+
+      const rowPattern = derivePattern(row.description).pattern;
+      const recMatch = (recurrenceCandidates ?? []).find(
+        (r) => r.kind === row.kind && derivePattern(r.description).pattern === rowPattern,
+      );
+      if (recMatch) {
+        recurrenceMatches.set(index, recMatch.id);
+        return;
+      }
+
+      // Heurística "descrição+valor repetidos em meses anteriores" — não
+      // depende da classificação da IA, então já dá pra checar aqui. A OUTRA
+      // heurística ("categoria assinaturas") só é possível depois que a
+      // categoria final é resolvida (regra aprendida OU IA) — ver step 4.
+      const normalizedDesc = normalizePattern(row.description);
+      const rowAmountCanonical = normalizeAmount(row.amount_raw);
+      const hasPriorOccurrence = (priorTx ?? []).some(
+        (t) =>
+          t.kind === row.kind &&
+          t.occurred_on < row.occurred_on &&
+          normalizePattern(t.description ?? "") === normalizedDesc &&
+          normalizeAmount(t.amount) === rowAmountCanonical,
+      );
+      if (hasPriorOccurrence) recurrenceConvertOffers.add(index);
+    });
+
+    /** Categoria com nome sugerindo assinatura/recorrência (ex: "Assinaturas Digitais"). */
+    function looksLikeSubscriptionCategoryName(name: string | undefined | null): boolean {
+      return !!name && normalizePattern(name).includes("assinatura");
+    }
+
     // 3. Classificação IA em lotes de 40 (só linhas NÃO duplicadas e NÃO
     //    resolvidas por regra — economiza tokens)
     const aiResults = new Map<number, AiClassification>();
@@ -469,6 +592,18 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
         }
       }
 
+      // Heurística "categoria assinaturas" — só dá pra checar agora que a
+      // categoria final (regra aprendida ou IA) já foi resolvida acima.
+      let offerConvertRecurrence = !isDup && recurrenceConvertOffers.has(index);
+      if (!isDup && !offerConvertRecurrence && !recurrenceMatches.has(index)) {
+        const finalCatName = suggested_category_id
+          ? categories.find((c) => c.id === suggested_category_id)?.name
+          : suggested_new_category;
+        if (looksLikeSubscriptionCategoryName(finalCatName)) offerConvertRecurrence = true;
+      }
+
+      const installmentMatch = !isDup ? installmentMatches.get(index) : undefined;
+
       return {
         occurred_on: row.occurred_on,
         description: row.description,
@@ -481,6 +616,11 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
         suggested_new_category,
         confidence,
         notes,
+        matched_installment_purchase_id: installmentMatch?.purchase_id ?? null,
+        matched_installment_purchase_description: installmentMatch?.description ?? null,
+        offer_create_installment: !isDup && installmentCreateOffers.has(index),
+        matched_recurrence_id: !isDup ? recurrenceMatches.get(index) ?? null : null,
+        offer_convert_recurrence: offerConvertRecurrence,
       };
     });
   });
@@ -489,6 +629,19 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
 // commitSmartImport — cria categorias novas aprovadas e grava os lançamentos.
 // Cada linha traz OU category_id (existente) OU new_category_name (a criar).
 // ---------------------------------------------------------------------------
+
+const StructuralActionInput = z.union([
+  z.object({
+    type: z.literal("link_installment"),
+    purchase_id: z.string().uuid(),
+    installment_number: z.number().int().min(1),
+  }),
+  z.object({
+    type: z.literal("create_installment"),
+    installments_count: z.number().int().min(2).max(360),
+  }),
+  z.object({ type: z.literal("convert_recurrence") }),
+]);
 
 const SmartCommitInput = z.object({
   rows: z
@@ -504,6 +657,10 @@ const SmartCommitInput = z.object({
           category_id: z.string().uuid().nullable().optional(),
           new_category_name: z.string().min(1).max(60).nullable().optional(),
           notes: z.string().nullable().optional(),
+          /** Vínculo estrutural escolhido pelo usuário na pré-visualização — nunca cria sem tentar casar primeiro (já feito em classifyAndCheckImport). */
+          structural_action: StructuralActionInput.nullable().optional(),
+          /** Recorrência já existente casada automaticamente — vínculo silencioso, sem ação do usuário. */
+          matched_recurrence_id: z.string().uuid().nullable().optional(),
         })
         .refine((r) => r.category_id || r.new_category_name, {
           message: "Cada linha precisa de uma categoria (existente ou nova).",
@@ -515,7 +672,16 @@ const SmartCommitInput = z.object({
 export const commitSmartImport = createServerFn({ method: "POST" })
   .inputValidator((i: unknown) => SmartCommitInput.parse(i))
   .handler(
-    async ({ data }): Promise<{ inserted: number; categories_created: number }> => {
+    async ({
+      data,
+    }): Promise<{
+      inserted: number;
+      categories_created: number;
+      installments_linked: number;
+      installments_created: number;
+      recurrences_created: number;
+      warnings: string[];
+    }> => {
       const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
       const { accountBelongsToUser } = await import("@/lib/finance/active-account.server");
       const sb = getSupabaseAdmin();
@@ -568,8 +734,170 @@ export const commitSmartImport = createServerFn({ method: "POST" })
         categoriesCreated++;
       }
 
+      // 1.5. Vínculo estrutural — PRÉ-PASSO. Cria recorrência/parcelamento
+      // ANTES de inserir as transações (nenhum dos dois depende do id da
+      // transação ainda), guardando o que cada linha vai precisar depois de
+      // inserida. NUNCA cria estrutura nova para "link_installment" — nesse
+      // caso só localizamos o item já existente a preencher.
+      const warnings: string[] = [];
+      let recurrencesCreated = 0;
+      let installmentsCreated = 0;
+      let installmentsLinked = 0;
+
+      // rowIndex → recurrence_id a gravar direto no insert da transação
+      const recurrenceIdByRow = new Map<number, string>();
+      // rowIndex → id do installment_items cujo transaction_id precisa ser
+      // preenchido DEPOIS que a transação for inserida (link OU criação nova)
+      const pendingItemLinkByRow = new Map<number, string>();
+
+      for (let i = 0; i < data.rows.length; i++) {
+        const row = data.rows[i];
+
+        if (row.matched_recurrence_id) {
+          recurrenceIdByRow.set(i, row.matched_recurrence_id);
+          continue;
+        }
+
+        const action = row.structural_action;
+        if (!action) continue;
+
+        if (action.type === "convert_recurrence") {
+          const dayOfMonth = Number(row.occurred_on.split("-")[2]);
+          const nextRun = computeNextRun(row.occurred_on, {
+            frequency: "monthly",
+            interval_count: 1,
+            day_of_month: dayOfMonth,
+          });
+          const categoryId =
+            row.category_id ??
+            createdMap.get(`${(row.new_category_name ?? "").trim().toLowerCase()}|${row.kind}`) ??
+            null;
+          if (!categoryId) {
+            warnings.push(`Linha "${row.description}": sem categoria resolvida, recorrência não criada.`);
+            continue;
+          }
+          const { data: rec, error: recErr } = await sb
+            .from("recurrences")
+            .insert({
+              user_id: userId,
+              account_id: row.account_id,
+              category_id: categoryId,
+              kind: row.kind,
+              type: row.kind === "income" ? "credit" : "debit",
+              amount: normalizeAmount(row.amount_raw),
+              description: row.description,
+              frequency: "monthly",
+              interval_count: 1,
+              day_of_month: dayOfMonth,
+              start_on: row.occurred_on,
+              next_run_on: nextRun,
+            })
+            .select("id")
+            .single();
+          if (recErr) {
+            warnings.push(`Linha "${row.description}": falha ao criar recorrência (${recErr.message}).`);
+            continue;
+          }
+          recurrenceIdByRow.set(i, rec.id);
+          recurrencesCreated++;
+        } else if (action.type === "link_installment") {
+          const { data: targetItem, error: itemErr } = await sb
+            .from("installment_items")
+            .select("id")
+            .eq("purchase_id", action.purchase_id)
+            .eq("installment_number", action.installment_number)
+            .is("transaction_id", null)
+            .maybeSingle();
+          if (itemErr || !targetItem) {
+            warnings.push(
+              `Linha "${row.description}": parcela ${action.installment_number} não encontrada no parcelamento (ou já vinculada) — importada como lançamento simples.`,
+            );
+            continue;
+          }
+          pendingItemLinkByRow.set(i, targetItem.id);
+        } else if (action.type === "create_installment") {
+          const categoryId =
+            row.category_id ??
+            createdMap.get(`${(row.new_category_name ?? "").trim().toLowerCase()}|${row.kind}`) ??
+            null;
+          if (!categoryId) {
+            warnings.push(`Linha "${row.description}": sem categoria resolvida, parcelamento não criado.`);
+            continue;
+          }
+
+          const { data: accRow } = await sb
+            .from("accounts")
+            .select("closing_day, due_day")
+            .eq("id", row.account_id)
+            .maybeSingle();
+
+          const { totalAmount, amounts } = estimateInstallmentSeries(
+            normalizeAmount(row.amount_raw),
+            action.installments_count,
+          );
+
+          const { data: purchase, error: purchaseErr } = await sb
+            .from("installment_purchases")
+            .insert({
+              user_id: userId,
+              account_id: row.account_id,
+              category_id: categoryId,
+              description: row.description,
+              total_amount: totalAmount,
+              installments_count: action.installments_count,
+              purchased_on: row.occurred_on,
+            })
+            .select("id")
+            .single();
+          if (purchaseErr) {
+            warnings.push(`Linha "${row.description}": falha ao criar parcelamento (${purchaseErr.message}).`);
+            continue;
+          }
+
+          const [py, pm, pd] = row.occurred_on.split("-").map(Number);
+          const purchaseDate = new Date(py, pm - 1, pd);
+          let firstItemId: string | null = null;
+
+          for (let n = 1; n <= action.installments_count; n++) {
+            const installmentDate = new Date(purchaseDate);
+            installmentDate.setMonth(installmentDate.getMonth() + (n - 1));
+            const dueDate =
+              accRow?.closing_day && accRow?.due_day
+                ? computeInvoiceDueDate({
+                    purchaseDate: installmentDate,
+                    closingDay: accRow.closing_day,
+                    dueDay: accRow.due_day,
+                  })
+                : installmentDate;
+            const dueStr = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, "0")}-${String(dueDate.getDate()).padStart(2, "0")}`;
+
+            const { data: item, error: itemErr } = await sb
+              .from("installment_items")
+              .insert({
+                user_id: userId,
+                purchase_id: purchase.id,
+                installment_number: n,
+                amount: amounts[n - 1],
+                due_date: dueStr,
+              })
+              .select("id")
+              .single();
+            if (itemErr) {
+              warnings.push(`Parcela ${n}/${action.installments_count} de "${row.description}": ${itemErr.message}`);
+              continue;
+            }
+            if (n === 1) firstItemId = item.id;
+          }
+
+          if (firstItemId) {
+            pendingItemLinkByRow.set(i, firstItemId);
+            installmentsCreated++;
+          }
+        }
+      }
+
       // 2. Monta payload final com todas as categorias resolvidas
-      const payload = data.rows.map((row) => {
+      const payload = data.rows.map((row, i) => {
         let categoryId = row.category_id ?? null;
         if (!categoryId && row.new_category_name) {
           const key = `${row.new_category_name.trim().toLowerCase()}|${row.kind}`;
@@ -590,11 +918,36 @@ export const commitSmartImport = createServerFn({ method: "POST" })
           notes: row.notes ?? null,
           dedup_hash: row.dedup_hash,
           source: "import",
+          recurrence_id: recurrenceIdByRow.get(i) ?? null,
         };
       });
 
-      const { error } = await sb.from("transactions").insert(payload);
+      const { data: insertedRows, error } = await sb
+        .from("transactions")
+        .insert(payload)
+        .select("id");
       if (error) throw new Error(`Falha ao gravar transações: ${error.message}`);
+
+      // 3. Pós-passo: agora que temos os ids das transações recém-inseridas
+      // (na MESMA ordem do payload/data.rows), preenche installment_items
+      // pendentes de vínculo (link OU primeira parcela de criação nova).
+      for (const [rowIndex, itemId] of pendingItemLinkByRow) {
+        const txId = insertedRows?.[rowIndex]?.id;
+        if (!txId) continue;
+        const { data: updated, error: linkErr } = await sb
+          .from("installment_items")
+          .update({ transaction_id: txId })
+          .eq("id", itemId)
+          .is("transaction_id", null)
+          .select("id");
+        if (linkErr || !updated?.length) {
+          warnings.push(
+            `Linha "${data.rows[rowIndex].description}": falha ao vincular a parcela (${linkErr?.message ?? "já vinculada por outra transação"}).`,
+          );
+        } else if (data.rows[rowIndex].structural_action?.type === "link_installment") {
+          installmentsLinked++;
+        }
+      }
 
       // Aprende com as linhas confirmadas (best-effort — não pode derrubar
       // uma importação que já foi gravada com sucesso).
@@ -612,7 +965,14 @@ export const commitSmartImport = createServerFn({ method: "POST" })
         // aprendizado é best-effort; a importação já foi gravada com sucesso
       }
 
-      return { inserted: payload.length, categories_created: categoriesCreated };
+      return {
+        inserted: payload.length,
+        categories_created: categoriesCreated,
+        installments_linked: installmentsLinked,
+        installments_created: installmentsCreated,
+        recurrences_created: recurrencesCreated,
+        warnings,
+      };
     },
   );
 
