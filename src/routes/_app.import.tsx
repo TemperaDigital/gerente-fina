@@ -105,6 +105,17 @@ interface EditableRow extends SmartImportRow {
   category_choice: string;
   /** Parcelamento detectado na descrição original (ex: "3/12") — metadado, não persistido. */
   installment_hint: { current: number; total: number } | null;
+  /**
+   * Escolha do usuário sobre o vínculo de parcelamento desta linha:
+   * "link" (vincular ao parcelamento existente), "create" (criar novo,
+   * só quando offer_create_installment) ou "ignore" (comportamento de hoje —
+   * transação simples). Default: "link" quando já achou correspondência
+   * (nunca cria estrutura duplicada sem avisar); "ignore" quando só oferece
+   * criação — exige opt-in explícito para criar estrutura nova.
+   */
+  installment_choice: "link" | "create" | "ignore";
+  /** Opt-in explícito para "Converter em recorrência mensal" — default false. */
+  convert_to_recurrence: boolean;
 }
 
 /**
@@ -332,6 +343,10 @@ function ImportPage() {
         ? `new:${r.suggested_new_category}`
         : "",
       installment_hint: hints[i] ?? null,
+      // Já achou parcelamento correspondente → vincula por padrão (nunca cria
+      // duplicidade sem avisar). Só oferece criação → exige opt-in explícito.
+      installment_choice: r.matched_installment_purchase_id ? "link" : "ignore",
+      convert_to_recurrence: false,
     }));
 
     setRows(editable);
@@ -643,6 +658,24 @@ function ImportPage() {
                 ? r.category_choice.slice(4)
                 : null,
               notes: r.notes ?? null,
+              structural_action:
+                r.installment_choice === "link" &&
+                r.matched_installment_purchase_id &&
+                r.installment_hint
+                  ? {
+                      type: "link_installment" as const,
+                      purchase_id: r.matched_installment_purchase_id,
+                      installment_number: r.installment_hint.current,
+                    }
+                  : r.installment_choice === "create" && r.installment_hint
+                  ? {
+                      type: "create_installment" as const,
+                      installments_count: r.installment_hint.total,
+                    }
+                  : r.convert_to_recurrence
+                  ? { type: "convert_recurrence" as const }
+                  : null,
+              matched_recurrence_id: r.matched_recurrence_id,
             })),
           },
         });

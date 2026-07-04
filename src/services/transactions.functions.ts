@@ -753,6 +753,10 @@ export interface TransactionDetailDTO {
   recurrence_id: string | null;
   source: string | null;
   has_installment_link: boolean;
+  /** Presente somente quando has_installment_link — contexto para a tela de conversão. */
+  installment_info: { current: number; total: number; purchase_description: string } | null;
+  /** Presente somente quando kind === 'transfer' — contexto para a tela de conversão. */
+  transfer_counterpart_account_name: string | null;
 }
 
 export const getTransactionById = createServerFn({ method: "GET" })
@@ -777,10 +781,40 @@ export const getTransactionById = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     if (!row) throw new Error("Lançamento não encontrado.");
 
-    const { count: instCount } = await sb
+    const { data: instRow } = await sb
       .from("installment_items")
-      .select("id", { count: "exact", head: true })
-      .eq("transaction_id", data.id);
+      .select(
+        "installment_number, purchase_id, installment_purchases:purchase_id ( description, installments_count )",
+      )
+      .eq("transaction_id", data.id)
+      .maybeSingle();
+
+    const instTyped = instRow as unknown as {
+      installment_number: number;
+      installment_purchases?: { description?: string | null; installments_count?: number } | null;
+    } | null;
+
+    const installmentInfo = instTyped
+      ? {
+          current: instTyped.installment_number,
+          total: instTyped.installment_purchases?.installments_count ?? 0,
+          purchase_description: instTyped.installment_purchases?.description ?? "",
+        }
+      : null;
+
+    let transferCounterpartName: string | null = null;
+    const rowTransferId = (row as { transfer_id?: string | null }).transfer_id;
+    if (rowTransferId) {
+      const { data: sibling } = await sb
+        .from("transactions")
+        .select("account_id, accounts:account_id ( name )")
+        .eq("transfer_id", rowTransferId)
+        .neq("id", data.id)
+        .maybeSingle();
+      transferCounterpartName =
+        (sibling as unknown as { accounts?: { name?: string | null } | null } | null)?.accounts
+          ?.name ?? null;
+    }
 
     const r = row as unknown as {
       id: string;
@@ -818,7 +852,9 @@ export const getTransactionById = createServerFn({ method: "GET" })
       paid_invoice_id: r.paid_invoice_id,
       recurrence_id: r.recurrence_id,
       source: r.source,
-      has_installment_link: (instCount ?? 0) > 0,
+      has_installment_link: installmentInfo !== null,
+      installment_info: installmentInfo,
+      transfer_counterpart_account_name: transferCounterpartName,
     };
   });
 
@@ -860,5 +896,107 @@ export const updateTransactionEntry = createServerFn({ method: "POST" })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+// ---------------------------------------------------------------------------
+// convertTransactionEntry — CONVERSÃO ESTRUTURAL (ação separada e explícita
+// da retificação acima). Desfaz a estrutura antiga (parcelamento/recorrência/
+// transferência/pagamento de fatura) e recria o lançamento com o novo kind,
+// tudo dentro de UMA chamada RPC atômica (migration 0013,
+// convert_transaction_entry) — nunca chamada diretamente do frontend.
+// ---------------------------------------------------------------------------
+const ConvertInput = z
+  .object({
+    transaction_id: z.string().uuid(),
+    new_kind: z.enum(["income", "expense", "transfer", "invoice_payment"]),
+    amount: z
+      .string()
+      .regex(/^\d+(\.\d{1,2})?$/, "amount inválido (ex.: 1234.56)"),
+    occurred_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    description: z.string().trim().min(1).max(240),
+    account_id: z.string().uuid(),
+    notes: z.string().max(2000).optional(),
+    category_id: z.string().uuid().optional(),
+    counterpart_account_id: z.string().uuid().optional(),
+    paid_invoice_id: z.string().uuid().optional(),
+    idempotency_key: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if ((v.new_kind === "income" || v.new_kind === "expense") && !v.category_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Categoria é obrigatória para receita/despesa.",
+        path: ["category_id"],
+      });
+    }
+    if (v.new_kind === "transfer") {
+      if (!v.counterpart_account_id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Selecione a conta de destino da transferência.",
+          path: ["counterpart_account_id"],
+        });
+      } else if (v.counterpart_account_id === v.account_id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Conta de destino deve ser diferente da origem.",
+          path: ["counterpart_account_id"],
+        });
+      }
+    }
+    if (v.new_kind === "invoice_payment" && !v.paid_invoice_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Selecione a fatura a ser paga.",
+        path: ["paid_invoice_id"],
+      });
+    }
+  });
+
+export interface ConvertTransactionResultDTO {
+  created_transaction_id: string | null;
+  created_transfer_id: string | null;
+  invoice_outstanding: number | null;
+  invoice_status: string | null;
+}
+
+export const convertTransactionEntry = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => ConvertInput.parse(input))
+  .handler(async ({ data }): Promise<ConvertTransactionResultDTO> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    const idempotencyKey =
+      data.new_kind === "invoice_payment" ? data.idempotency_key ?? crypto.randomUUID() : null;
+
+    const { data: rpcResult, error } = await sb.rpc("convert_transaction_entry", {
+      _transaction_id: data.transaction_id,
+      _new_kind: data.new_kind,
+      _amount: data.amount,
+      _occurred_on: data.occurred_on,
+      _description: data.description,
+      _account_id: data.account_id,
+      _notes: data.notes ?? null,
+      _category_id: data.category_id ?? null,
+      _counterpart_account_id: data.counterpart_account_id ?? null,
+      _paid_invoice_id: data.paid_invoice_id ?? null,
+      _idempotency_key: idempotencyKey,
+    });
+
+    if (error) {
+      // Mensagens de negócio (P0001: fatura não encontrada, ambiguidade de
+      // perna, categoria ausente etc.) chegam aqui como texto legível.
+      throw new Error(error.message);
+    }
+
+    const result = rpcResult?.[0];
+    if (!result) throw new Error("Falha ao converter lançamento.");
+
+    return {
+      created_transaction_id: result.created_transaction_id,
+      created_transfer_id: result.created_transfer_id,
+      invoice_outstanding: result.invoice_outstanding,
+      invoice_status: result.invoice_status,
+    };
   });
 

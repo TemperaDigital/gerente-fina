@@ -16,10 +16,11 @@ import {
 import {
   queryOptions,
   useMutation,
+  useQuery,
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { ArrowLeft, Lock } from "lucide-react";
+import { ArrowLeft, Lock, RefreshCw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -33,15 +34,79 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { GlassCard } from "@/components/dashboard/primitives";
 import {
   getTransactionById,
   updateTransactionEntry,
+  convertTransactionEntry,
+  type TransactionKind,
 } from "@/services/transactions.functions";
 import {
   getAccountsLookup,
   getCategoriesLookup,
 } from "@/services/lookups.functions";
+import {
+  listInvoicesForPayment,
+  type InvoiceForPaymentDTO,
+} from "@/services/invoices.functions";
+
+/**
+ * Mensagem explicando EXATAMENTE o que a conversão vai desfazer, antes de
+ * qualquer ação — ver missão "Conversão segura de tipo de lançamento".
+ * Retorna null para lançamento simples (sem vínculo estrutural).
+ */
+function structuralWarningFor(tx: {
+  kind: TransactionKind;
+  has_installment_link: boolean;
+  installment_info: { current: number; total: number; purchase_description: string } | null;
+  recurrence_id: string | null;
+  transfer_counterpart_account_name: string | null;
+}): string | null {
+  if (tx.has_installment_link && tx.installment_info) {
+    const { current, total, purchase_description } = tx.installment_info;
+    const label = purchase_description ? `"${purchase_description}"` : "uma compra parcelada";
+    return `Este lançamento faz parte de ${label} (${current}/${total}). Convertê-lo vai desvincular APENAS esta parcela; as demais permanecem intactas.`;
+  }
+  if (tx.kind === "transfer") {
+    return `Este lançamento é uma perna de transferência${
+      tx.transfer_counterpart_account_name
+        ? ` com "${tx.transfer_counterpart_account_name}"`
+        : ""
+    }. A perna correspondente na conta de destino/origem será excluída junto.`;
+  }
+  if (tx.kind === "invoice_payment") {
+    return "Este lançamento é uma perna de pagamento de fatura. A outra perna será excluída e o saldo da fatura será recalculado automaticamente pelo trigger existente.";
+  }
+  if (tx.recurrence_id) {
+    return "Este lançamento foi gerado por uma recorrência ativa. A recorrência em si NÃO será afetada — apenas esta ocorrência específica será desvinculada.";
+  }
+  return null;
+}
+
+const NEW_KIND_LABEL: Record<TransactionKind, string> = {
+  income: "Receita",
+  expense: "Despesa",
+  transfer: "Transferência",
+  invoice_payment: "Pagamento de Fatura",
+};
 
 const txQuery = (id: string) =>
   queryOptions({
@@ -151,6 +216,96 @@ function EditTransactionPage() {
       });
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  // ---------------------------------------------------------------------------
+  // Converter Lançamento — ação SEPARADA e EXPLÍCITA da retificação acima.
+  // NUNCA oferece re-parcelamento/recorrência automática: só desfaz a
+  // estrutura antiga e recria como income/expense/transfer/invoice_payment.
+  // ---------------------------------------------------------------------------
+  const structuralWarning = structuralWarningFor(tx);
+  const bankAccounts = accounts.filter((a) => a.type !== "credit_card");
+  const cardAccounts = accounts.filter((a) => a.type === "credit_card");
+
+  const [convertSetupOpen, setConvertSetupOpen] = useState(false);
+  const [convertConfirmOpen, setConvertConfirmOpen] = useState(false);
+  const [newKind, setNewKind] = useState<TransactionKind | "">("");
+  const [convertCategoryId, setConvertCategoryId] = useState("");
+  const [convertCounterpartAccountId, setConvertCounterpartAccountId] = useState("");
+  const [convertCardAccountId, setConvertCardAccountId] = useState("");
+  const [convertInvoiceId, setConvertInvoiceId] = useState("");
+
+  const invoicesQuery = useQuery({
+    queryKey: ["invoices-for-payment", convertCardAccountId],
+    queryFn: () =>
+      listInvoicesForPayment({ data: { account_id: convertCardAccountId } }),
+    enabled: !!convertCardAccountId,
+  });
+  const cardInvoices: InvoiceForPaymentDTO[] = invoicesQuery.data ?? [];
+
+  const newKindCategories = categories.filter((c) =>
+    newKind === "income" ? c.kind === "income" : c.kind === "expense",
+  );
+
+  function resetConvertSetup() {
+    setNewKind("");
+    setConvertCategoryId("");
+    setConvertCounterpartAccountId("");
+    setConvertCardAccountId("");
+    setConvertInvoiceId("");
+  }
+
+  function openConvertSetup() {
+    resetConvertSetup();
+    setConvertSetupOpen(true);
+  }
+
+  function convertSetupIsValid(): boolean {
+    if (!newKind) return false;
+    if (newKind === "income" || newKind === "expense") return !!convertCategoryId;
+    if (newKind === "transfer")
+      return !!convertCounterpartAccountId && convertCounterpartAccountId !== accountId;
+    if (newKind === "invoice_payment") return !!convertCardAccountId && !!convertInvoiceId;
+    return false;
+  }
+
+  const convertMut = useMutation({
+    mutationFn: () =>
+      convertTransactionEntry({
+        data: {
+          transaction_id: id,
+          new_kind: newKind as TransactionKind,
+          amount: amount.replace(",", ".").trim(),
+          occurred_on: occurredOn,
+          description: description.trim(),
+          account_id: accountId,
+          notes: notes.trim() || null,
+          category_id:
+            newKind === "income" || newKind === "expense" ? convertCategoryId : undefined,
+          counterpart_account_id:
+            newKind === "transfer" ? convertCounterpartAccountId : undefined,
+          paid_invoice_id: newKind === "invoice_payment" ? convertInvoiceId : undefined,
+        },
+      }),
+    onSuccess: async () => {
+      toast.success("Lançamento convertido com sucesso.");
+      setConvertConfirmOpen(false);
+      setConvertSetupOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      await queryClient.invalidateQueries({ queryKey: ["transaction", id] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      await queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      router.invalidate();
+      navigate({
+        to: "/transactions",
+        search: { month: occurredOn.slice(0, 7), page: 1 },
+      });
+    },
+    onError: (e: Error) => {
+      toast.error(e.message);
+      setConvertConfirmOpen(false);
+    },
   });
 
   function handleSubmit(e: React.FormEvent) {
@@ -330,7 +485,217 @@ function EditTransactionPage() {
             </Button>
           </div>
         </form>
+
+        {/* Conversão estrutural — ação SEPARADA da retificação acima */}
+        <GlassCard className="mt-6 space-y-2 border-rose-400/20 p-5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-rose-200">
+            <ShieldAlert className="size-4" /> Operação Estrutural
+          </div>
+          <p className="text-xs text-foreground/60">
+            Precisa mudar o TIPO deste lançamento (ex.: de despesa para transferência)? A
+            retificação acima não permite isso de propósito. Use a conversão — ela desfaz
+            corretamente qualquer vínculo (parcelamento, recorrência, transferência, pagamento de
+            fatura) antes de recriar o lançamento com o novo tipo.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            className="border-rose-400/30 bg-rose-400/5 text-rose-200 hover:bg-rose-400/10"
+            onClick={openConvertSetup}
+          >
+            Converter lançamento...
+          </Button>
+        </GlassCard>
       </div>
+
+      {/* Dialog 1 — escolha do novo tipo + campos exigidos por ele */}
+      <Dialog open={convertSetupOpen} onOpenChange={setConvertSetupOpen}>
+        <DialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
+          <DialogHeader>
+            <DialogTitle>Converter lançamento</DialogTitle>
+            <DialogDescription>
+              Escolha o novo tipo. Valor, data, descrição e conta usados serão os que estão
+              preenchidos no formulário acima.
+            </DialogDescription>
+          </DialogHeader>
+
+          {structuralWarning && (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">
+              {structuralWarning}
+            </div>
+          )}
+
+          <div className="space-y-3.5">
+            <Field label="Novo tipo">
+              <Select
+                value={newKind}
+                onValueChange={(v) => {
+                  setNewKind(v as TransactionKind);
+                  setConvertCategoryId("");
+                  setConvertCounterpartAccountId("");
+                  setConvertCardAccountId("");
+                  setConvertInvoiceId("");
+                }}
+              >
+                <SelectTrigger className="border-white/10 bg-white/[0.04]">
+                  <SelectValue placeholder="Selecione..." />
+                </SelectTrigger>
+                <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
+                  {(Object.keys(NEW_KIND_LABEL) as TransactionKind[]).map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {NEW_KIND_LABEL[k]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+
+            {(newKind === "income" || newKind === "expense") && (
+              <Field label="Categoria">
+                <Select value={convertCategoryId} onValueChange={setConvertCategoryId}>
+                  <SelectTrigger className="border-white/10 bg-white/[0.04]">
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
+                  <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
+                    {newKindCategories.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+
+            {newKind === "transfer" && (
+              <Field label="Conta de destino">
+                <Select
+                  value={convertCounterpartAccountId}
+                  onValueChange={setConvertCounterpartAccountId}
+                >
+                  <SelectTrigger className="border-white/10 bg-white/[0.04]">
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
+                  <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
+                    {accounts
+                      .filter((a) => a.id !== accountId)
+                      .map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+
+            {newKind === "invoice_payment" && (
+              <>
+                <Field label="Cartão">
+                  <Select
+                    value={convertCardAccountId}
+                    onValueChange={(v) => {
+                      setConvertCardAccountId(v);
+                      setConvertInvoiceId("");
+                    }}
+                  >
+                    <SelectTrigger className="border-white/10 bg-white/[0.04]">
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
+                      {cardAccounts.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Fatura sendo quitada">
+                  <Select
+                    value={convertInvoiceId}
+                    onValueChange={setConvertInvoiceId}
+                    disabled={!convertCardAccountId}
+                  >
+                    <SelectTrigger className="border-white/10 bg-white/[0.04]">
+                      <SelectValue
+                        placeholder={
+                          convertCardAccountId ? "Selecione..." : "Escolha um cartão primeiro"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent className="border-white/10 bg-zinc-900/95 text-foreground">
+                      {cardInvoices.length === 0 ? (
+                        <div className="px-2 py-1.5 text-xs text-foreground/40">
+                          Nenhuma fatura disponível
+                        </div>
+                      ) : (
+                        cardInvoices.map((inv) => (
+                          <SelectItem key={inv.id} value={inv.id}>
+                            {inv.reference_month.slice(0, 7)} · vence {inv.due_date} ·{" "}
+                            {inv.status === "closed" ? "fechada" : "aberta"}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              className="border border-white/10 bg-white/[0.04] hover:bg-white/10"
+              onClick={() => setConvertSetupOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={!convertSetupIsValid()}
+              className="bg-rose-500 text-white hover:bg-rose-600"
+              onClick={() => {
+                setConvertSetupOpen(false);
+                setConvertConfirmOpen(true);
+              }}
+            >
+              Continuar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog 2 — confirmação destrutiva final, mesmo padrão visual usado em outras exclusões */}
+      <AlertDialog open={convertConfirmOpen} onOpenChange={setConvertConfirmOpen}>
+        <AlertDialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar conversão?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-foreground/70">
+              <span className="block">{structuralWarning}</span>
+              <span className="block">
+                Um novo lançamento de <strong>{newKind && NEW_KIND_LABEL[newKind]}</strong> será
+                criado com os dados atuais do formulário. Esta ação não pode ser desfeita.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConvertConfirmOpen(false)}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={convertMut.isPending}
+              className="bg-rose-500 text-white hover:bg-rose-600"
+              onClick={() => convertMut.mutate()}
+            >
+              {convertMut.isPending && <RefreshCw className="mr-1.5 size-3.5 animate-spin" />}
+              Sim, converter
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
