@@ -425,4 +425,46 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Verificação:** `npx tsc --noEmit` limpo · `npm test` 64/64 · eslint sem erros reais.
 
+**Status:** enviado ao GitHub (`git push`).
+
+---
+
+## 18. Histórico de conversas no Chat IA
+
+- Duas tabelas novas (migration 0014): `chat_threads` (title nullable,
+  updated_at) e `chat_messages` (role user/assistant, content), RLS por
+  `auth.uid()` com `user_id` duplicado em `chat_messages` — mesmo padrão
+  de `installment_items` (migration 0003), evitando join na policy.
+- Server functions novas em `chat.functions.ts`: `listChatThreads` (com
+  prévia da última mensagem, calculada em JS a partir de uma query
+  ordenada por `created_at desc`), `createChatThread`, `getChatThreadMessages`,
+  `appendChatMessage`, `deleteChatThread`.
+- `sendChatMessage` foi adaptada para persistir a mensagem do usuário E a
+  resposta da IA a cada troca — a lógica de chamada à IA em si foi extraída
+  intacta para uma função interna `computeReply` (não exportada, não é mais
+  uma server function própria) e envolvida por uma camada de persistência
+  que roda depois; falha ao persistir histórico não bloqueia a resposta ao
+  usuário (só loga no servidor).
+- UI: coluna lateral de conversas em `/chat` (lista mais recente primeiro,
+  prévia de texto, data), virando `Sheet` (drawer) no mobile via botão no
+  cabeçalho — mesmo componente já usado em `AccountLedgerSheet`. Nova
+  conversa é criada automaticamente no primeiro envio de mensagem (usuário
+  nunca precisa clicar em "Nova conversa" antes de poder mandar a primeira).
+  Exclusão de thread com confirmação (`AlertDialog`, mesmo padrão de outras
+  telas).
+- Nenhuma ferramenta nova de IA foi adicionada (fora de escopo — Missão 9).
+
+**Arquivos criados:**
+- `docs/migrations/0014_chat_threads_and_messages.sql`
+
+**Arquivos alterados:**
+- `src/services/chat.functions.ts`
+- `src/routes/_app.chat.tsx`
+
+**Commit:** `df9c046`.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 64/64 · eslint sem erros reais.
+
+**Pendente:** aplicar a migration 0014 no Supabase antes de usar em produção (ainda não confirmado pelo usuário).
+
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
