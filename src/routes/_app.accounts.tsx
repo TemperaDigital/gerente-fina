@@ -18,7 +18,6 @@ import {
   ArrowLeft,
   Banknote,
   Landmark,
-  CreditCard,
   Plus,
   Archive,
   Pencil,
@@ -51,6 +50,7 @@ import {
   AccountForm,
   type AccountFormPayload,
 } from "@/components/accounts/account-form";
+import { AccountLedgerSheet } from "@/components/accounts/account-ledger-sheet";
 import {
   listAccounts,
   createAccount,
@@ -94,15 +94,20 @@ export const Route = createFileRoute("/_app/accounts")({
 });
 
 function AccountsPage() {
-  const { data: accounts } = useSuspenseQuery(accountsQuery());
+  const { data: allAccounts } = useSuspenseQuery(accountsQuery());
   const queryClient = useQueryClient();
   const router = useRouter();
+
+  // Segregação estrita: /accounts é exclusiva de dinheiro e conta bancária.
+  // Cartões de crédito vivem só em /credit-cards.
+  const accounts = allAccounts.filter((a) => a.type !== "credit_card");
 
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AccountWithBalanceDTO | null>(null);
   const [archiving, setArchiving] = useState<AccountWithBalanceDTO | null>(
     null,
   );
+  const [viewing, setViewing] = useState<AccountWithBalanceDTO | null>(null);
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ["accounts"] });
@@ -114,17 +119,10 @@ function AccountsPage() {
   const createMut = useMutation({
     mutationFn: (payload: AccountFormPayload) =>
       createAccount({ data: payload }),
-    onSuccess: async (_res, payload) => {
-      if (payload.type === "credit_card") {
-        toast.success("Cartão criado. Disponível em Cartões.");
-      } else {
-        toast.success("Conta criada.");
-      }
+    onSuccess: async () => {
+      toast.success("Conta criada.");
       setCreating(false);
       await refresh();
-      if (payload.type === "credit_card") {
-        router.navigate({ to: "/credit-cards" });
-      }
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -195,7 +193,6 @@ function AccountsPage() {
             {([
               { key: "cash", label: "Dinheiro", Icon: Banknote, color: "text-emerald-300" },
               { key: "bank", label: "Bancos", Icon: Landmark, color: "text-sky-300" },
-              { key: "credit_card", label: "Cartões de Crédito", Icon: CreditCard, color: "text-violet-300" },
             ] as const).map(({ key, label, Icon, color }) => {
               const group = accounts.filter((a) => a.type === key);
               if (group.length === 0) return null;
@@ -210,7 +207,19 @@ function AccountsPage() {
                   </div>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {group.map((a) => (
-                      <GlassCard key={a.id} className="p-5">
+                      <GlassCard
+                        key={a.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setViewing(a)}
+                        onKeyDown={(e: React.KeyboardEvent) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setViewing(a);
+                          }
+                        }}
+                        className="cursor-pointer p-5 transition-colors hover:bg-white/[0.04]"
+                      >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <Icon className={`size-4 ${color}`} />
@@ -225,7 +234,10 @@ function AccountsPage() {
                                   size="icon"
                                   variant="ghost"
                                   className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
-                                  onClick={() => setEditing(a)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditing(a);
+                                  }}
                                   aria-label="Editar"
                                 >
                                   <Pencil className="size-3.5" />
@@ -239,7 +251,10 @@ function AccountsPage() {
                                   size="icon"
                                   variant="ghost"
                                   className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
-                                  onClick={() => setArchiving(a)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setArchiving(a);
+                                  }}
                                   aria-label="Arquivar"
                                 >
                                   <Archive className="size-3.5" />
@@ -287,7 +302,7 @@ function AccountsPage() {
 
       </div>
 
-      {/* Create dialog — tipo dinâmico (cash | bank | credit_card) */}
+      {/* Create dialog — apenas dinheiro/banco (cartão é exclusivo de /credit-cards) */}
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
           <DialogHeader>
@@ -295,6 +310,7 @@ function AccountsPage() {
           </DialogHeader>
           <AccountForm
             initialType="bank"
+            allowedTypes={["cash", "bank"]}
             submitting={createMut.isPending}
             submitLabel="Criar conta"
             onCancel={() => setCreating(false)}
@@ -350,6 +366,12 @@ function AccountsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Drill-down: extrato da conta selecionada */}
+      <AccountLedgerSheet
+        account={viewing}
+        onOpenChange={(open) => !open && setViewing(null)}
+      />
     </AppShell>
   );
 }

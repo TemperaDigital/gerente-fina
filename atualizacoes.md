@@ -256,3 +256,62 @@ cronológica, com os arquivos criados/alterados em cada uma.
 **Dependência instalada:** `vitest` (dev dependency)
 
 **Status:** não commitado.
+
+---
+
+## 13. Fixa "legenda com marcador colorido" do donut de categorias
+
+- Pedido assumia que a legenda do donut ainda usava um marcador circular
+  colorido — na verdade já usava `CategoryIcon` (ícone real, não um ponto de
+  cor), então nada foi alterado nessa parte; avisei o usuário disso.
+- Corrigido um bug real de flexbox encontrado na revisão: faltava `min-w-0`
+  no `<span>` do nome da categoria (item flex com `truncate`) — sem isso,
+  nomes longos podiam estourar a linha em vez de cortar com reticências.
+  Propagado `min-w-0` em cascata e adicionado `tabular-nums` nas colunas de
+  percentual/valor para não oscilarem horizontalmente.
+
+**Arquivos alterados:**
+- `src/components/dashboard/category-donut.tsx`
+
+**Commit:** `6a1a2dd` (push feito a pedido do usuário)
+
+---
+
+## 14. Drill-down de extrato/fatura em /accounts e /credit-cards
+
+- **Segregação estrita:** `/accounts` agora filtra contas tipo `credit_card`
+  da listagem e do formulário de criação (`AccountForm` ganhou a prop
+  `allowedTypes`, restringindo as pílulas de tipo exibidas); removida a
+  lógica morta de redirecionar para `/credit-cards` ao criar cartão por lá,
+  já que não é mais possível. `/credit-cards` já era exclusiva de cartões —
+  só precisou do drill-down novo.
+- **Painel lateral (Sheet) de drill-down:** clicar em qualquer card (conta
+  ou cartão) abre um `Sheet` com o extrato daquele ativo:
+  - Conta corrente/dinheiro: seletor de mês (mesmo padrão visual do
+    Dashboard) + `TransactionsTable` reaproveitada de `/transactions`
+    (mesmo componente, mesmos botões de editar/excluir) sobre
+    `getTransactionsList`.
+  - Cartão de crédito: dropdown de fatura (mês de referência) + Badge
+    "Fatura Paga" (emerald) quando `status === 'paid'`, sobre
+    `getInvoiceDetail` (já existia, resolve dropdown + linhas em uma
+    chamada). Linhas com botões explícitos de editar (rota
+    `/transactions/edit/$id`) e excluir (`discardTransaction`).
+  - Nenhuma lógica de gravação nova: edição e exclusão reaproveitam 100%
+    os serviços já existentes.
+  - Ao fechar o painel, invalida `accounts`/`dashboard`/`invoices` como
+    segurança extra além da invalidação já disparada por cada exclusão.
+- `GlassCard` (componente compartilhado do Dashboard) ganhou suporte a
+  props nativas de `div` (`role`, `tabIndex`, `onClick`, `onKeyDown` etc.)
+  para viabilizar os cards clicáveis — mudança aditiva, não quebra nenhum
+  uso existente.
+
+**Arquivos criados:**
+- `src/components/accounts/account-ledger-sheet.tsx`
+
+**Arquivos alterados:**
+- `src/routes/_app.accounts.tsx`
+- `src/routes/_app.credit-cards.tsx`
+- `src/components/accounts/account-form.tsx`
+- `src/components/dashboard/primitives.tsx`
+
+**Status:** não commitado.
