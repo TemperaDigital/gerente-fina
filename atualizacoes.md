@@ -467,4 +467,29 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Pendente:** aplicar a migration 0014 no Supabase antes de usar em produção (ainda não confirmado pelo usuário).
 
+**Status:** enviado ao GitHub (`git push`).
+
+---
+
+## 19. Categorias criadas pelo Importador recebem natureza "Variável" por padrão
+
+- A coluna `categories.nature` (enum `category_nature`, migration 0012) é
+  nullable e sem default no banco. O único fluxo de auto-criação de
+  categoria pelo importador é o insert direto em `commitSmartImport`
+  (`new_category_name`) — não passa por `createCategory`
+  (`categories.functions.ts`), então o ajuste foi feito diretamente ali.
+- Insert agora sempre envia `nature: "VARIÁVEL"` (valor exato do enum,
+  com acento) ao criar categoria nova. Reclassificação manual como
+  "FIXA" continua disponível em `/categories`, sem nenhuma tentativa da
+  IA de adivinhar a natureza (fora de escopo desta missão).
+- Confirmado que `seedDefaultCategories` (fluxo separado, não tocado)
+  já define `nature` a partir da árvore padrão — não precisava de ajuste.
+
+**Arquivos alterados:**
+- `src/lib/supabase/import.functions.ts`
+
+**Commit:** `5ccec27`.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 64/64 · eslint sem erros reais.
+
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
