@@ -55,6 +55,8 @@ interface Props {
   initialType: AccountFormType;
   /** Quando true, o tipo é fixo (uso em /credit-cards e na edição). */
   lockType?: boolean;
+  /** Restringe as pílulas de tipo exibidas (ex: /accounts não oferece Cartão — segregação estrita de telas). */
+  allowedTypes?: AccountFormType[];
   submitting?: boolean;
   submitLabel: string;
   onSubmit: (payload: AccountFormPayload) => void;
@@ -91,6 +93,7 @@ export function AccountForm({
   initial,
   initialType,
   lockType = false,
+  allowedTypes,
   submitting,
   submitLabel,
   onSubmit,
@@ -118,6 +121,9 @@ export function AccountForm({
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const isCard = type === "credit_card";
+  const visibleTypeOptions = allowedTypes
+    ? TYPE_OPTIONS.filter((o) => allowedTypes.includes(o.value))
+    : TYPE_OPTIONS;
 
   const errors = useMemo(() => {
     const e: Partial<
@@ -217,8 +223,11 @@ export function AccountForm({
     <form onSubmit={handleSubmit} className="space-y-4">
       {!lockType && (
         <Field label="Tipo de conta">
-          <div className="grid grid-cols-3 gap-2">
-            {TYPE_OPTIONS.map(({ value, label, Icon }) => {
+          <div
+            className="grid gap-2"
+            style={{ gridTemplateColumns: `repeat(${visibleTypeOptions.length}, minmax(0, 1fr))` }}
+          >
+            {visibleTypeOptions.map(({ value, label, Icon }) => {
               const active = type === value;
               return (
                 <button

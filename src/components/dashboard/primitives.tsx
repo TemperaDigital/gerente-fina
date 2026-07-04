@@ -45,7 +45,8 @@ export function formatMonthLabel(month: string /* YYYY-MM */): string {
 export function GlassCard({
   className,
   children,
-}: {
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement> & {
   className?: string;
   children: React.ReactNode;
 }) {
@@ -59,6 +60,7 @@ export function GlassCard({
         "before:bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_60%)]",
         className,
       )}
+      {...rest}
     >
       {children}
     </div>

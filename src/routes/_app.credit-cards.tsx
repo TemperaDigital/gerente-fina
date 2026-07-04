@@ -47,6 +47,7 @@ import {
   AccountForm,
   type AccountFormPayload,
 } from "@/components/accounts/account-form";
+import { AccountLedgerSheet } from "@/components/accounts/account-ledger-sheet";
 import {
   listAccounts,
   createAccount,
@@ -99,6 +100,7 @@ function CreditCardsPage() {
   const [archiving, setArchiving] = useState<AccountWithBalanceDTO | null>(
     null,
   );
+  const [viewing, setViewing] = useState<AccountWithBalanceDTO | null>(null);
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ["accounts"] });
@@ -187,7 +189,19 @@ function CreditCardsPage() {
                   )
                 : "—";
               return (
-                <GlassCard key={c.id} className="p-5">
+                <GlassCard
+                  key={c.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setViewing(c)}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setViewing(c);
+                    }
+                  }}
+                  className="cursor-pointer p-5 transition-colors hover:bg-white/[0.04]"
+                >
                   <div className="flex items-start justify-between">
                     <CreditCard className="size-5 text-violet-300" />
                     <div className="flex gap-1">
@@ -195,7 +209,10 @@ function CreditCardsPage() {
                         size="icon"
                         variant="ghost"
                         className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
-                        onClick={() => setEditing(c)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditing(c);
+                        }}
                         aria-label="Editar"
                       >
                         <Pencil className="size-3.5" />
@@ -204,7 +221,10 @@ function CreditCardsPage() {
                         size="icon"
                         variant="ghost"
                         className="size-7 rounded-full text-foreground/60 hover:bg-white/10"
-                        onClick={() => setArchiving(c)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setArchiving(c);
+                        }}
                         aria-label="Arquivar"
                       >
                         <Archive className="size-3.5" />
@@ -338,6 +358,12 @@ function CreditCardsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Drill-down: fatura selecionada do cartão */}
+      <AccountLedgerSheet
+        account={viewing}
+        onOpenChange={(open) => !open && setViewing(null)}
+      />
     </AppShell>
   );
 }

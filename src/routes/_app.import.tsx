@@ -49,6 +49,7 @@ import {
   Sparkles,
   Pencil,
   CreditCard,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -353,6 +354,17 @@ function ImportPage() {
   function applyBulkSourceAccount(id: string) {
     setBulkSourceAccountId(id);
     setPaymentRows((prev) => prev.map((r) => ({ ...r, source_account_id: id })));
+  }
+
+  /**
+   * Descarta uma linha de pagamento detectada (ex: sem fatura disponível
+   * ainda para vincular). Some da importação por completo — NÃO vira
+   * lançamento comum. Como a validação de bloqueio (`paymentRowsPending`)
+   * deriva do próprio array `paymentRows`, remover aqui já libera o botão
+   * de confirmar automaticamente.
+   */
+  function discardPaymentRow(key: string) {
+    setPaymentRows((prev) => prev.filter((r) => r.key !== key));
   }
 
   /** Avisa quando o tipo de documento detectado não bate com a conta selecionada. */
@@ -906,7 +918,7 @@ function ImportPage() {
                 {paymentRows.map((r) => (
                   <div
                     key={r.key}
-                    className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-3 grid gap-2 sm:grid-cols-[auto_1fr_1fr_1fr] sm:items-center"
+                    className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-3 grid gap-2 sm:grid-cols-[auto_1fr_1fr_1fr_auto] sm:items-center"
                   >
                     <div className="text-xs font-mono text-foreground/60 whitespace-nowrap">
                       {r.occurred_on}
@@ -958,6 +970,16 @@ function ImportPage() {
                         )}
                       </SelectContent>
                     </Select>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => discardPaymentRow(r.key)}
+                      title="Descartar esta linha (não importa como lançamento algum)"
+                      className="h-8 w-8 shrink-0 text-foreground/40 hover:bg-rose-500/10 hover:text-rose-400"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
                   </div>
                 ))}
               </div>
