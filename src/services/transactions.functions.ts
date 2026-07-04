@@ -72,12 +72,128 @@ const ListInput = z.object({
   account_id: z.string().uuid().optional(),
   category_id: z.string().uuid().optional(),
   kind: z.enum(["income", "expense", "transfer", "invoice_payment"]).optional(),
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  from: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  to: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   /** Mês YYYY-MM — atalho que sobrescreve from/to se fornecido. */
-  month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  month: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional(),
   search: z.string().trim().min(1).max(120).optional(),
 });
+
+type TxRow = {
+  id: string;
+  account_id: string;
+  category_id: string | null;
+  kind: TransactionKind;
+  type: TransactionType;
+  amount: string;
+  description: string | null;
+  occurred_on: string;
+  transfer_id: string | null;
+  invoice_id: string | null;
+  paid_invoice_id: string | null;
+  recurrence_id: string | null;
+  source: string | null;
+  created_at: string;
+  accounts?: { name?: string | null } | null;
+  categories?: { name?: string | null } | null;
+};
+
+/**
+ * Enriquece linhas cruas de `transactions` com nome da conta-irmã de
+ * transferência e progresso de parcela — usado tanto pela listagem paginada
+ * quanto pela exportação (sem paginação), evitando duplicar as 2 queries
+ * extras em ambos os lugares.
+ */
+async function enrichTransactionRows(
+  sb: import("@supabase/supabase-js").SupabaseClient,
+  baseRows: TxRow[],
+): Promise<TransactionListItemDTO[]> {
+  const transferIds = Array.from(
+    new Set(baseRows.filter((r) => r.transfer_id).map((r) => r.transfer_id!)),
+  );
+  const counterpartByTransfer = new Map<string, Map<string, string>>();
+  if (transferIds.length > 0) {
+    const { data: legs } = await sb
+      .from("transactions")
+      .select("id, transfer_id, account_id, accounts:account_id ( name )")
+      .in("transfer_id", transferIds);
+    for (const l of (legs ?? []) as unknown as Array<{
+      id: string;
+      transfer_id: string;
+      account_id: string;
+      accounts?: { name?: string | null } | null;
+    }>) {
+      if (!counterpartByTransfer.has(l.transfer_id)) {
+        counterpartByTransfer.set(l.transfer_id, new Map());
+      }
+      counterpartByTransfer.get(l.transfer_id)!.set(l.id, l.accounts?.name ?? "");
+    }
+  }
+
+  const txIds = baseRows.map((r) => r.id);
+  const installmentByTx = new Map<string, string>();
+  if (txIds.length > 0) {
+    const { data: items } = await sb
+      .from("installment_items")
+      .select(
+        "transaction_id, installment_number, purchase_id, installment_purchases:purchase_id ( installments_count )",
+      )
+      .in("transaction_id", txIds);
+    for (const it of (items ?? []) as unknown as Array<{
+      transaction_id: string | null;
+      installment_number: number;
+      installment_purchases?: { installments_count?: number } | null;
+    }>) {
+      if (!it.transaction_id) continue;
+      const total = it.installment_purchases?.installments_count ?? 0;
+      installmentByTx.set(it.transaction_id, `${it.installment_number}/${total}`);
+    }
+  }
+
+  return baseRows.map((row) => {
+    let counterpart: string | null = null;
+    if (row.transfer_id) {
+      const map = counterpartByTransfer.get(row.transfer_id);
+      if (map) {
+        for (const [id, name] of map) {
+          if (id !== row.id) {
+            counterpart = name;
+            break;
+          }
+        }
+      }
+    }
+    return {
+      id: row.id,
+      account_id: row.account_id,
+      account_name: row.accounts?.name ?? null,
+      category_id: row.category_id,
+      category_name: row.categories?.name ?? null,
+      kind: row.kind,
+      type: row.type,
+      amount: row.amount,
+      description: sanitizeDescription(row.description) || null,
+      occurred_on: row.occurred_on,
+      transfer_id: row.transfer_id,
+      invoice_id: row.invoice_id,
+      paid_invoice_id: row.paid_invoice_id,
+      recurrence_id: row.recurrence_id,
+      source: row.source,
+      transfer_counterpart_name: counterpart,
+      installment_progress: installmentByTx.get(row.id) ?? null,
+      created_at: row.created_at,
+    };
+  });
+}
 
 export const getTransactionsList = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => ListInput.parse(input ?? {}))
@@ -122,110 +238,7 @@ export const getTransactionsList = createServerFn({ method: "GET" })
     const { data: rows, count, error } = await query;
     if (error) throw new Error(error.message);
 
-    type Row = {
-      id: string;
-      account_id: string;
-      category_id: string | null;
-      kind: TransactionKind;
-      type: TransactionType;
-      amount: string;
-      description: string | null;
-      occurred_on: string;
-      transfer_id: string | null;
-      invoice_id: string | null;
-      paid_invoice_id: string | null;
-      recurrence_id: string | null;
-      source: string | null;
-      created_at: string;
-      accounts?: { name?: string | null } | null;
-      categories?: { name?: string | null } | null;
-    };
-
-    const baseRows = (rows ?? []) as unknown as Row[];
-
-    // -------- Resolução de pernas-irmãs de transferência (1 query extra) ---
-    const transferIds = Array.from(
-      new Set(baseRows.filter((r) => r.transfer_id).map((r) => r.transfer_id!)),
-    );
-    const counterpartByTransfer = new Map<string, Map<string, string>>();
-    if (transferIds.length > 0) {
-      const { data: legs } = await sb
-        .from("transactions")
-        .select("id, transfer_id, account_id, accounts:account_id ( name )")
-        .in("transfer_id", transferIds);
-      for (const l of (legs ?? []) as unknown as Array<{
-        id: string;
-        transfer_id: string;
-        account_id: string;
-        accounts?: { name?: string | null } | null;
-      }>) {
-        if (!counterpartByTransfer.has(l.transfer_id)) {
-          counterpartByTransfer.set(l.transfer_id, new Map());
-        }
-        counterpartByTransfer
-          .get(l.transfer_id)!
-          .set(l.id, l.accounts?.name ?? "");
-      }
-    }
-
-    // -------- Progresso de parcelas (installment_items) -------------------
-    const txIds = baseRows.map((r) => r.id);
-    const installmentByTx = new Map<string, string>();
-    if (txIds.length > 0) {
-      const { data: items } = await sb
-        .from("installment_items")
-        .select(
-          "transaction_id, installment_number, purchase_id, installment_purchases:purchase_id ( installments_count )",
-        )
-        .in("transaction_id", txIds);
-      for (const it of (items ?? []) as unknown as Array<{
-        transaction_id: string | null;
-        installment_number: number;
-        installment_purchases?: { installments_count?: number } | null;
-      }>) {
-        if (!it.transaction_id) continue;
-        const total = it.installment_purchases?.installments_count ?? 0;
-        installmentByTx.set(
-          it.transaction_id,
-          `${it.installment_number}/${total}`,
-        );
-      }
-    }
-
-    const items: TransactionListItemDTO[] = baseRows.map((row) => {
-      let counterpart: string | null = null;
-      if (row.transfer_id) {
-        const map = counterpartByTransfer.get(row.transfer_id);
-        if (map) {
-          for (const [id, name] of map) {
-            if (id !== row.id) {
-              counterpart = name;
-              break;
-            }
-          }
-        }
-      }
-      return {
-        id: row.id,
-        account_id: row.account_id,
-        account_name: row.accounts?.name ?? null,
-        category_id: row.category_id,
-        category_name: row.categories?.name ?? null,
-        kind: row.kind,
-        type: row.type,
-        amount: row.amount,
-        description: sanitizeDescription(row.description) || null,
-        occurred_on: row.occurred_on,
-        transfer_id: row.transfer_id,
-        invoice_id: row.invoice_id,
-        paid_invoice_id: row.paid_invoice_id,
-        recurrence_id: row.recurrence_id,
-        source: row.source,
-        transfer_counterpart_name: counterpart,
-        installment_progress: installmentByTx.get(row.id) ?? null,
-        created_at: row.created_at,
-      };
-    });
+    const items = await enrichTransactionRows(sb, (rows ?? []) as unknown as TxRow[]);
 
     return {
       items,
@@ -233,6 +246,102 @@ export const getTransactionsList = createServerFn({ method: "GET" })
       page: data.page,
       page_size: data.page_size,
     };
+  });
+
+// ---------------------------------------------------------------------------
+// getTransactionsForExport — Exportar/Imprimir (Missão 10): TODAS as linhas
+// que baterem com o filtro escolhido no diálogo, sem paginação. Filtros são
+// independentes dos já aplicados na tela de Livro-Caixa.
+// ---------------------------------------------------------------------------
+const ExportInput = z
+  .object({
+    period_mode: z.enum(["all", "month", "range"]).default("all"),
+    month: z
+      .string()
+      .regex(/^\d{4}-\d{2}$/)
+      .optional(),
+    from: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    to: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    /** "Tipo de Conta" — não confundir com o filtro de conta ESPECÍFICA da tela normal. */
+    account_type: z.enum(["credit_card", "account", "all"]).default("all"),
+  })
+  .superRefine((v, ctx) => {
+    if (v.period_mode === "month" && !v.month) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Informe o mês para o período 'Mês específico'.",
+        path: ["month"],
+      });
+    }
+    if (v.period_mode === "range" && (!v.from || !v.to)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Informe início e fim para o período 'Intervalo de datas'.",
+        path: ["from"],
+      });
+    }
+  });
+
+/** Limite prático de segurança — sistema monousuário, não há paginação real de UI para exportação. */
+const EXPORT_ROW_LIMIT = 50_000;
+
+export const getTransactionsForExport = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => ExportInput.parse(input ?? {}))
+  .handler(async ({ data }): Promise<TransactionListItemDTO[]> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    let from: string | undefined;
+    let to: string | undefined;
+    if (data.period_mode === "month" && data.month) {
+      const [y, m] = data.month.split("-").map(Number);
+      from = `${y}-${String(m).padStart(2, "0")}-01`;
+      const lastDay = new Date(y, m, 0).getDate();
+      to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    } else if (data.period_mode === "range") {
+      from = data.from;
+      to = data.to;
+    }
+
+    let accountIds: string[] | null = null;
+    if (data.account_type !== "all") {
+      const typesFilter = data.account_type === "credit_card" ? ["credit_card"] : ["bank", "cash"];
+      const { data: accs, error: accErr } = await sb
+        .from("accounts")
+        .select("id")
+        .in("type", typesFilter);
+      if (accErr) throw new Error(accErr.message);
+      accountIds = (accs ?? []).map((a) => a.id as string);
+      if (accountIds.length === 0) return [];
+    }
+
+    let query = sb
+      .from("transactions")
+      .select(
+        `id, account_id, category_id, kind, type, amount, description,
+         occurred_on, transfer_id, invoice_id, paid_invoice_id,
+         recurrence_id, source, created_at,
+         accounts:account_id ( name ),
+         categories:category_id ( name )`,
+      )
+      .order("occurred_on", { ascending: false })
+      .order("created_at", { ascending: false })
+      .range(0, EXPORT_ROW_LIMIT - 1);
+
+    if (accountIds) query = query.in("account_id", accountIds);
+    if (from) query = query.gte("occurred_on", from);
+    if (to) query = query.lte("occurred_on", to);
+
+    const { data: rows, error } = await query;
+    if (error) throw new Error(error.message);
+
+    return enrichTransactionRows(sb, (rows ?? []) as unknown as TxRow[]);
   });
 
 // ---------------------------------------------------------------------------
@@ -273,14 +382,16 @@ export const getReviewQueue = createServerFn({ method: "GET" }).handler(
     if (error) throw new Error(error.message);
 
     const groups = new Map<string, TransactionListItemDTO[]>();
-    for (const r of (data ?? []) as unknown as Array<{
-      id: string;
-      dedup_hash: string;
-      [k: string]: unknown;
-    } & {
-      accounts?: { name?: string | null } | null;
-      categories?: { name?: string | null } | null;
-    }>) {
+    for (const r of (data ?? []) as unknown as Array<
+      {
+        id: string;
+        dedup_hash: string;
+        [k: string]: unknown;
+      } & {
+        accounts?: { name?: string | null } | null;
+        categories?: { name?: string | null } | null;
+      }
+    >) {
       const item: TransactionListItemDTO = {
         id: r.id,
         account_id: r.account_id as string,
@@ -315,7 +426,10 @@ export const getReviewQueue = createServerFn({ method: "GET" }).handler(
 const RecurrenceInput = z.object({
   frequency: z.enum(["daily", "weekly", "monthly", "yearly"]),
   interval_count: z.number().int().min(1).max(60).default(1),
-  end_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  end_on: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 
 const InstallmentInput = z.object({
@@ -325,9 +439,7 @@ const InstallmentInput = z.object({
 const CreateInput = z
   .object({
     kind: z.enum(["income", "expense", "transfer", "invoice_payment"]),
-    amount: z
-      .string()
-      .regex(/^\d+(\.\d{1,2})?$/, "amount inválido (ex.: 1234.56)"),
+    amount: z.string().regex(/^\d+(\.\d{1,2})?$/, "amount inválido (ex.: 1234.56)"),
     occurred_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     description: z.string().trim().min(1).max(240),
     notes: z.string().max(2000).optional(),
@@ -361,10 +473,7 @@ const CreateInput = z
         path: ["counterpart_account_id"],
       });
     }
-    if (
-      v.kind === "transfer" &&
-      v.counterpart_account_id === v.account_id
-    ) {
+    if (v.kind === "transfer" && v.counterpart_account_id === v.account_id) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Conta de destino deve ser diferente da origem.",
@@ -466,18 +575,15 @@ export const createTransactionEntry = createServerFn({ method: "POST" })
     if (data.kind === "invoice_payment") {
       const idempotencyKey = data.idempotency_key ?? crypto.randomUUID();
 
-      const { data: rpcResult, error: rpcError } = await sb.rpc(
-        "pay_credit_card_invoice",
-        {
-          _paid_invoice_id: data.paid_invoice_id!,
-          _source_account_id: data.account_id,
-          _amount: data.amount,
-          _occurred_on: data.occurred_on,
-          _description: data.description,
-          _notes: data.notes ?? null,
-          _idempotency_key: idempotencyKey,
-        },
-      );
+      const { data: rpcResult, error: rpcError } = await sb.rpc("pay_credit_card_invoice", {
+        _paid_invoice_id: data.paid_invoice_id!,
+        _source_account_id: data.account_id,
+        _amount: data.amount,
+        _occurred_on: data.occurred_on,
+        _description: data.description,
+        _notes: data.notes ?? null,
+        _idempotency_key: idempotencyKey,
+      });
 
       if (rpcError) {
         // Mensagens de negócio (fatura não encontrada, conta = cartão) vêm com
@@ -642,9 +748,7 @@ export const createTransactionEntry = createServerFn({ method: "POST" })
 // discardTransaction — usado pela fila de conciliação
 // ---------------------------------------------------------------------------
 export const discardTransaction = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
@@ -703,29 +807,20 @@ export const mergeDuplicateTransactions = createServerFn({ method: "POST" })
     // Ordem crítica: DELETE primeiro libera o índice UNIQUE parcial em
     // (user_id, dedup_hash), evitando conflito quando o keeper for
     // re-hasheado pelo trigger ao receber source='import'/'pluggy'.
-    const { error: dErr } = await sb
-      .from("transactions")
-      .delete()
-      .in("id", data.absorb_ids);
+    const { error: dErr } = await sb.from("transactions").delete().in("id", data.absorb_ids);
     if (dErr) throw new Error(`Falha ao remover duplicatas: ${dErr.message}`);
 
     // Patch: preserva amarração do Open Finance (external_id) e marca source
     // como o do donor (que dispara a re-geração do dedup_hash via trigger).
     const patch: Record<string, string | null> = {};
     if (donor.source && donor.source !== "manual") patch.source = donor.source;
-    if (donor.external_id && !keeperBefore.external_id)
-      patch.external_id = donor.external_id;
+    if (donor.external_id && !keeperBefore.external_id) patch.external_id = donor.external_id;
 
     if (Object.keys(patch).length > 0) {
-      const { error: uErr } = await sb
-        .from("transactions")
-        .update(patch)
-        .eq("id", data.keep_id);
+      const { error: uErr } = await sb.from("transactions").update(patch).eq("id", data.keep_id);
       if (uErr) {
         // Não há rollback dos deletes; logamos via warning no retorno.
-        throw new Error(
-          `Duplicatas removidas, mas falha ao absorver metadados: ${uErr.message}`,
-        );
+        throw new Error(`Duplicatas removidas, mas falha ao absorver metadados: ${uErr.message}`);
       }
     }
 
@@ -760,9 +855,7 @@ export interface TransactionDetailDTO {
 }
 
 export const getTransactionById = createServerFn({ method: "GET" })
-  .inputValidator((input: unknown) =>
-    z.object({ id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<TransactionDetailDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
@@ -868,9 +961,7 @@ export const getTransactionById = createServerFn({ method: "GET" })
 const UpdateTxInput = z.object({
   id: z.string().uuid(),
   description: z.string().trim().min(1).max(240),
-  amount: z
-    .string()
-    .regex(/^\d+(\.\d{1,2})?$/, "amount inválido (ex.: 1234.56)"),
+  amount: z.string().regex(/^\d+(\.\d{1,2})?$/, "amount inválido (ex.: 1234.56)"),
   occurred_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   account_id: z.string().uuid(),
   category_id: z.string().uuid().optional().nullable(),
@@ -909,9 +1000,7 @@ const ConvertInput = z
   .object({
     transaction_id: z.string().uuid(),
     new_kind: z.enum(["income", "expense", "transfer", "invoice_payment"]),
-    amount: z
-      .string()
-      .regex(/^\d+(\.\d{1,2})?$/, "amount inválido (ex.: 1234.56)"),
+    amount: z.string().regex(/^\d+(\.\d{1,2})?$/, "amount inválido (ex.: 1234.56)"),
     occurred_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     description: z.string().trim().min(1).max(240),
     account_id: z.string().uuid(),
@@ -967,7 +1056,7 @@ export const convertTransactionEntry = createServerFn({ method: "POST" })
     const sb = getSupabaseAdmin();
 
     const idempotencyKey =
-      data.new_kind === "invoice_payment" ? data.idempotency_key ?? crypto.randomUUID() : null;
+      data.new_kind === "invoice_payment" ? (data.idempotency_key ?? crypto.randomUUID()) : null;
 
     const { data: rpcResult, error } = await sb.rpc("convert_transaction_entry", {
       _transaction_id: data.transaction_id,
@@ -999,4 +1088,3 @@ export const convertTransactionEntry = createServerFn({ method: "POST" })
       invoice_status: result.invoice_status,
     };
   });
-
