@@ -499,7 +499,8 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
         );
         if (match) {
           installmentMatches.set(index, { purchase_id: match.id, description: match.description });
-        } else if (hint.current === 1) {
+        } else if (hint.current === 1 && hint.total >= 2) {
+          // total < 2 (ex.: "1/1") não é parcelamento de verdade — nada a criar.
           installmentCreateOffers.add(index);
         }
         return; // linha de parcelamento nunca também vira candidata a recorrência

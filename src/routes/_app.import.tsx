@@ -619,6 +619,33 @@ function ImportPage() {
     patchRow(idx, { kind, category_choice: "" });
   }
 
+  /** Alterna vincular/ignorar o parcelamento já encontrado para esta linha. */
+  function toggleInstallmentLink(idx: number) {
+    setRows((prev) =>
+      prev.map((r, i) =>
+        i === idx
+          ? { ...r, installment_choice: r.installment_choice === "link" ? "ignore" : "link" }
+          : r,
+      ),
+    );
+  }
+
+  /** Alterna criar/ignorar um parcelamento novo (só quando não achou correspondência). */
+  function toggleInstallmentCreate(idx: number) {
+    setRows((prev) =>
+      prev.map((r, i) =>
+        i === idx
+          ? { ...r, installment_choice: r.installment_choice === "create" ? "ignore" : "create" }
+          : r,
+      ),
+    );
+  }
+
+  /** Alterna converter/ignorar esta linha como início de uma recorrência mensal. */
+  function toggleConvertRecurrence(idx: number) {
+    patchRow(idx, { convert_to_recurrence: !rows[idx].convert_to_recurrence });
+  }
+
   // ---------------------------------------------------------------------------
   // Confirmação
   // ---------------------------------------------------------------------------
@@ -640,7 +667,14 @@ function ImportPage() {
 
   const commitMut = useMutation({
     mutationFn: async () => {
-      let smartResult: { inserted: number; categories_created: number } | null = null;
+      let smartResult: {
+        inserted: number;
+        categories_created: number;
+        installments_linked: number;
+        installments_created: number;
+        recurrences_created: number;
+        warnings: string[];
+      } | null = null;
       if (included.length > 0) {
         smartResult = await commitSmartImport({
           data: {
@@ -726,8 +760,22 @@ function ImportPage() {
           `${smartResult.inserted} lançamento(s) importados` +
             (smartResult.categories_created > 0
               ? ` · ${smartResult.categories_created} categoria(s) nova(s) criada(s)`
+              : "") +
+            (smartResult.installments_linked > 0
+              ? ` · ${smartResult.installments_linked} parcela(s) vinculada(s)`
+              : "") +
+            (smartResult.installments_created > 0
+              ? ` · ${smartResult.installments_created} parcelamento(s) novo(s) criado(s)`
+              : "") +
+            (smartResult.recurrences_created > 0
+              ? ` · ${smartResult.recurrences_created} recorrência(s) nova(s) criada(s)`
               : "") + "!",
         );
+        if (smartResult.warnings.length > 0) {
+          toast.warning(
+            `${smartResult.warnings.length} aviso(s) sobre vínculos estruturais: ${smartResult.warnings.join(" · ")}`,
+          );
+        }
       }
 
       if (paymentOutcomes.length > 0) {
@@ -1174,10 +1222,60 @@ function ImportPage() {
                               )}
                             </button>
                           )}
-                          {r.installment_hint && (
-                            <span className="ml-1.5 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border text-violet-400 bg-violet-500/10 border-violet-500/20">
-                              {r.installment_hint.current}/{r.installment_hint.total}
-                            </span>
+                          {(r.installment_hint ||
+                            r.matched_installment_purchase_id ||
+                            r.offer_create_installment ||
+                            r.offer_convert_recurrence) && (
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              {r.installment_hint && (
+                                <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border text-violet-400 bg-violet-500/10 border-violet-500/20">
+                                  {r.installment_hint.current}/{r.installment_hint.total}
+                                </span>
+                              )}
+                              {!isDup && r.matched_installment_purchase_id && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleInstallmentLink(idx)}
+                                  title={`Vincular à compra parcelada "${r.matched_installment_purchase_description}"`}
+                                  className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border transition-colors ${
+                                    r.installment_choice === "link"
+                                      ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+                                      : "text-foreground/40 bg-white/[0.02] border-white/10"
+                                  }`}
+                                >
+                                  Vincular parcelamento
+                                </button>
+                              )}
+                              {!isDup && r.offer_create_installment && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleInstallmentCreate(idx)}
+                                  title="Criar um novo parcelamento a partir desta primeira parcela"
+                                  className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border transition-colors ${
+                                    r.installment_choice === "create"
+                                      ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+                                      : "text-foreground/40 bg-white/[0.02] border-white/10"
+                                  }`}
+                                >
+                                  Criar novo parcelamento
+                                  {r.installment_hint ? ` (1/${r.installment_hint.total})` : ""}
+                                </button>
+                              )}
+                              {!isDup && r.offer_convert_recurrence && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleConvertRecurrence(idx)}
+                                  title="Criar uma recorrência mensal a partir deste lançamento"
+                                  className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border transition-colors ${
+                                    r.convert_to_recurrence
+                                      ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+                                      : "text-foreground/40 bg-white/[0.02] border-white/10"
+                                  }`}
+                                >
+                                  Converter em recorrência mensal
+                                </button>
+                              )}
+                            </div>
                           )}
                         </TableCell>
 
