@@ -492,4 +492,63 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Verificação:** `npx tsc --noEmit` limpo · `npm test` 64/64 · eslint sem erros reais.
 
+**Status:** enviado ao GitHub (`git push`).
+
+---
+
+## 20. Agente de Chat com Ferramentas — criar, consultar, corrigir, relatórios
+
+- **Defeito corrigido:** o chat antigo (`resolveActiveAccount` + primeira
+  categoria da lista) criava lançamentos sozinho ao receber algo como
+  "gastei 25 hoje", escolhendo conta e categoria sem perguntar nada —
+  contrariava a regra de nunca decidir por conta própria um dado que só o
+  usuário sabe. Confirmado lendo o código antigo antes de alterar.
+- Substituído por um agente multi-turno com tool calling (mesmo padrão
+  HTTP de `classifyBatchWithAI`, mas SEM `tool_choice` forçado — o modelo
+  pode responder texto, perguntar, ou chamar uma ferramenta).
+- **Ferramentas:** `create_transaction` (reaproveita `createTransactionEntry`
+  — nenhuma lógica de hash/dedup/atomicidade duplicada; nunca inventa
+  `account_id`/`category_id`; categoria nova criada com `nature: "VARIÁVEL"`,
+  mesma regra da Missão 11), `query_transactions_summary`,
+  `get_income_expense_report` (lê as views `monthly_dre`/
+  `monthly_dre_by_category`, já existentes desde a migration 0004),
+  `get_installments_report` (parcelas restantes + comprometimento por mês,
+  sem estimar renda), `find_transaction_candidates` (reaproveita
+  `normalizePattern` de `rules.functions.ts` para casar descrição
+  aproximada, tolerante a acento) e `delete_transaction` (exige
+  `confirmed: true` — bloqueado em CÓDIGO, não só pedido no prompt).
+- Prompt de sistema embute as contas/categorias reais do usuário (mesmo
+  padrão de `categoryList` do importador) e as regras inegociáveis: nunca
+  inventar conta/categoria, só perguntar sobre parcelamento se a conta for
+  `credit_card`, nunca excluir sem confirmação explícita no turno anterior,
+  nunca reportar números sem ter chamado a ferramenta correspondente.
+  Preservada a regra determinística preexistente dos "temperos"
+  (MariaReniele/Woshington → Alimentação // mercearia).
+- Loop com teto de 6 iterações de ferramentas por mensagem (segurança
+  contra loop infinito); histórico persistido (Missão 8) continua sendo
+  só o texto final de cada turno — as idas e vindas internas de ferramenta
+  não viram mensagens na thread.
+- `ChatResponse.transaction.id` virou opcional (createTransactionEntry não
+  retorna o id da transação criada nos fluxos de receita/despesa/parcela) e
+  ganhou `transactionDeleted?` para a UI invalidar caches/mostrar toast
+  também quando o agente exclui um lançamento.
+- Ambiguidade de spec resolvida com bom senso (não travou o trabalho): a
+  missão listava os campos de `create_transaction` sem
+  `counterpart_account_id`/`paid_invoice_id`, mas `kind` inclui
+  transfer/invoice_payment, que exigem esses campos em
+  `createTransactionEntry`. Adicionei os dois como parâmetros opcionais
+  (nomes já existentes, não inventados) e documentei no prompt; se
+  ausentes, a própria validação de `createTransactionEntry` já devolve um
+  erro claro que o agente repassa ao usuário — sem nenhuma lógica extra.
+
+**Arquivos alterados:**
+- `src/services/chat.functions.ts`
+- `src/routes/_app.chat.tsx`
+
+**Commits:** `f88360c` (agente + ferramentas), `e1b0202` (UI reage à exclusão).
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 64/64 · eslint sem erros reais.
+
+**Pendente:** não foi possível testar a chamada real à IA neste ambiente (sem `LOVABLE_API_KEY`/rede de saída no sandbox) — peço que teste manualmente o caso do defeito relatado ("gastei 25 hoje" sem contexto deve gerar uma pergunta sobre a conta, nunca criar sozinho).
+
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
