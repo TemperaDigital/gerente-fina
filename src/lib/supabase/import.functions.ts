@@ -288,9 +288,7 @@ async function classifyBatchWithAI(
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) return result; // sem chave: fluxo segue manual
 
-  const categoryList = categories
-    .map((c) => `- ${c.id} | ${c.name} | ${c.kind}`)
-    .join("\n");
+  const categoryList = categories.map((c) => `- ${c.id} | ${c.name} | ${c.kind}`).join("\n");
 
   const systemPrompt = `Você é um classificador contábil brasileiro especializado em extratos bancários e faturas de cartão.
 Sua tarefa: para CADA transação da lista, escolher a categoria mais adequada.
@@ -400,9 +398,7 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
     const categories = cats ?? [];
     const validCatIds = new Set(categories.map((c) => c.id));
     const catNamesLower = new Set(categories.map((c) => c.name.toLowerCase()));
-    const temperoCat = categories.find((c) =>
-      c.name.toLowerCase().includes("mercearia"),
-    );
+    const temperoCat = categories.find((c) => c.name.toLowerCase().includes("mercearia"));
 
     // 2. Hash + dedup (mesma lógica do checkImportDuplicates)
     const rowsWithHash = await Promise.all(
@@ -478,10 +474,7 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
       .order("occurred_on", { ascending: false })
       .limit(500);
 
-    const installmentMatches = new Map<
-      number,
-      { purchase_id: string; description: string }
-    >();
+    const installmentMatches = new Map<number, { purchase_id: string; description: string }>();
     const installmentCreateOffers = new Set<number>();
     const recurrenceMatches = new Map<number, string>();
     const recurrenceConvertOffers = new Set<number>();
@@ -620,7 +613,7 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
         matched_installment_purchase_id: installmentMatch?.purchase_id ?? null,
         matched_installment_purchase_description: installmentMatch?.description ?? null,
         offer_create_installment: !isDup && installmentCreateOffers.has(index),
-        matched_recurrence_id: !isDup ? recurrenceMatches.get(index) ?? null : null,
+        matched_recurrence_id: !isDup ? (recurrenceMatches.get(index) ?? null) : null,
         offer_convert_recurrence: offerConvertRecurrence,
       };
     });
@@ -727,10 +720,14 @@ export const commitSmartImport = createServerFn({ method: "POST" })
 
         const { data: created, error: createErr } = await sb
           .from("categories")
-          .insert({ user_id: userId, name: cat.name, kind: cat.kind })
+          // Categoria criada automaticamente pelo importador: "VARIÁVEL" por
+          // padrão (maioria dos casos reais); usuário reclassifica manualmente
+          // como FIXA depois, em /categories, quando perceber a exceção.
+          .insert({ user_id: userId, name: cat.name, kind: cat.kind, nature: "VARIÁVEL" })
           .select("id")
           .single();
-        if (createErr) throw new Error(`Falha ao criar categoria "${cat.name}": ${createErr.message}`);
+        if (createErr)
+          throw new Error(`Falha ao criar categoria "${cat.name}": ${createErr.message}`);
         createdMap.set(key, created.id);
         categoriesCreated++;
       }
@@ -774,7 +771,9 @@ export const commitSmartImport = createServerFn({ method: "POST" })
             createdMap.get(`${(row.new_category_name ?? "").trim().toLowerCase()}|${row.kind}`) ??
             null;
           if (!categoryId) {
-            warnings.push(`Linha "${row.description}": sem categoria resolvida, recorrência não criada.`);
+            warnings.push(
+              `Linha "${row.description}": sem categoria resolvida, recorrência não criada.`,
+            );
             continue;
           }
           const { data: rec, error: recErr } = await sb
@@ -796,7 +795,9 @@ export const commitSmartImport = createServerFn({ method: "POST" })
             .select("id")
             .single();
           if (recErr) {
-            warnings.push(`Linha "${row.description}": falha ao criar recorrência (${recErr.message}).`);
+            warnings.push(
+              `Linha "${row.description}": falha ao criar recorrência (${recErr.message}).`,
+            );
             continue;
           }
           recurrenceIdByRow.set(i, rec.id);
@@ -822,7 +823,9 @@ export const commitSmartImport = createServerFn({ method: "POST" })
             createdMap.get(`${(row.new_category_name ?? "").trim().toLowerCase()}|${row.kind}`) ??
             null;
           if (!categoryId) {
-            warnings.push(`Linha "${row.description}": sem categoria resolvida, parcelamento não criado.`);
+            warnings.push(
+              `Linha "${row.description}": sem categoria resolvida, parcelamento não criado.`,
+            );
             continue;
           }
 
@@ -851,7 +854,9 @@ export const commitSmartImport = createServerFn({ method: "POST" })
             .select("id")
             .single();
           if (purchaseErr) {
-            warnings.push(`Linha "${row.description}": falha ao criar parcelamento (${purchaseErr.message}).`);
+            warnings.push(
+              `Linha "${row.description}": falha ao criar parcelamento (${purchaseErr.message}).`,
+            );
             continue;
           }
 
@@ -884,7 +889,9 @@ export const commitSmartImport = createServerFn({ method: "POST" })
               .select("id")
               .single();
             if (itemErr) {
-              warnings.push(`Parcela ${n}/${action.installments_count} de "${row.description}": ${itemErr.message}`);
+              warnings.push(
+                `Parcela ${n}/${action.installments_count} de "${row.description}": ${itemErr.message}`,
+              );
               continue;
             }
             if (n === 1) firstItemId = item.id;
@@ -982,4 +989,3 @@ export const commitSmartImport = createServerFn({ method: "POST" })
       };
     },
   );
-
