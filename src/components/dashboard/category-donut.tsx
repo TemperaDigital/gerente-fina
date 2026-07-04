@@ -123,20 +123,20 @@ export function CategoryDonut({ data }: { data: CategoryBreakdownDTO[] }) {
       </div>
 
       {/* Legenda com ícones e percentuais */}
-      <ul className="flex-1 w-full space-y-1.5 text-xs">
+      <ul className="min-w-0 flex-1 w-full space-y-1.5 text-xs">
         {slices.map((s) => {
           const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
           return (
-            <li key={s.name} className="flex items-center gap-2">
+            <li key={s.name} className="flex min-w-0 items-center gap-2">
               <span
                 className="flex size-5 shrink-0 items-center justify-center rounded-md"
                 style={{ background: `${s.color}1a` }}
               >
                 <CategoryIcon icon={s.icon} color={s.color} className="size-3" />
               </span>
-              <span className="truncate text-foreground/70 flex-1">{s.name}</span>
-              <span className="font-mono text-foreground/40 shrink-0">{pct}%</span>
-              <span className="font-mono font-semibold text-foreground/80 shrink-0 min-w-[64px] text-right">
+              <span className="min-w-0 flex-1 truncate text-foreground/70">{s.name}</span>
+              <span className="shrink-0 font-mono tabular-nums text-foreground/40">{pct}%</span>
+              <span className="min-w-[64px] shrink-0 text-right font-mono font-semibold tabular-nums text-foreground/80">
                 {BRL(s.value)}
               </span>
             </li>
