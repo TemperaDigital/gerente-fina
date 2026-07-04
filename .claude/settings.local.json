@@ -9,7 +9,10 @@
       "Bash(echo \"exit: $?\")",
       "Bash(tee /tmp/claude-1001/-home-td-fguerra-Documentos-GitHub-gerente-fina/ef2a5f4b-e2c2-4046-9613-d266e4631ad1/scratchpad/tsc_phaseB.log)",
       "Bash(sed -n '/TABELA: installment_purchases/,/TABELA: installment_items/p' docs/migrations/0003_recurrences_invoices_installments_loans.sql)",
-      "Bash(sed -n '/TABELA: installment_items/,/TABELA: loans/p' docs/migrations/0003_recurrences_invoices_installments_loans.sql)"
+      "Bash(sed -n '/TABELA: installment_items/,/TABELA: loans/p' docs/migrations/0003_recurrences_invoices_installments_loans.sql)",
+      "Bash(npm test *)",
+      "Bash(npx eslint *)",
+      "Bash(grep -rn '\\\\.from\\(\"categories\"\\)\\\\s*$\\\\|\\\\.from\\(\"categories\"\\)\\\\.insert\\\\|from\\(\"categories\"\\)' /home/td-fguerra/Documentos/GitHub/gerente-fina/src --include=\"*.ts\" --include=\"*.tsx\" -A1)"
     ]
   }
 }
