@@ -925,14 +925,20 @@ export const commitSmartImport = createServerFn({ method: "POST" })
       const { data: insertedRows, error } = await sb
         .from("transactions")
         .insert(payload)
-        .select("id");
+        .select("id, dedup_hash");
       if (error) throw new Error(`Falha ao gravar transações: ${error.message}`);
 
-      // 3. Pós-passo: agora que temos os ids das transações recém-inseridas
-      // (na MESMA ordem do payload/data.rows), preenche installment_items
-      // pendentes de vínculo (link OU primeira parcela de criação nova).
+      // Correlaciona por dedup_hash (único por linha) em vez de confiar na
+      // ordem de retorno do insert em lote — mais seguro que indexação posicional.
+      const txIdByHash = new Map(
+        (insertedRows ?? []).map((r) => [r.dedup_hash as string, r.id as string]),
+      );
+
+      // 3. Pós-passo: agora que temos os ids das transações recém-inseridas,
+      // preenche installment_items pendentes de vínculo (link OU primeira
+      // parcela de criação nova).
       for (const [rowIndex, itemId] of pendingItemLinkByRow) {
-        const txId = insertedRows?.[rowIndex]?.id;
+        const txId = txIdByHash.get(data.rows[rowIndex].dedup_hash);
         if (!txId) continue;
         const { data: updated, error: linkErr } = await sb
           .from("installment_items")
