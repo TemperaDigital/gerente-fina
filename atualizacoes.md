@@ -314,4 +314,115 @@ cronológica, com os arquivos criados/alterados em cada uma.
 - `src/components/accounts/account-form.tsx`
 - `src/components/dashboard/primitives.tsx`
 
-**Status:** não commitado.
+---
+
+## 15. Descarte de pagamento sem fatura + Conversão segura de tipo de lançamento
+
+- **Parte 1 — Descarte:** cada linha de "Pagamento(s) de Fatura
+  Detectado(s)" no importador ganhou um botão de lixeira para descartar a
+  linha por completo do lote (sem fatura disponível, não vira lançamento
+  comum — vira nada).
+- **Parte 2 — Conversão estrutural:** nova ação "Converter lançamento..."
+  em `/transactions/edit/$id`, separada da retificação/edição já existente.
+  Desfaz a estrutura antiga (parcelamento via `installment_items`,
+  recorrência, transferência ou pagamento de fatura) e recria com o novo
+  `kind`, tudo atomicamente via RPC nova `convert_transaction_entry`
+  (migration 0013).
+- **Pausa por ambiguidade de schema (guardrail seguido à risca):** parei e
+  usei `AskUserQuestion` ao encontrar 2 divergências entre o schema
+  assumido e o real — (a) não existe `installment_purchase_id` em
+  `transactions`, o vínculo é indireto via `installment_items.transaction_id`;
+  (b) a migration 0011 (`pay_credit_card_invoice`) não estava versionada no
+  repo. Usuário confirmou usar a estrutura real e colou o SQL completo da
+  migration 0011, revelando que a idempotência mora em
+  `transactions.external_id` (índice único parcial), não em tabela própria.
+
+**Arquivos criados:**
+- `docs/migrations/0013_convert_transaction_entry.sql`
+
+**Arquivos alterados:**
+- `src/services/transactions.functions.ts` (`convertTransactionEntry`, `getTransactionById` estendido)
+- `src/routes/_app.transactions.edit.$id.tsx`
+- `src/routes/_app.import.tsx` (botão de descarte)
+
+**Commit:** `6c165f7`. **Migração 0013 aplicada no Supabase** (confirmado pelo usuário).
+
+---
+
+## 16. Importador reconhece parcelamento e assinatura recorrente
+
+- Regra-mestra: nunca criar parcelamento ou recorrência novos sem antes
+  tentar casar com uma estrutura já existente — evita duplicidade contábil.
+- **Parcelamento:** ao detectar "Parcela X/Y", busca `installment_purchases`
+  compatível (mesma conta, mesma quantidade de parcelas, descrição
+  normalizada via `derivePattern`). Achou → oferece "Vincular parcelamento
+  existente". Não achou e é a 1ª parcela (1/Y, Y≥2) → oferece "Criar novo
+  parcelamento". Não achou e é parcela do meio (ex.: 8/10) → nenhuma ação,
+  mantém texto simples (nunca reconstrói histórico).
+- **Recorrência:** achou `recurrences` compatível → vincula em silêncio (sem
+  UI, o materializador já cobre meses futuros). Não achou mas parece
+  assinatura (categoria "assinatura" OU descrição+valor repetidos em meses
+  anteriores) → oferece "Converter em recorrência mensal".
+- Nova função pura `estimateInstallmentSeries` (direção oposta à divisão de
+  total existente em `createTransactionEntry`: aqui parte-se de UMA parcela
+  conhecida para estimar a série).
+- Correções feitas antes de rodar `tsc`: heurística de "categoria parece
+  assinatura" só pode rodar DEPOIS da categoria final ser resolvida (regra
+  do usuário > regra aprendida > IA), então foi movida para o passo 4;
+  guarda para hint "1/1" (não é parcelamento real); correlação de linhas
+  pós-insert em lote feita por `dedup_hash` (chave única) em vez de
+  posição no array, por segurança.
+- Mental-test confirmado: CSV do Nubank com "8/10", "12/12", "7/7" nunca
+  oferece "criar novo parcelamento" (só ofertas de vínculo ou nada).
+
+**Arquivos criados:**
+- `src/lib/finance/installment-split.ts` + `.test.ts`
+
+**Arquivos alterados:**
+- `src/lib/supabase/import.functions.ts`
+- `src/routes/_app.import.tsx`
+
+**Commit:** `aef9fcf` (parte do trabalho já havia sido auto-commitada pela ferramenta do usuário em `972f43a`/`dce5901`, com mensagens placeholder — não reescrevi esse histórico).
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 64/64 · eslint sem erros reais (só ruído pré-existente de `prettier/prettier`).
+
+---
+
+## 17. Exportar/Imprimir Lançamentos com filtros de período e tipo de conta
+
+- Botão "Exportar / Imprimir" na tela de Lançamentos abre diálogo com
+  filtros PRÓPRIOS (independentes dos já aplicados na tela): período
+  (todos/mês específico/intervalo de datas) e "Tipo de Conta"
+  (cartão/conta/todos) — renomeado de "Conta" para não confundir com o
+  filtro de conta específica já existente na tela.
+- Botão "Importar" adicionado ao lado, apenas um link para `/import` (sem
+  mecanismo de import paralelo).
+- Nova server function `getTransactionsForExport` retorna TODAS as linhas
+  do filtro (sem paginação); refatorei a lógica de enriquecimento
+  (contraparte de transferência + progresso de parcela) de
+  `getTransactionsList` para uma função compartilhada `enrichTransactionRows`,
+  reaproveitada pelos dois endpoints.
+- "Exportar CSV": monta CSV client-side e dispara download via Blob (BOM
+  UTF-8 para acentuação correta em Excel).
+- "Imprimir / Salvar PDF": abre uma janela dedicada (`window.open` +
+  `document.write`) com HTML autocontido — fundo branco/texto preto
+  independente do tema escuro do app, cabeçalho repetindo via
+  `thead { display: table-header-group }`, `tr { break-inside: avoid }` e
+  `window.print()` — sem instalar nenhuma lib de geração de PDF.
+- Decisão de bom senso não coberta explicitamente na missão: o rodapé da
+  tabela de impressão mostra o saldo do período (receitas − despesas),
+  excluindo transferências e pagamentos de fatura da soma (não são
+  resultado, são movimentação patrimonial).
+
+**Arquivos criados:**
+- `src/components/transactions/export-print-dialog.tsx`
+
+**Arquivos alterados:**
+- `src/services/transactions.functions.ts` (`getTransactionsForExport`, `enrichTransactionRows`)
+- `src/routes/_app.transactions.index.tsx`
+
+**Commit:** `a175e40`.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 64/64 · eslint sem erros reais.
+
+**Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
