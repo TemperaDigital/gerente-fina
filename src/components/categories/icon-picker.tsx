@@ -8,10 +8,11 @@
  * <CategoryIcon /> é exportado para reúso em qualquer tela que exiba
  * categorias (lançamentos, orçamentos, dashboard, importador...).
  */
-import type { ComponentType } from "react";
+import { useRef, type ComponentType } from "react";
 import {
   Utensils,
   ShoppingCart,
+  ShoppingBag,
   Car,
   Fuel,
   Bus,
@@ -42,8 +43,15 @@ import {
   Dumbbell,
   Scissors,
   Coffee,
+  Shapes,
+  Landmark,
+  Wallet,
+  ArrowLeftRight,
+  Upload,
+  X,
   Tag,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -54,7 +62,8 @@ export const CATEGORY_ICONS: Record<
   { Icon: ComponentType<{ className?: string; style?: React.CSSProperties }>; label: string }
 > = {
   utensils:       { Icon: Utensils,      label: "Alimentação" },
-  "shopping-cart":{ Icon: ShoppingCart,  label: "Mercado" },
+  "shopping-cart":{ Icon: ShoppingCart,  label: "Supermercado" },
+  "shopping-bag": { Icon: ShoppingBag,   label: "Compras" },
   coffee:         { Icon: Coffee,        label: "Café/Lanches" },
   car:            { Icon: Car,           label: "Carro" },
   fuel:           { Icon: Fuel,          label: "Combustível" },
@@ -85,6 +94,10 @@ export const CATEGORY_ICONS: Record<
   baby:           { Icon: Baby,          label: "Filhos" },
   dumbbell:       { Icon: Dumbbell,      label: "Academia" },
   scissors:       { Icon: Scissors,      label: "Beleza" },
+  shapes:         { Icon: Shapes,        label: "Diversos" },
+  landmark:       { Icon: Landmark,      label: "Financeiro" },
+  wallet:         { Icon: Wallet,        label: "Receitas" },
+  "arrow-left-right": { Icon: ArrowLeftRight, label: "Transferências" },
 };
 
 // Paleta compacta (hex persistido em categories.color)
@@ -102,6 +115,11 @@ export const CATEGORY_COLORS = [
 // ---------------------------------------------------------------------------
 // CategoryIcon — renderiza o ícone de uma categoria em qualquer tela
 // ---------------------------------------------------------------------------
+/** Ícone customizado enviado pelo usuário — persistido como data URI em `icon`. */
+function isCustomIconDataUri(icon: string): boolean {
+  return icon.startsWith("data:image/svg+xml") || icon.startsWith("data:image/png");
+}
+
 export function CategoryIcon({
   icon,
   color,
@@ -111,6 +129,19 @@ export function CategoryIcon({
   color?: string | null;
   className?: string;
 }) {
+  // Ícone customizado: SEMPRE via <img src="data:...">, nunca innerHTML — um
+  // SVG carregado como <img> não executa <script>/handlers embutidos, então
+  // isso é seguro mesmo aceitando upload livre do usuário.
+  if (icon && isCustomIconDataUri(icon)) {
+    return (
+      <img
+        src={icon}
+        alt=""
+        className={cn("size-4 object-contain", className)}
+      />
+    );
+  }
+
   const entry = icon ? CATEGORY_ICONS[icon] : undefined;
   const Cmp = entry?.Icon ?? Tag;
   return (
@@ -119,6 +150,24 @@ export function CategoryIcon({
       style={color ? { color } : undefined}
     />
   );
+}
+
+// ---------------------------------------------------------------------------
+// Upload de ícone customizado (.svg/.png, máx. 50 KB) — validado no cliente
+// ANTES de processar. Persistido como data URI direto em `categories.icon`
+// (coluna já aceita texto longo). Nunca renderizado via innerHTML — sempre
+// <img src="data:...">, que não executa script embutido em SVG.
+// ---------------------------------------------------------------------------
+const MAX_CUSTOM_ICON_BYTES = 50 * 1024;
+const ALLOWED_CUSTOM_ICON_TYPES = ["image/svg+xml", "image/png"];
+const ICON_IMPORT_ERROR_MESSAGE =
+  "Não foi possível importar o ícone. O arquivo deve ser um SVG ou PNG válido e ter um tamanho máximo de 50 KB para evitar lentidão no painel.";
+
+function isValidCustomIconFile(file: File): boolean {
+  const nameLower = file.name.toLowerCase();
+  const extOk = nameLower.endsWith(".svg") || nameLower.endsWith(".png");
+  const typeOk = file.type === "" || ALLOWED_CUSTOM_ICON_TYPES.includes(file.type);
+  return extOk && typeOk && file.size > 0 && file.size <= MAX_CUSTOM_ICON_BYTES;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +184,24 @@ export function IconPicker({
   onChangeIcon: (icon: string | null) => void;
   onChangeColor: (color: string | null) => void;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function handleCustomIconChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!isValidCustomIconFile(file)) {
+      toast.error(ICON_IMPORT_ERROR_MESSAGE);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") onChangeIcon(reader.result);
+    };
+    reader.onerror = () => toast.error(ICON_IMPORT_ERROR_MESSAGE);
+    reader.readAsDataURL(file);
+  }
+
   return (
     <div className="space-y-3">
       {/* Grade de ícones */}
@@ -159,6 +226,37 @@ export function IconPicker({
             </button>
           );
         })}
+      </div>
+
+      {/* Upload de ícone customizado */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".svg,.png,image/svg+xml,image/png"
+            className="hidden"
+            onChange={handleCustomIconChange}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-[11px] font-medium text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
+          >
+            <Upload className="size-3.5" /> Carregar ícone personalizado
+          </button>
+          {value && isCustomIconDataUri(value) && (
+            <button
+              type="button"
+              onClick={() => onChangeIcon(null)}
+              title="Remover ícone personalizado"
+              className="text-zinc-500 transition-colors hover:text-rose-400"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+        <p className="text-[10px] text-zinc-600">Aceita SVG ou PNG · máximo 50 KB</p>
       </div>
 
       {/* Paleta de cores */}

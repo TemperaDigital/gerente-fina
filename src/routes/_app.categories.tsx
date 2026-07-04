@@ -10,7 +10,7 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Plus, ChevronDown, ChevronRight, Edit2, Trash2, Tag } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, Edit2, Trash2, Tag, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/app-shell";
@@ -41,9 +41,18 @@ import {
   createCategory,
   updateCategory,
   archiveCategory,
+  seedDefaultCategories,
   type CategoryDTO,
+  type CategoryNature,
 } from "@/services/categories.functions";
 import { IconPicker, CategoryIcon, CATEGORY_COLORS } from "@/components/categories/icon-picker";
+
+type NatureFilter = "all" | CategoryNature;
+
+const NATURE_LABEL: Record<CategoryNature, string> = {
+  FIXA: "Fixa",
+  "VARIÁVEL": "Variável",
+};
 
 const categoriesQuery = () =>
   queryOptions({ queryKey: ["categories", "all"], queryFn: () => listCategories() });
@@ -77,6 +86,7 @@ function CategoriesComponent() {
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<"expense" | "income">("expense");
+  const [natureFilter, setNatureFilter] = useState<NatureFilter>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [showModal, setShowModal] = useState(false);
@@ -87,6 +97,7 @@ function CategoriesComponent() {
   const [catParentId, setCatParentId] = useState<string>("none");
   const [catIcon, setCatIcon] = useState<string | null>(null);
   const [catColor, setCatColor] = useState<string | null>(null);
+  const [catNature, setCatNature] = useState<CategoryNature | null>(null);
   const [archiving, setArchiving] = useState<CategoryDTO | null>(null);
 
   async function refresh() {
@@ -101,6 +112,7 @@ function CategoriesComponent() {
       parent_id: string | null;
       icon: string | null;
       color: string | null;
+      nature: CategoryNature | null;
     }) => createCategory({ data: payload }),
     onSuccess: async () => {
       toast.success("Categoria criada.");
@@ -118,6 +130,7 @@ function CategoriesComponent() {
       parent_id: string | null;
       icon: string | null;
       color: string | null;
+      nature: CategoryNature | null;
     }) => updateCategory({ data: payload }),
     onSuccess: async () => {
       toast.success("Categoria atualizada.");
@@ -132,6 +145,19 @@ function CategoriesComponent() {
     onSuccess: async () => {
       toast.success("Categoria arquivada.");
       setArchiving(null);
+      await refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const seedMut = useMutation({
+    mutationFn: () => seedDefaultCategories(),
+    onSuccess: async (result) => {
+      toast.success(
+        `${result.created} categoria(s) criada(s)` +
+          (result.skipped > 0 ? ` · ${result.skipped} já existente(s), ignorada(s)` : "") +
+          ".",
+      );
       await refresh();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -154,6 +180,7 @@ function CategoriesComponent() {
     setCatParentId("none");
     setCatIcon(null);
     setCatColor(null);
+    setCatNature(null);
     setShowModal(true);
   }
 
@@ -165,6 +192,7 @@ function CategoriesComponent() {
     setCatParentId(category.parent_id ?? "none");
     setCatIcon(category.icon ?? null);
     setCatColor(category.color ?? null);
+    setCatNature(category.nature ?? null);
     setShowModal(true);
   }
 
@@ -176,6 +204,7 @@ function CategoriesComponent() {
       parent_id: catParentId === "none" ? null : catParentId,
       icon: catIcon,
       color: catColor,
+      nature: catNature,
     };
     if (modalMode === "create") {
       createMut.mutate(payload);
@@ -185,8 +214,12 @@ function CategoriesComponent() {
   }
 
   const live = categories.filter((c) => !c.archived_at);
-  const rootCategories = live.filter((c) => c.kind === activeTab && c.parent_id === null);
-  const childrenOf = (parentId: string) => live.filter((c) => c.parent_id === parentId);
+  const matchesNature = (c: CategoryDTO) => natureFilter === "all" || c.nature === natureFilter;
+  const rootCategories = live.filter(
+    (c) => c.kind === activeTab && c.parent_id === null && matchesNature(c),
+  );
+  const childrenOf = (parentId: string) =>
+    live.filter((c) => c.parent_id === parentId && matchesNature(c));
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-4 md:p-8 space-y-6">
@@ -197,27 +230,52 @@ function CategoriesComponent() {
           </h1>
           <p className="text-sm text-zinc-400 mt-1">Organize receitas e despesas em categorias e subcategorias.</p>
         </div>
-        <button
-          onClick={handleOpenCreate}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-lg transition-all flex items-center justify-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> Nova Categoria
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => seedMut.mutate()}
+            disabled={seedMut.isPending}
+            title="Cria as categorias e subcategorias padrão do sistema que ainda não existirem"
+            className="bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-40 text-zinc-200 border border-white/10 px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2"
+          >
+            <Sparkles className="w-4 h-4" />
+            {seedMut.isPending ? "Importando..." : "Importar categorias padrão"}
+          </button>
+          <button
+            onClick={handleOpenCreate}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-lg transition-all flex items-center justify-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> Nova Categoria
+          </button>
+        </div>
       </div>
 
-      <div className="flex border-b border-zinc-900 max-w-xs bg-white/[0.02] p-1 rounded-xl border border-white/[0.04]">
-        <button
-          onClick={() => setActiveTab("expense")}
-          className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-all ${activeTab === "expense" ? "bg-zinc-800 text-white shadow" : "text-zinc-500"}`}
-        >
-          🛑 Despesas
-        </button>
-        <button
-          onClick={() => setActiveTab("income")}
-          className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-all ${activeTab === "income" ? "bg-zinc-800 text-white shadow" : "text-zinc-500"}`}
-        >
-          🟢 Receitas
-        </button>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex border-b border-zinc-900 max-w-xs bg-white/[0.02] p-1 rounded-xl border border-white/[0.04]">
+          <button
+            onClick={() => setActiveTab("expense")}
+            className={`flex-1 py-2 px-3 text-center text-xs font-bold rounded-lg transition-all ${activeTab === "expense" ? "bg-zinc-800 text-white shadow" : "text-zinc-500"}`}
+          >
+            🛑 Despesas
+          </button>
+          <button
+            onClick={() => setActiveTab("income")}
+            className={`flex-1 py-2 px-3 text-center text-xs font-bold rounded-lg transition-all ${activeTab === "income" ? "bg-zinc-800 text-white shadow" : "text-zinc-500"}`}
+          >
+            🟢 Receitas
+          </button>
+        </div>
+
+        <div className="flex border-b border-zinc-900 max-w-xs bg-white/[0.02] p-1 rounded-xl border border-white/[0.04]">
+          {(["all", "FIXA", "VARIÁVEL"] as NatureFilter[]).map((n) => (
+            <button
+              key={n}
+              onClick={() => setNatureFilter(n)}
+              className={`flex-1 py-2 px-3 text-center text-xs font-bold rounded-lg transition-all whitespace-nowrap ${natureFilter === n ? "bg-zinc-800 text-white shadow" : "text-zinc-500"}`}
+            >
+              {n === "all" ? "Todas as naturezas" : NATURE_LABEL[n]}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="max-w-3xl bg-white/[0.02] border border-white/[0.06] backdrop-blur-xl rounded-2xl p-6 shadow-2xl min-h-[150px] relative">
@@ -248,6 +306,17 @@ function CategoriesComponent() {
                         className="w-5 h-5"
                       />
                       <span className="font-semibold text-zinc-200 text-sm">{parent.name}</span>
+                      {parent.nature && (
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                            parent.nature === "FIXA"
+                              ? "text-sky-400 bg-sky-500/10 border-sky-500/20"
+                              : "text-amber-400 bg-amber-500/10 border-amber-500/20"
+                          }`}
+                        >
+                          {NATURE_LABEL[parent.nature]}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center space-x-1">
                       <Tooltip>
@@ -280,6 +349,17 @@ function CategoriesComponent() {
                               className="w-3.5 h-3.5"
                             />
                             <span className="text-sm text-zinc-300 font-medium">{child.name}</span>
+                            {child.nature && (
+                              <span
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${
+                                  child.nature === "FIXA"
+                                    ? "text-sky-400 bg-sky-500/10 border-sky-500/20"
+                                    : "text-amber-400 bg-amber-500/10 border-amber-500/20"
+                                }`}
+                              >
+                                {NATURE_LABEL[child.nature]}
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center space-x-1">
                             <Tooltip>
@@ -330,6 +410,22 @@ function CategoriesComponent() {
                 <SelectContent>
                   <SelectItem value="expense">🛑 Despesa</SelectItem>
                   <SelectItem value="income">🟢 Receita</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Natureza</Label>
+              <Select
+                value={catNature ?? "none"}
+                onValueChange={(v) => setCatNature(v === "none" ? null : (v as CategoryNature))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem classificação</SelectItem>
+                  <SelectItem value="FIXA">Fixa</SelectItem>
+                  <SelectItem value="VARIÁVEL">Variável</SelectItem>
                 </SelectContent>
               </Select>
             </div>
