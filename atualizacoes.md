@@ -218,3 +218,41 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Arquivo criado:**
 - `atualizacoes.md`
+
+---
+
+## 12. Suite de testes unitários do motor matemático
+
+- Verificado o ambiente: não havia test runner configurado (sem script
+  `test`, sem Vitest instalado). Havia um `bun.lock`, mas o binário `bun`
+  não está disponível neste ambiente — instalado e configurado **Vitest**,
+  que integra nativamente com o Vite já usado pelo projeto.
+- Config de teste isolada (`vitest.config.ts`) que NÃO importa
+  `vite.config.ts` da aplicação (evita qualquer interferência dos plugins de
+  build/SSR do TanStack Start/Nitro) — só replica o alias `@/` do
+  `tsconfig.json`, já que os módulos testados são funções puras sem
+  dependência de React/servidor/Supabase.
+- Testes exaustivos para os 3 arquivos pedidos, incluindo casos de estresse
+  contábil (valores negativos/saldo devedor, entradas nulas/vazias/strings
+  maliciosas, bug clássico de ponto flutuante 0.1+0.2, anos bissextos,
+  meses de 28/29/30/31 dias, virada de ano, empates determinísticos):
+  - `money.ts` — `toCents`, `fromCents`, `addAmounts`, `sumAmounts`,
+    `safePercent`, `isNegativeAmount`, `normalizeAmount`.
+  - `invoice-due.ts` — `computeInvoiceDueDate`, incluindo clamps de fim de
+    mês e validação de entrada fora de 1..31.
+  - `invoice-payment-match.ts` — `suggestInvoiceForPayment`, incluindo
+    exclusão de status `paid`/`overdue` e não-mutação do array de entrada.
+- Suite executada localmente (`npm test`): **60/60 testes passando**.
+
+**Arquivos criados:**
+- `vitest.config.ts`
+- `src/lib/finance/money.test.ts`
+- `src/lib/finance/invoice-due.test.ts`
+- `src/lib/finance/invoice-payment-match.test.ts`
+
+**Arquivos alterados:**
+- `package.json` (scripts `test` e `test:watch`)
+
+**Dependência instalada:** `vitest` (dev dependency)
+
+**Status:** não commitado.
