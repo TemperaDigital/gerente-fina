@@ -551,4 +551,52 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Pendente:** não foi possível testar a chamada real à IA neste ambiente (sem `LOVABLE_API_KEY`/rede de saída no sandbox) — peço que teste manualmente o caso do defeito relatado ("gastei 25 hoje" sem contexto deve gerar uma pergunta sobre a conta, nunca criar sozinho).
 
+**Status:** enviado ao GitHub (`git push`).
+
+---
+
+## 21. Sincronizar exclusão entre Lançamentos e as 4 estruturas de /installments
+
+- **Investigação de schema (feita antes de qualquer código, como pedido):**
+  achado real e documentado no código — `installment_purchases`/
+  `installment_items` TÊM vínculo de fato com `transactions`
+  (`installment_items.transaction_id`, `ON DELETE SET NULL`), mas `loans`
+  (empréstimos/financiamentos/consórcios) NÃO têm nenhuma coluna de vínculo
+  com `transactions` — nem `loan_id`, nem reaproveitamento de
+  `recurrence_id` — e não existe nenhuma função de criação/pagamento para
+  `loans` no app hoje, só `listLoans` (leitura). Ou seja: a Parte 1 da
+  missão (avisar/sincronizar ao excluir um lançamento vinculado) só se
+  aplica de fato a parcelamentos — para `loans` não há o que sincronizar,
+  porque não há vínculo nenhum a quebrar.
+- **Parte 1:** `getTransactionDeleteImpact` avisa, antes de excluir um
+  lançamento comum, se ele é uma parcela vinculada a `installment_purchases`
+  (mostra descrição da compra e "X/Y"). Se for a ÚLTIMA parcela ainda
+  vinculada, oferece um checkbox "excluir também o parcelamento inteiro".
+  Nova RPC atômica `delete_installment_purchase` (migration 0015, mesma
+  disciplina de `pay_credit_card_invoice`) apaga o cabeçalho E qualquer
+  transaction ainda vinculada numa única transação de banco.
+- **Parte 2:** ícone de excluir em TODOS os 4 tipos de card em
+  `/installments`. Parcelamento chama a mesma RPC atômica (informa quantos
+  lançamentos foram removidos junto); `loans` usa um `DELETE` simples
+  (`deleteLoan`) — sem RPC, porque não há nada para arrastar.
+- Escopo mantido enxuto de propósito: a fila de conciliação (`DiscardButton`
+  em `ReviewQueue`) não foi alterada — o pedido era especificamente sobre o
+  botão de excluir da tela de Lançamentos (`TransactionRow`), que também
+  cobre `/accounts` e `/credit-cards` via `AccountLedgerSheet` (mesmo
+  componente reaproveitado).
+
+**Arquivos criados:**
+- `docs/migrations/0015_delete_installment_purchase.sql`
+
+**Arquivos alterados:**
+- `src/services/transactions.functions.ts` (`getTransactionDeleteImpact`)
+- `src/services/installments.functions.ts` (`deleteInstallmentPurchase`, `deleteLoan`)
+- `src/components/transactions/list-ui.tsx`
+- `src/routes/_app.transactions.index.tsx`
+- `src/routes/_app.installments.tsx`
+
+**Commits:** `1f50310` (Parte 1), `dc14001` (Parte 2).
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 64/64 · eslint sem erros reais.
+
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
