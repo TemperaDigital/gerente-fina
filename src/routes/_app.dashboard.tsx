@@ -19,6 +19,8 @@ import {
   ChevronLeft,
   ChevronRight,
   CalendarDays,
+  CalendarClock,
+  AlertTriangle,
   BarChart3,
   PieChart as PieChartIcon,
 } from "lucide-react";
@@ -38,6 +40,7 @@ import {
 } from "@/services/dashboard.functions";
 import { listBudgets } from "@/services/budgets.functions";
 import { materializeDueRecurrences } from "@/services/recurrence-materializer.functions";
+import { listScheduledItems } from "@/services/scheduled-items.functions";
 import { toCents, fromCents, safePercent } from "@/lib/finance/money";
 
 // ---------------------------------------------------------------------------
@@ -94,6 +97,12 @@ const breakdownQuery = (month: string) =>
     queryFn: () => getCategoryBreakdown({ data: { month, kind: "expense" } }),
   });
 
+const scheduledQuery = () =>
+  queryOptions({
+    queryKey: ["agendamentos"],
+    queryFn: () => listScheduledItems(),
+  });
+
 // ---------------------------------------------------------------------------
 // Route
 // ---------------------------------------------------------------------------
@@ -119,6 +128,7 @@ export const Route = createFileRoute("/_app/dashboard")({
       context.queryClient.ensureQueryData(budgetsQuery(month)),
       context.queryClient.ensureQueryData(dreHistoryQuery()),
       context.queryClient.ensureQueryData(breakdownQuery(month)),
+      context.queryClient.ensureQueryData(scheduledQuery()),
     ]);
   },
 
@@ -156,6 +166,7 @@ function DashboardPage() {
   const { data: budgets } = useSuspenseQuery(budgetsQuery(month));
   const { data: dreHistory } = useSuspenseQuery(dreHistoryQuery());
   const { data: breakdown } = useSuspenseQuery(breakdownQuery(month));
+  const { data: scheduledItems } = useSuspenseQuery(scheduledQuery());
 
   // Materializa recorrências vencidas (salário, contas fixas...) uma vez por
   // montagem — silencioso quando não há nada novo, nunca derruba o dashboard.
@@ -181,6 +192,20 @@ function DashboardPage() {
   const topBudgets = budgets.slice(0, 5);
   const isNegative = (v: string) => toCents(v) < 0n;
   const isCurrent = month === currentMonth();
+
+  // Widget "Contas a Vencer" (Missão 7, Parte 3) — próximos 30 dias,
+  // incluindo atrasados. Sem ação de confirmar aqui — isso fica só em
+  // /agendamentos; este widget é só um lembrete visual.
+  const todayForSchedule = new Date();
+  todayForSchedule.setHours(0, 0, 0, 0);
+  const todayScheduleIso = `${todayForSchedule.getFullYear()}-${String(todayForSchedule.getMonth() + 1).padStart(2, "0")}-${String(todayForSchedule.getDate()).padStart(2, "0")}`;
+  const in30 = new Date(todayForSchedule);
+  in30.setDate(in30.getDate() + 30);
+  const in30Iso = `${in30.getFullYear()}-${String(in30.getMonth() + 1).padStart(2, "0")}-${String(in30.getDate()).padStart(2, "0")}`;
+  const dueSoon = scheduledItems
+    .filter((i) => i.next_run_on <= in30Iso)
+    .sort((a, b) => a.next_run_on.localeCompare(b.next_run_on))
+    .slice(0, 5);
 
   function goMonth(delta: number) {
     navigate({ search: { month: addMonth(month, delta) } });
@@ -465,6 +490,64 @@ function DashboardPage() {
                   </p>
                 </div>
               ))}
+            </div>
+          </GlassCard>
+        )}
+
+        {/* Widget "Contas a Vencer" (Missão 7) — próximos 30 dias + atrasados */}
+        {dueSoon.length > 0 && (
+          <GlassCard className="border border-white/10 p-5 sm:p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground/80">
+                <CalendarClock className="size-4 text-primary" />
+                Contas a Vencer
+              </h2>
+              <Link to="/agendamentos">
+                <Button variant="ghost" size="sm" className="gap-1 px-2 text-xs text-primary">
+                  Ver todas <ArrowRight className="size-3" />
+                </Button>
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {dueSoon.map((item) => {
+                const overdue = item.next_run_on < todayScheduleIso;
+                const isToday = item.next_run_on === todayScheduleIso;
+                const [y, m, d] = item.next_run_on.split("-");
+                return (
+                  <div
+                    key={item.id}
+                    className={`flex items-center justify-between gap-3 rounded-xl border p-3 ${
+                      overdue
+                        ? "border-red-500/30 bg-red-500/5"
+                        : isToday
+                          ? "border-amber-500/30 bg-amber-500/5"
+                          : "border-white/10 bg-white/[0.02]"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {overdue && <AlertTriangle className="size-3.5 shrink-0 text-red-400" />}
+                        <span className="truncate text-sm font-medium text-foreground/90">
+                          {item.description}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-foreground/40">
+                        {overdue ? "Atrasado desde" : isToday ? "Vence hoje" : "Vence"} {d}/{m}/{y}
+                        {" · "}
+                        {item.account_name ?? "—"}
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 font-mono text-sm font-semibold ${
+                        item.kind === "income" ? "text-emerald-400" : "text-rose-400"
+                      }`}
+                    >
+                      {item.kind === "income" ? "+" : "−"}
+                      {BRL(item.amount)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </GlassCard>
         )}

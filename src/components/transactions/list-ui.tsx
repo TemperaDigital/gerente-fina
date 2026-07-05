@@ -40,15 +40,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { GlassCard, formatBRL } from "@/components/dashboard/primitives";
+import { getTransactionDeleteImpact } from "@/services/transactions.functions";
 import type {
   TransactionListItemDTO,
   TransactionKind,
   ReviewGroupDTO,
+  TransactionDeleteImpactDTO,
 } from "@/services/transactions.functions";
-import type {
-  AccountLookupDTO,
-  CategoryLookupDTO,
-} from "@/services/lookups.functions";
+import type { AccountLookupDTO, CategoryLookupDTO } from "@/services/lookups.functions";
 
 // ---------------------------------------------------------------------------
 // Filtros
@@ -87,8 +86,7 @@ export function FiltersBar({
             onChange={(e) => setLocalSearch(e.target.value)}
             onBlur={() => onChange({ ...value, search: localSearch })}
             onKeyDown={(e) => {
-              if (e.key === "Enter")
-                onChange({ ...value, search: localSearch });
+              if (e.key === "Enter") onChange({ ...value, search: localSearch });
             }}
           />
         </div>
@@ -97,9 +95,7 @@ export function FiltersBar({
       <FilterSelect
         label="Conta"
         value={value.account_id ?? "all"}
-        onChange={(v) =>
-          onChange({ ...value, account_id: v === "all" ? undefined : v })
-        }
+        onChange={(v) => onChange({ ...value, account_id: v === "all" ? undefined : v })}
         options={[
           { value: "all", label: "Todas" },
           ...accounts.map((a) => ({ value: a.id, label: a.name })),
@@ -109,9 +105,7 @@ export function FiltersBar({
       <FilterSelect
         label="Categoria"
         value={value.category_id ?? "all"}
-        onChange={(v) =>
-          onChange({ ...value, category_id: v === "all" ? undefined : v })
-        }
+        onChange={(v) => onChange({ ...value, category_id: v === "all" ? undefined : v })}
         options={[
           { value: "all", label: "Todas" },
           ...categories.map((c) => ({
@@ -202,6 +196,7 @@ export function TransactionsTable({
   total,
   onPageChange,
   onDelete,
+  onDeletePurchase,
 }: {
   items: TransactionListItemDTO[];
   page: number;
@@ -209,6 +204,8 @@ export function TransactionsTable({
   total: number;
   onPageChange: (page: number) => void;
   onDelete: (id: string, description: string) => void;
+  /** Missão 12: exclusão do parcelamento inteiro quando esta é a última parcela paga. Opcional — sem ela, o aviso é mostrado mas sem a opção de excluir tudo. */
+  onDeletePurchase?: (purchaseId: string, description: string) => void;
 }) {
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
   const grouped = useMemo(() => {
@@ -235,7 +232,12 @@ export function TransactionsTable({
               </div>
               <ul className="divide-y divide-white/5">
                 {dayItems.map((it) => (
-                  <TransactionRow key={it.id} it={it} onDelete={onDelete} />
+                  <TransactionRow
+                    key={it.id}
+                    it={it}
+                    onDelete={onDelete}
+                    onDeletePurchase={onDeletePurchase}
+                  />
                 ))}
               </ul>
             </li>
@@ -245,8 +247,7 @@ export function TransactionsTable({
 
       <div className="flex items-center justify-between border-t border-white/5 px-5 py-3 text-xs text-foreground/60">
         <div>
-          {total} lançamento{total === 1 ? "" : "s"} · página {page} de{" "}
-          {lastPage}
+          {total} lançamento{total === 1 ? "" : "s"} · página {page} de {lastPage}
         </div>
         <div className="flex gap-2">
           <Button
@@ -276,24 +277,40 @@ export function TransactionsTable({
 function TransactionRow({
   it,
   onDelete,
+  onDeletePurchase,
 }: {
   it: TransactionListItemDTO;
   onDelete: (id: string, description: string) => void;
+  onDeletePurchase?: (purchaseId: string, description: string) => void;
 }) {
   const meta = kindMeta(it.kind);
   const Icon = meta.icon;
-  const amountSign =
-    it.kind === "income" ? "+" : it.kind === "expense" ? "−" : "";
+  const amountSign = it.kind === "income" ? "+" : it.kind === "expense" ? "−" : "";
   const amountColor =
     it.kind === "income"
       ? "text-emerald-400"
       : it.kind === "expense"
-      ? "text-rose-400"
-      : it.kind === "transfer"
-      ? "text-sky-300"
-      : "text-violet-300";
+        ? "text-rose-400"
+        : it.kind === "transfer"
+          ? "text-sky-300"
+          : "text-violet-300";
 
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [impact, setImpact] = useState<TransactionDeleteImpactDTO | null>(null);
+  const [alsoDeletePurchase, setAlsoDeletePurchase] = useState(false);
+
+  async function openConfirm() {
+    setImpact(null);
+    setAlsoDeletePurchase(false);
+    setConfirmOpen(true);
+    try {
+      const res = await getTransactionDeleteImpact({ data: { id: it.id } });
+      setImpact(res);
+    } catch {
+      // Falha ao checar impacto não deve travar a exclusão simples — segue sem o aviso extra.
+      setImpact({ linked_installment: null });
+    }
+  }
 
   return (
     <li className="group relative">
@@ -337,8 +354,7 @@ function TransactionRow({
                 variant="outline"
                 className="border-sky-400/30 bg-sky-400/10 px-1.5 py-0 text-[10px] font-semibold text-sky-300"
               >
-                🔁 {it.type === "debit" ? "Para" : "De"}:{" "}
-                {it.transfer_counterpart_name}
+                🔁 {it.type === "debit" ? "Para" : "De"}: {it.transfer_counterpart_name}
               </Badge>
             )}
             {it.kind === "invoice_payment" && (
@@ -373,7 +389,7 @@ function TransactionRow({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              setConfirmOpen(true);
+              openConfirm();
             }}
             className="absolute right-3 top-1/2 size-8 -translate-y-1/2 text-foreground/30 opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
             aria-label="Excluir lançamento"
@@ -389,16 +405,47 @@ function TransactionRow({
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir lançamento?</AlertDialogTitle>
             <AlertDialogDescription>
-              "{it.description || meta.label}" ({formatBRL(it.amount)}) será removido
-              permanentemente. Esta ação não pode ser desfeita.
+              <span className="block">
+                "{it.description || meta.label}" ({formatBRL(it.amount)}) será removido
+                permanentemente. Esta ação não pode ser desfeita.
+              </span>
+              {impact?.linked_installment && (
+                <span className="mt-2 block rounded-lg border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs text-amber-200">
+                  Esta é a parcela {impact.linked_installment.installment_number}/
+                  {impact.linked_installment.installments_count} de "
+                  {impact.linked_installment.purchase_description}". Ao excluir, ela volta a
+                  aparecer como não paga no parcelamento.
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {impact?.linked_installment?.is_last_paid && onDeletePurchase && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-white/[0.04] p-2.5 text-xs text-foreground/70">
+              <input
+                type="checkbox"
+                checked={alsoDeletePurchase}
+                onChange={(e) => setAlsoDeletePurchase(e.target.checked)}
+                className="mt-0.5"
+              />
+              Esta era a última parcela ainda vinculada — excluir também o parcelamento inteiro
+              (todas as parcelas, pagas ou não)?
+            </label>
+          )}
+
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
-                onDelete(it.id, it.description || meta.label);
+                if (alsoDeletePurchase && impact?.linked_installment && onDeletePurchase) {
+                  onDeletePurchase(
+                    impact.linked_installment.purchase_id,
+                    impact.linked_installment.purchase_description,
+                  );
+                } else {
+                  onDelete(it.id, it.description || meta.label);
+                }
                 setConfirmOpen(false);
               }}
             >
@@ -410,7 +457,6 @@ function TransactionRow({
     </li>
   );
 }
-
 
 // ---------------------------------------------------------------------------
 // Review Queue (fila de conciliação)
@@ -430,9 +476,7 @@ export function ReviewQueue({
         <div className="flex items-center gap-3">
           <CheckCircle2 className="size-5 text-emerald-400" />
           <div>
-            <div className="text-sm font-semibold text-foreground">
-              Fila de conciliação limpa
-            </div>
+            <div className="text-sm font-semibold text-foreground">Fila de conciliação limpa</div>
             <div className="text-xs text-foreground/50">
               Nenhuma duplicidade pendente de revisão.
             </div>
@@ -446,12 +490,10 @@ export function ReviewQueue({
     <GlassCard className="p-4">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">
-            Fila de Revisão de Conciliação
-          </h2>
+          <h2 className="text-sm font-semibold text-foreground">Fila de Revisão de Conciliação</h2>
           <p className="text-xs text-foreground/50">
-            {groups.length} grupo{groups.length === 1 ? "" : "s"} com possível
-            duplicidade detectada pelo hash.
+            {groups.length} grupo{groups.length === 1 ? "" : "s"} com possível duplicidade detectada
+            pelo hash.
           </p>
         </div>
       </div>
@@ -501,9 +543,7 @@ export function ReviewQueue({
                       </Button>
                       <DiscardButton
                         description={it.description ?? "lançamento sem descrição"}
-                        onConfirm={() =>
-                          onDiscard(it.id, it.description ?? "lançamento")
-                        }
+                        onConfirm={() => onDiscard(it.id, it.description ?? "lançamento")}
                       />
                     </div>
                   </li>
@@ -517,13 +557,7 @@ export function ReviewQueue({
   );
 }
 
-function DiscardButton({
-  description,
-  onConfirm,
-}: {
-  description: string;
-  onConfirm: () => void;
-}) {
+function DiscardButton({ description, onConfirm }: { description: string; onConfirm: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -541,10 +575,8 @@ function DiscardButton({
             <AlertDialogTitle>Descartar lançamento?</AlertDialogTitle>
             <AlertDialogDescription className="text-foreground/60">
               Você está prestes a remover permanentemente o lançamento{" "}
-              <span className="font-semibold text-foreground">
-                "{description}"
-              </span>
-              . Esta ação não pode ser desfeita.
+              <span className="font-semibold text-foreground">"{description}"</span>. Esta ação não
+              pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

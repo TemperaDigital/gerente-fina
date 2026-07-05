@@ -29,6 +29,7 @@ import {
   mergeDuplicateTransactions,
 } from "@/services/transactions.functions";
 import { getAccountsLookup, getCategoriesLookup } from "@/services/lookups.functions";
+import { deleteInstallmentPurchase } from "@/services/installments.functions";
 
 // ---------------------------------------------------------------------------
 // Search params
@@ -182,6 +183,19 @@ function TransactionsPage() {
     onError: (e: Error) => toast.error(`Falha ao mesclar: ${e.message}`),
   });
 
+  const deletePurchaseMut = useMutation({
+    mutationFn: (v: { id: string; description: string }) =>
+      deleteInstallmentPurchase({ data: { id: v.id } }),
+    onSuccess: async (res, variables) => {
+      toast.success(
+        `Parcelamento "${variables.description}" excluído — ${res.deleted_transactions} lançamento(s) removido(s) junto.`,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      await queryClient.invalidateQueries({ queryKey: ["installments"] });
+    },
+    onError: (e: Error) => toast.error(`Falha ao excluir parcelamento: ${e.message}`),
+  });
+
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
@@ -268,6 +282,7 @@ function TransactionsPage() {
             total={list.total}
             onPageChange={(p) => navigate({ search: (prev: TxSearch) => ({ ...prev, page: p }) })}
             onDelete={(id) => discardMut.mutate(id)}
+            onDeletePurchase={(id, description) => deletePurchaseMut.mutate({ id, description })}
           />
         </div>
       </div>

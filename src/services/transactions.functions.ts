@@ -457,6 +457,12 @@ const CreateInput = z
     // Modificadores opcionais (income/expense)
     installment: InstallmentInput.optional(),
     recurrence: RecurrenceInput.optional(),
+    /**
+     * Vincula o lançamento a uma recorrência JÁ EXISTENTE (Missão 7 —
+     * confirmação de "Contas a Vencer"), em vez de criar uma nova definição
+     * como `recurrence` faz. Mutuamente exclusivo com `recurrence`.
+     */
+    link_recurrence_id: z.string().uuid().optional(),
   })
   .superRefine((v, ctx) => {
     if ((v.kind === "income" || v.kind === "expense") && !v.category_id) {
@@ -499,6 +505,21 @@ const CreateInput = z
         code: z.ZodIssueCode.custom,
         message: "Recorrência só vale para receitas e despesas.",
         path: ["recurrence"],
+      });
+    }
+    if (v.link_recurrence_id && v.recurrence) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Não é possível criar uma nova recorrência e vincular a uma existente ao mesmo tempo.",
+        path: ["link_recurrence_id"],
+      });
+    }
+    if (v.link_recurrence_id && v.kind !== "income" && v.kind !== "expense") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Vínculo com recorrência só vale para receitas e despesas.",
+        path: ["link_recurrence_id"],
       });
     }
   });
@@ -739,9 +760,74 @@ export const createTransactionEntry = createServerFn({ method: "POST" })
       ...basePayload,
       amount: data.amount,
       occurred_on: data.occurred_on,
+      recurrence_id: data.link_recurrence_id ?? null,
     });
     if (error) throw new Error(error.message);
     return { created_count: 1, warnings };
+  });
+
+// ---------------------------------------------------------------------------
+// getTransactionDeleteImpact — Missão 12: avisa ANTES de excluir se o
+// lançamento pertence a um parcelamento de cartão (installment_items.
+// transaction_id). Empréstimos/financiamentos/consórcios (tabela `loans`)
+// não têm NENHUM vínculo com `transactions` no schema atual — não têm
+// coluna loan_id nem reaproveitam recurrence_id, e não há função de
+// criação/pagamento para loans no app hoje (só listagem) — por isso não
+// entram nesta checagem, não há o que avisar.
+// ---------------------------------------------------------------------------
+export interface TransactionDeleteImpactDTO {
+  linked_installment: {
+    purchase_id: string;
+    purchase_description: string;
+    installment_number: number;
+    installments_count: number;
+    /** Quantas parcelas dessa compra ainda têm transaction_id (antes desta exclusão). */
+    paid_count: number;
+    /** true se esta é a ÚLTIMA parcela ainda vinculada — excluir zera o parcelamento inteiro. */
+    is_last_paid: boolean;
+  } | null;
+}
+
+export const getTransactionDeleteImpact = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }): Promise<TransactionDeleteImpactDTO> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    const { data: item, error } = await sb
+      .from("installment_items")
+      .select(
+        "purchase_id, installment_number, installment_purchases:purchase_id ( description, installments_count )",
+      )
+      .eq("transaction_id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!item) return { linked_installment: null };
+
+    const typed = item as unknown as {
+      purchase_id: string;
+      installment_number: number;
+      installment_purchases?: { description?: string | null; installments_count?: number } | null;
+    };
+
+    const { count, error: countErr } = await sb
+      .from("installment_items")
+      .select("id", { count: "exact", head: true })
+      .eq("purchase_id", typed.purchase_id)
+      .not("transaction_id", "is", null);
+    if (countErr) throw new Error(countErr.message);
+
+    const paidCount = count ?? 0;
+    return {
+      linked_installment: {
+        purchase_id: typed.purchase_id,
+        purchase_description: typed.installment_purchases?.description ?? "",
+        installment_number: typed.installment_number,
+        installments_count: typed.installment_purchases?.installments_count ?? 0,
+        paid_count: paidCount,
+        is_last_paid: paidCount <= 1,
+      },
+    };
   });
 
 // ---------------------------------------------------------------------------

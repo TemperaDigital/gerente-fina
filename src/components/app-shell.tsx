@@ -16,22 +16,24 @@ import {
   Menu,
   MessageSquare,
   FileUp,
+  CalendarClock,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { to: "/dashboard",    label: "Dashboard",        icon: LayoutDashboard },
-  { to: "/transactions", label: "Lançamentos",       icon: ArrowLeftRight },
-  { to: "/accounts",     label: "Contas",            icon: Wallet },
-  { to: "/credit-cards", label: "Cartões",           icon: CreditCard },
-  { to: "/import",       label: "Importar Extrato",  icon: FileUp },
-  { to: "/categories",   label: "Categorias",        icon: Tags },
-  { to: "/installments", label: "Parcelas & Dívidas",icon: Layers },
-  { to: "/budgets",      label: "Orçamentos",        icon: Target },
-  { to: "/forecast",     label: "Previsão",          icon: LineChart },
-  { to: "/chat",         label: "Chat IA",           icon: MessageSquare },
-  { to: "/settings",     label: "Configurações",     icon: SettingsIcon },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/transactions", label: "Lançamentos", icon: ArrowLeftRight },
+  { to: "/accounts", label: "Contas", icon: Wallet },
+  { to: "/credit-cards", label: "Cartões", icon: CreditCard },
+  { to: "/import", label: "Importar Extrato", icon: FileUp },
+  { to: "/categories", label: "Categorias", icon: Tags },
+  { to: "/installments", label: "Parcelas & Dívidas", icon: Layers },
+  { to: "/agendamentos", label: "Agendamentos", icon: CalendarClock },
+  { to: "/budgets", label: "Orçamentos", icon: Target },
+  { to: "/forecast", label: "Previsão", icon: LineChart },
+  { to: "/chat", label: "Chat IA", icon: MessageSquare },
+  { to: "/settings", label: "Configurações", icon: SettingsIcon },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -45,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="pointer-events-none fixed inset-0 -z-10"
         style={{
           background:
-            "radial-gradient(800px 500px at 15% -10%, rgba(99,102,241,0.18), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,0.14), transparent 60%), radial-gradient(900px 600px at 50% 110%, rgba(59,130,246,0.10), transparent 60%)"
+            "radial-gradient(800px 500px at 15% -10%, rgba(99,102,241,0.18), transparent 60%), radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,0.14), transparent 60%), radial-gradient(900px 600px at 50% 110%, rgba(59,130,246,0.10), transparent 60%)",
         }}
       />
 
@@ -100,10 +102,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="mx-auto flex w-full max-w-[1600px] gap-0 md:gap-4 md:px-4 md:py-4">
         {/* Sidebar desktop */}
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-1 border-r border-white/5 px-3 py-6 md:flex">
-          <Link
-            to="/dashboard"
-            className="mb-6 px-3 text-lg font-semibold tracking-tight"
-          >
+          <Link to="/dashboard" className="mb-6 px-3 text-lg font-semibold tracking-tight">
             Gerente <span className="text-primary">Fina</span>
           </Link>
           {NAV.map((n) => {
