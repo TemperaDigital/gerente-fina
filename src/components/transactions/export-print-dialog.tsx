@@ -53,6 +53,19 @@ function formatBR(date: string): string {
   return `${d}/${m}/${y}`;
 }
 
+/** "2026-07-01" -> "07/2026" — mês da fatura de cartão a que a despesa foi anexada. */
+function formatInvoiceMonth(referenceMonth: string | null): string {
+  if (!referenceMonth) return "";
+  const [y, m] = referenceMonth.split("-");
+  return `${m}/${y}`;
+}
+
+function natureLabel(nature: "FIXA" | "VARIÁVEL" | null): string {
+  if (nature === "FIXA") return "Fixa";
+  if (nature === "VARIÁVEL") return "Variável";
+  return "";
+}
+
 // ---------------------------------------------------------------------------
 // CSV
 // ---------------------------------------------------------------------------
@@ -62,7 +75,16 @@ function csvEscape(v: string): string {
 }
 
 function buildCsv(items: TransactionListItemDTO[]): string {
-  const header = ["Data", "Conta", "Categoria", "Tipo", "Descrição", "Valor"];
+  const header = [
+    "Data",
+    "Conta",
+    "Categoria",
+    "Tipo",
+    "Descrição",
+    "Valor",
+    "Fatura",
+    "Tipo de Despesa",
+  ];
   const lines = [header.map(csvEscape).join(",")];
   for (const it of items) {
     const amount = it.kind === "expense" ? `-${it.amount}` : it.amount;
@@ -74,6 +96,8 @@ function buildCsv(items: TransactionListItemDTO[]): string {
         KIND_LABEL[it.kind],
         it.description ?? "",
         amount,
+        formatInvoiceMonth(it.invoice_reference_month),
+        natureLabel(it.category_nature),
       ]
         .map((v) => csvEscape(String(v)))
         .join(","),
@@ -118,6 +142,8 @@ function buildPrintHtml(items: TransactionListItemDTO[], filterLabel: string): s
         <td>${escapeHtml(KIND_LABEL[it.kind])}</td>
         <td>${escapeHtml(it.description ?? "—")}</td>
         <td class="num">${escapeHtml(amount)}</td>
+        <td>${escapeHtml(formatInvoiceMonth(it.invoice_reference_month) || "—")}</td>
+        <td>${escapeHtml(natureLabel(it.category_nature) || "—")}</td>
       </tr>`;
     })
     .join("");
@@ -171,15 +197,18 @@ function buildPrintHtml(items: TransactionListItemDTO[], filterLabel: string): s
         <th>Tipo</th>
         <th>Descrição</th>
         <th class="num">Valor</th>
+        <th>Fatura</th>
+        <th>Tipo de Despesa</th>
       </tr>
     </thead>
     <tbody>
-      ${rows || `<tr><td colspan="6" style="text-align:center;color:#777;">Nenhum lançamento encontrado com os filtros escolhidos.</td></tr>`}
+      ${rows || `<tr><td colspan="8" style="text-align:center;color:#777;">Nenhum lançamento encontrado com os filtros escolhidos.</td></tr>`}
     </tbody>
     <tfoot>
       <tr>
         <td colspan="5">Saldo do período (receitas − despesas, exclui transferências/pgto. fatura)</td>
         <td class="num">${escapeHtml(totalLabel)}</td>
+        <td colspan="2"></td>
       </tr>
     </tfoot>
   </table>

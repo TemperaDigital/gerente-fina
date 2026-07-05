@@ -2,7 +2,7 @@
  * Componentes da Rota /transactions.
  * Visual: vidro fosco / ZimaOS. Headless — recebe DTOs prontos.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftRight,
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -189,6 +190,16 @@ function formatBR(date: string): string {
   return `${d}/${m}/${y}`;
 }
 
+/** "2026-07-01" -> "07/2026" — mês da fatura de cartão a que a despesa foi anexada. */
+function formatInvoiceMonth(referenceMonth: string): string {
+  const [y, m] = referenceMonth.split("-");
+  return `${m}/${y}`;
+}
+
+function natureLabel(nature: "FIXA" | "VARIÁVEL"): string {
+  return nature === "FIXA" ? "Fixa" : "Variável";
+}
+
 export function TransactionsTable({
   items,
   page,
@@ -197,6 +208,7 @@ export function TransactionsTable({
   onPageChange,
   onDelete,
   onDeletePurchase,
+  onBulkDelete,
 }: {
   items: TransactionListItemDTO[];
   page: number;
@@ -206,6 +218,8 @@ export function TransactionsTable({
   onDelete: (id: string, description: string) => void;
   /** Missão 12: exclusão do parcelamento inteiro quando esta é a última parcela paga. Opcional — sem ela, o aviso é mostrado mas sem a opção de excluir tudo. */
   onDeletePurchase?: (purchaseId: string, description: string) => void;
+  /** Exclusão em lote da seleção múltipla. Opcional — sem ela, nenhuma checkbox de seleção é exibida. */
+  onBulkDelete?: (ids: string[]) => void;
 }) {
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
   const grouped = useMemo(() => {
@@ -217,8 +231,59 @@ export function TransactionsTable({
     return Array.from(m.entries());
   }, [items]);
 
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+
+  // A seleção é sempre relativa à página atual — troca de página (ou refetch
+  // com itens diferentes) reinicia a seleção para evitar excluir algo que o
+  // usuário não está mais vendo.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [items]);
+
+  const selectionEnabled = !!onBulkDelete;
+  const allSelected = items.length > 0 && selected.size === items.length;
+  const someSelected = selected.size > 0 && !allSelected;
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected((prev) =>
+      prev.size === items.length ? new Set() : new Set(items.map((i) => i.id)),
+    );
+  }
+
   return (
     <GlassCard className="overflow-hidden p-0">
+      {selectionEnabled && items.length > 0 && (
+        <div className="flex items-center justify-between gap-3 border-b border-white/5 bg-white/[0.02] px-5 py-2.5">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground/60">
+            <Checkbox
+              checked={allSelected ? true : someSelected ? "indeterminate" : false}
+              onCheckedChange={toggleAll}
+            />
+            {selected.size > 0 ? `${selected.size} selecionado(s)` : "Selecionar todos"}
+          </label>
+          {selected.size > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1.5 rounded-full text-xs text-rose-400 hover:bg-rose-400/10"
+              onClick={() => setBulkConfirmOpen(true)}
+            >
+              <Trash2 className="size-3.5" /> Excluir selecionados
+            </Button>
+          )}
+        </div>
+      )}
+
       {items.length === 0 ? (
         <div className="p-12 text-center text-sm text-foreground/50">
           Nenhum lançamento encontrado com os filtros aplicados.
@@ -237,6 +302,9 @@ export function TransactionsTable({
                     it={it}
                     onDelete={onDelete}
                     onDeletePurchase={onDeletePurchase}
+                    selectionEnabled={selectionEnabled}
+                    selected={selected.has(it.id)}
+                    onToggleSelect={() => toggleOne(it.id)}
                   />
                 ))}
               </ul>
@@ -270,6 +338,33 @@ export function TransactionsTable({
           </Button>
         </div>
       </div>
+
+      <AlertDialog open={bulkConfirmOpen} onOpenChange={setBulkConfirmOpen}>
+        <AlertDialogContent className="border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir {selected.size} lançamento(s)?</AlertDialogTitle>
+            <AlertDialogDescription className="text-foreground/60">
+              Esta ação não pode ser desfeita. Se algum dos selecionados for uma parcela de um
+              parcelamento de cartão, ela volta a aparecer como não paga (o parcelamento em si não é
+              excluído).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-white/10 bg-white/[0.04] hover:bg-white/10">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                onBulkDelete?.(Array.from(selected));
+                setBulkConfirmOpen(false);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </GlassCard>
   );
 }
@@ -278,10 +373,16 @@ function TransactionRow({
   it,
   onDelete,
   onDeletePurchase,
+  selectionEnabled,
+  selected,
+  onToggleSelect,
 }: {
   it: TransactionListItemDTO;
   onDelete: (id: string, description: string) => void;
   onDeletePurchase?: (purchaseId: string, description: string) => void;
+  selectionEnabled?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const meta = kindMeta(it.kind);
   const Icon = meta.icon;
@@ -314,10 +415,22 @@ function TransactionRow({
 
   return (
     <li className="group relative">
+      {selectionEnabled && (
+        <Checkbox
+          checked={!!selected}
+          onCheckedChange={() => onToggleSelect?.()}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute left-3 top-1/2 z-10 -translate-y-1/2"
+          aria-label="Selecionar lançamento"
+        />
+      )}
       <Link
         to="/transactions/edit/$id"
         params={{ id: it.id }}
-        className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 px-5 py-3 transition-colors hover:bg-white/[0.04]"
+        className={cn(
+          "grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 px-5 py-3 transition-colors hover:bg-white/[0.04]",
+          selectionEnabled && "pl-11",
+        )}
       >
         <div
           className={cn(
@@ -365,10 +478,19 @@ function TransactionRow({
                 Fatura
               </Badge>
             )}
+            {it.invoice_reference_month && (
+              <Badge
+                variant="outline"
+                className="border-orange-400/30 bg-orange-400/10 px-1.5 py-0 text-[10px] font-semibold text-orange-300"
+              >
+                Fat. {formatInvoiceMonth(it.invoice_reference_month)}
+              </Badge>
+            )}
           </div>
           <div className="mt-0.5 truncate text-xs text-foreground/50">
             {it.account_name ?? "—"}
             {it.category_name ? ` · ${it.category_name}` : ""}
+            {it.category_nature ? ` (${natureLabel(it.category_nature)})` : ""}
           </div>
         </div>
 

@@ -26,6 +26,7 @@ import {
   getTransactionsList,
   getReviewQueue,
   discardTransaction,
+  bulkDiscardTransactions,
   mergeDuplicateTransactions,
 } from "@/services/transactions.functions";
 import { getAccountsLookup, getCategoriesLookup } from "@/services/lookups.functions";
@@ -173,6 +174,15 @@ function TransactionsPage() {
     onError: (e: Error) => toast.error(`Falha ao descartar: ${e.message}`),
   });
 
+  const bulkDiscardMut = useMutation({
+    mutationFn: (ids: string[]) => bulkDiscardTransactions({ data: { ids } }),
+    onSuccess: async (res) => {
+      toast.success(`${res.deleted_count} lançamento(s) excluído(s).`);
+      await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    },
+    onError: (e: Error) => toast.error(`Falha ao excluir em lote: ${e.message}`),
+  });
+
   const mergeMut = useMutation({
     mutationFn: (v: { keep_id: string; absorb_ids: string[] }) =>
       mergeDuplicateTransactions({ data: v }),
@@ -283,6 +293,7 @@ function TransactionsPage() {
             onPageChange={(p) => navigate({ search: (prev: TxSearch) => ({ ...prev, page: p }) })}
             onDelete={(id) => discardMut.mutate(id)}
             onDeletePurchase={(id, description) => deletePurchaseMut.mutate({ id, description })}
+            onBulkDelete={(ids) => bulkDiscardMut.mutate(ids)}
           />
         </div>
       </div>
