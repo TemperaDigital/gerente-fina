@@ -21,6 +21,11 @@ import {
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
+function currentMonthParam(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/transactions", label: "Lançamentos", icon: ArrowLeftRight },

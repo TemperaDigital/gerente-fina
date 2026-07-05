@@ -24,6 +24,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+function currentMonthParam(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
