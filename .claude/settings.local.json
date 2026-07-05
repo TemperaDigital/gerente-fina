@@ -15,7 +15,14 @@
       "Bash(grep -rn '\\\\.from\\(\"categories\"\\)\\\\s*$\\\\|\\\\.from\\(\"categories\"\\)\\\\.insert\\\\|from\\(\"categories\"\\)' /home/td-fguerra/Documentos/GitHub/gerente-fina/src --include=\"*.ts\" --include=\"*.tsx\" -A1)",
       "Bash(python3 -c ' *)",
       "Bash(python3)",
-      "Bash(echo \"grep exit: $?\")"
+      "Bash(echo \"grep exit: $?\")",
+      "Bash(grep -n \"discardTransaction\\\\|Excluir\\\\|AlertDialog\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/_app.transactions.edit.\\\\$id.tsx | head -20)",
+      "Read(//home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/**)",
+      "Bash(npx tsr *)",
+      "Bash(timeout 60 npx vite build --mode development)",
+      "Bash(grep -n \"'/accounts': typeof AppAccountsRoute$\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routeTree.gen.ts)",
+      "Bash(grep -n \"'/_app/accounts': typeof AppAccountsRoute$\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routeTree.gen.ts)",
+      "Bash(grep -n \"Widget de faturas abertas\\\\|</GlassCard>\\\\|\\)}$\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/_app.dashboard.tsx)"
     ]
   }
 }
