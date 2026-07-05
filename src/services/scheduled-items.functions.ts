@@ -196,3 +196,129 @@ export const confirmScheduledItem = createServerFn({ method: "POST" })
 
     return { created_count: 1, deactivated: shouldDeactivate };
   });
+
+// ---------------------------------------------------------------------------
+// CRUD do agendamento em si (Parte 2). Único campo de data no formulário:
+// `date` — representa `next_run_on` (a próxima ocorrência). Para criação,
+// também vira `start_on`. `day_of_month` é sempre DERIVADO de `date` para
+// frequências monthly/yearly — não é um campo de formulário separado.
+// ---------------------------------------------------------------------------
+function dayOfMonthFor(frequency: RecurrenceFrequency, date: string): number | null {
+  if (frequency !== "monthly" && frequency !== "yearly") return null;
+  return Number(date.split("-")[2]);
+}
+
+const ScheduledItemFields = {
+  description: z.string().trim().min(1).max(240),
+  amount: z.string().regex(/^\d+(\.\d{1,2})?$/, "amount inválido (ex.: 1234.56)"),
+  kind: z.enum(["income", "expense"]),
+  account_id: z.string().uuid(),
+  category_id: z.string().uuid(),
+  frequency: z.enum(["once", "daily", "weekly", "monthly", "yearly"]),
+  interval_count: z.number().int().min(1).max(60).default(1),
+  /** Próxima ocorrência (create: também é o início do agendamento). */
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  end_on: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+};
+
+function validateScheduledItemDates(
+  v: { date: string; end_on?: string; frequency: RecurrenceFrequency },
+  ctx: z.RefinementCtx,
+) {
+  if (v.end_on && v.end_on < v.date) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Data de término deve ser depois da próxima data.",
+      path: ["end_on"],
+    });
+  }
+  if (v.frequency === "once" && v.end_on) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Ocorrência única não usa data de término.",
+      path: ["end_on"],
+    });
+  }
+}
+
+const CreateScheduledItemInput = z
+  .object(ScheduledItemFields)
+  .superRefine(validateScheduledItemDates);
+
+export const createScheduledItem = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => CreateScheduledItemInput.parse(input))
+  .handler(async ({ data }): Promise<{ id: string }> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
+    const type = data.kind === "income" ? "credit" : "debit";
+
+    const { data: created, error } = await sb
+      .from("recurrences")
+      .insert({
+        user_id: userId,
+        account_id: data.account_id,
+        category_id: data.category_id,
+        kind: data.kind,
+        type,
+        amount: data.amount,
+        description: data.description,
+        frequency: data.frequency,
+        interval_count: data.frequency === "once" ? 1 : data.interval_count,
+        day_of_month: dayOfMonthFor(data.frequency, data.date),
+        start_on: data.date,
+        end_on: data.frequency === "once" ? null : (data.end_on ?? null),
+        next_run_on: data.date,
+      })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    return { id: created.id };
+  });
+
+const UpdateScheduledItemInput = z
+  .object({ id: z.string().uuid(), ...ScheduledItemFields })
+  .superRefine(validateScheduledItemDates);
+
+export const updateScheduledItem = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => UpdateScheduledItemInput.parse(input))
+  .handler(async ({ data }) => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+    const type = data.kind === "income" ? "credit" : "debit";
+
+    const { error } = await sb
+      .from("recurrences")
+      .update({
+        account_id: data.account_id,
+        category_id: data.category_id,
+        kind: data.kind,
+        type,
+        amount: data.amount,
+        description: data.description,
+        frequency: data.frequency,
+        interval_count: data.frequency === "once" ? 1 : data.interval_count,
+        day_of_month: dayOfMonthFor(data.frequency, data.date),
+        next_run_on: data.date,
+        end_on: data.frequency === "once" ? null : (data.end_on ?? null),
+      })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// Excluir NÃO apaga lançamentos já materializados: transactions.recurrence_id
+// é ON DELETE SET NULL (migration 0003) — o histórico passado fica intacto,
+// só perde o vínculo com o agendamento (que deixou de existir).
+export const deleteScheduledItem = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }) => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+    const { error } = await sb.from("recurrences").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });

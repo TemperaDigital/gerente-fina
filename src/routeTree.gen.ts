@@ -23,6 +23,7 @@ import { Route as AppCreditCardsRouteImport } from './routes/_app.credit-cards'
 import { Route as AppChatRouteImport } from './routes/_app.chat'
 import { Route as AppCategoriesRouteImport } from './routes/_app.categories'
 import { Route as AppBudgetsRouteImport } from './routes/_app.budgets'
+import { Route as AppAgendamentosRouteImport } from './routes/_app.agendamentos'
 import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
 import { Route as AppTransactionsIndexRouteImport } from './routes/_app.transactions.index'
 import { Route as AppTransactionsNewRouteImport } from './routes/_app.transactions.new'
@@ -97,6 +98,11 @@ const AppBudgetsRoute = AppBudgetsRouteImport.update({
   path: '/budgets',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAgendamentosRoute = AppAgendamentosRouteImport.update({
+  id: '/agendamentos',
+  path: '/agendamentos',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAccountsRoute = AppAccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
@@ -123,6 +129,7 @@ export interface FileRoutesByFullPath {
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/accounts': typeof AppAccountsRoute
+  '/agendamentos': typeof AppAgendamentosRoute
   '/budgets': typeof AppBudgetsRoute
   '/categories': typeof AppCategoriesRoute
   '/chat': typeof AppChatRoute
@@ -142,6 +149,7 @@ export interface FileRoutesByTo {
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/accounts': typeof AppAccountsRoute
+  '/agendamentos': typeof AppAgendamentosRoute
   '/budgets': typeof AppBudgetsRoute
   '/categories': typeof AppCategoriesRoute
   '/chat': typeof AppChatRoute
@@ -163,6 +171,7 @@ export interface FileRoutesById {
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/_app/accounts': typeof AppAccountsRoute
+  '/_app/agendamentos': typeof AppAgendamentosRoute
   '/_app/budgets': typeof AppBudgetsRoute
   '/_app/categories': typeof AppCategoriesRoute
   '/_app/chat': typeof AppChatRoute
@@ -184,6 +193,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/reset-password'
     | '/accounts'
+    | '/agendamentos'
     | '/budgets'
     | '/categories'
     | '/chat'
@@ -203,6 +213,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/reset-password'
     | '/accounts'
+    | '/agendamentos'
     | '/budgets'
     | '/categories'
     | '/chat'
@@ -223,6 +234,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/reset-password'
     | '/_app/accounts'
+    | '/_app/agendamentos'
     | '/_app/budgets'
     | '/_app/categories'
     | '/_app/chat'
@@ -345,6 +357,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBudgetsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/agendamentos': {
+      id: '/_app/agendamentos'
+      path: '/agendamentos'
+      fullPath: '/agendamentos'
+      preLoaderRoute: typeof AppAgendamentosRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/accounts': {
       id: '/_app/accounts'
       path: '/accounts'
@@ -378,6 +397,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRoute
+  AppAgendamentosRoute: typeof AppAgendamentosRoute
   AppBudgetsRoute: typeof AppBudgetsRoute
   AppCategoriesRoute: typeof AppCategoriesRoute
   AppChatRoute: typeof AppChatRoute
@@ -395,6 +415,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAccountsRoute: AppAccountsRoute,
+  AppAgendamentosRoute: AppAgendamentosRoute,
   AppBudgetsRoute: AppBudgetsRoute,
   AppCategoriesRoute: AppCategoriesRoute,
   AppChatRoute: AppChatRoute,
