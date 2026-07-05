@@ -24,6 +24,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+function currentMonthParam(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+
 
 
 import { Button } from "@/components/ui/button";
@@ -158,7 +164,7 @@ function AccountsPage() {
               variant="ghost"
               className="h-9 gap-2 rounded-full border border-white/10 bg-white/[0.04] text-foreground/70 hover:bg-white/10"
             >
-              <Link to="/dashboard">
+              <Link to="/dashboard" search={{ month: currentMonthParam() }}>
                 <ArrowLeft className="size-4" /> Dashboard
               </Link>
             </Button>

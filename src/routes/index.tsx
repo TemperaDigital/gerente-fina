@@ -8,12 +8,17 @@ import { Eye, EyeOff, Sparkles, ShieldCheck, Zap, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
 
+function currentMonthParam(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 export const Route = createFileRoute("/")({
   ssr: false,
   beforeLoad: async () => {
     const { data } = await supabase.auth.getSession();
     if (data.session) {
-      throw redirect({ to: "/dashboard" });
+      throw redirect({ to: "/dashboard", search: { month: currentMonthParam() } });
     }
   },
   component: WelcomeComponent,
@@ -36,7 +41,7 @@ function WelcomeComponent() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         toast.success("Bem-vindo de volta!");
-        navigate({ to: "/dashboard" });
+        navigate({ to: "/dashboard", search: { month: currentMonthParam() } });
       } else {
         const { error } = await supabase.auth.signUp({
           email,
