@@ -745,6 +745,70 @@ export const createTransactionEntry = createServerFn({ method: "POST" })
   });
 
 // ---------------------------------------------------------------------------
+// getTransactionDeleteImpact — Missão 12: avisa ANTES de excluir se o
+// lançamento pertence a um parcelamento de cartão (installment_items.
+// transaction_id). Empréstimos/financiamentos/consórcios (tabela `loans`)
+// não têm NENHUM vínculo com `transactions` no schema atual — não têm
+// coluna loan_id nem reaproveitam recurrence_id, e não há função de
+// criação/pagamento para loans no app hoje (só listagem) — por isso não
+// entram nesta checagem, não há o que avisar.
+// ---------------------------------------------------------------------------
+export interface TransactionDeleteImpactDTO {
+  linked_installment: {
+    purchase_id: string;
+    purchase_description: string;
+    installment_number: number;
+    installments_count: number;
+    /** Quantas parcelas dessa compra ainda têm transaction_id (antes desta exclusão). */
+    paid_count: number;
+    /** true se esta é a ÚLTIMA parcela ainda vinculada — excluir zera o parcelamento inteiro. */
+    is_last_paid: boolean;
+  } | null;
+}
+
+export const getTransactionDeleteImpact = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }): Promise<TransactionDeleteImpactDTO> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+
+    const { data: item, error } = await sb
+      .from("installment_items")
+      .select(
+        "purchase_id, installment_number, installment_purchases:purchase_id ( description, installments_count )",
+      )
+      .eq("transaction_id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!item) return { linked_installment: null };
+
+    const typed = item as unknown as {
+      purchase_id: string;
+      installment_number: number;
+      installment_purchases?: { description?: string | null; installments_count?: number } | null;
+    };
+
+    const { count, error: countErr } = await sb
+      .from("installment_items")
+      .select("id", { count: "exact", head: true })
+      .eq("purchase_id", typed.purchase_id)
+      .not("transaction_id", "is", null);
+    if (countErr) throw new Error(countErr.message);
+
+    const paidCount = count ?? 0;
+    return {
+      linked_installment: {
+        purchase_id: typed.purchase_id,
+        purchase_description: typed.installment_purchases?.description ?? "",
+        installment_number: typed.installment_number,
+        installments_count: typed.installment_purchases?.installments_count ?? 0,
+        paid_count: paidCount,
+        is_last_paid: paidCount <= 1,
+      },
+    };
+  });
+
+// ---------------------------------------------------------------------------
 // discardTransaction — usado pela fila de conciliação
 // ---------------------------------------------------------------------------
 export const discardTransaction = createServerFn({ method: "POST" })
