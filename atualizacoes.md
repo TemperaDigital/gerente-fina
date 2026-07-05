@@ -692,4 +692,34 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Verificação:** `npx tsc --noEmit` limpo · `npm test` 73/73 · eslint sem erros reais.
 
+**Status:** enviado ao GitHub (`git push`).
+
+---
+
+## 24. Seleção múltipla e exclusão em lote na tela de Lançamentos
+
+- Cada linha ganhou um checkbox de seleção; barra de "Selecionar todos" (a
+  seleção é relativa à página atual — reseta ao trocar de página, para não
+  arrastar uma seleção de itens que não estão mais visíveis) aparece acima
+  da lista, com botão "Excluir selecionados" quando há pelo menos 1 item
+  marcado.
+- Confirmação via `AlertDialog` avisa que parcelas de cartão porventura
+  incluídas no lote voltam a "não paga" (mesmo comportamento já
+  estabelecido na exclusão individual da Missão 12) — o parcelamento em si
+  não é excluído.
+- Nova server function `bulkDiscardTransactions`: um único
+  `DELETE ... WHERE id IN (...)` em vez de N chamadas separadas.
+- Seleção é opcional via prop `onBulkDelete` em `TransactionsTable` — sem
+  essa prop (outros usos do componente, como o drill-down de `/accounts` e
+  `/credit-cards` via `AccountLedgerSheet`), nenhuma checkbox aparece.
+
+**Arquivos alterados:**
+- `src/services/transactions.functions.ts`
+- `src/components/transactions/list-ui.tsx`
+- `src/routes/_app.transactions.index.tsx`
+
+**Commit:** `dfbfad0`.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 73/73 · eslint sem erros reais.
+
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
