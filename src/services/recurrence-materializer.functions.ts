@@ -14,11 +14,25 @@
  * "Meses atrasados": se o usuário não abre o app por semanas, uma recorrência
  * mensal pode ter várias ocorrências pendentes. occurrencesUntil() gera todas
  * de uma vez, até o limite de 36 (proteção contra configuração inválida).
+ *
+ * DISTINÇÃO POR TIPO DE CONTA (Missão 7): contas bank/cash NUNCA são
+ * materializadas automaticamente aqui — a contabilidade dessas contas precisa
+ * refletir a conciliação bancária real (o valor pago pode diferir do
+ * esperado, ex: conta de luz variável), então o sistema não pode presumir que
+ * o pagamento aconteceu antes do usuário confirmar contra o extrato de
+ * verdade. Elas ficam como lembrete (lidas por listScheduledItems, em
+ * scheduled-items.functions.ts) até o usuário confirmar manualmente via
+ * confirmScheduledItem. Contas credit_card mantêm o comportamento automático
+ * de sempre — a cobrança no cartão acontece independente de ação do usuário.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
-import { computeNextRun, occurrencesUntil, type RecurrenceLike } from "@/lib/finance/recurrence-schedule";
+import {
+  computeNextRun,
+  occurrencesUntil,
+  type RecurrenceLike,
+} from "@/lib/finance/recurrence-schedule";
 
 interface RecurrenceRow {
   id: string;
@@ -33,6 +47,7 @@ interface RecurrenceRow {
   day_of_month: number | null;
   end_on: string | null;
   next_run_on: string;
+  accounts?: { type: "cash" | "bank" | "credit_card" } | null;
 }
 
 export interface MaterializeResultDTO {
@@ -47,7 +62,10 @@ const UNIQUE_VIOLATION = "23505";
 const Input = z
   .object({
     /** Materializa tudo até esta data (inclusive). Default: hoje. */
-    until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    until: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
   })
   .optional();
 
@@ -63,7 +81,7 @@ export const materializeDueRecurrences = createServerFn({ method: "POST" })
     const { data: recurrences, error } = await sb
       .from("recurrences")
       .select(
-        "id, account_id, category_id, kind, type, amount, description, frequency, interval_count, day_of_month, end_on, next_run_on",
+        "id, account_id, category_id, kind, type, amount, description, frequency, interval_count, day_of_month, end_on, next_run_on, accounts:account_id ( type )",
       )
       .eq("user_id", userId)
       .eq("active", true)
@@ -71,7 +89,12 @@ export const materializeDueRecurrences = createServerFn({ method: "POST" })
 
     if (error) throw new Error(error.message);
     if (!recurrences?.length) {
-      return { created: 0, skipped_already_materialized: 0, recurrences_advanced: 0, recurrences_deactivated: 0 };
+      return {
+        created: 0,
+        skipped_already_materialized: 0,
+        recurrences_advanced: 0,
+        recurrences_deactivated: 0,
+      };
     }
 
     let created = 0;
@@ -79,7 +102,12 @@ export const materializeDueRecurrences = createServerFn({ method: "POST" })
     let advanced = 0;
     let deactivated = 0;
 
-    for (const rec of recurrences as RecurrenceRow[]) {
+    for (const rec of recurrences as unknown as RecurrenceRow[]) {
+      // Bank/cash: NUNCA materializa sozinho — fica só como lembrete até o
+      // usuário confirmar manualmente (confirmScheduledItem). Só credit_card
+      // segue o comportamento automático de sempre.
+      if (rec.accounts?.type !== "credit_card") continue;
+
       const recLike: RecurrenceLike = {
         frequency: rec.frequency,
         interval_count: rec.interval_count,
@@ -112,7 +140,10 @@ export const materializeDueRecurrences = createServerFn({ method: "POST" })
           }
           // Erro genuíno (FK inválida, categoria arquivada, etc): não trava as
           // demais recorrências, mas registra e para de avançar ESTA aqui.
-          console.error(`Falha ao materializar recorrência ${rec.id} em ${occurredOn}:`, insertError.message);
+          console.error(
+            `Falha ao materializar recorrência ${rec.id} em ${occurredOn}:`,
+            insertError.message,
+          );
           break;
         }
 
@@ -121,6 +152,20 @@ export const materializeDueRecurrences = createServerFn({ method: "POST" })
       }
 
       if (!lastProcessedDate) continue;
+
+      // 'once' nunca tem próxima ocorrência — desativa direto, sem chamar
+      // computeNextRun (que lança erro de propósito para esse caso).
+      if (recLike.frequency === "once") {
+        const { error: updateError } = await sb
+          .from("recurrences")
+          .update({ active: false })
+          .eq("id", rec.id);
+        if (!updateError) {
+          advanced++;
+          deactivated++;
+        }
+        continue;
+      }
 
       // Avança next_run_on para depois da última data processada com sucesso
       const newNextRun = computeNextRun(lastProcessedDate, recLike);
