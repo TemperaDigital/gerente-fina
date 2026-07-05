@@ -12,7 +12,10 @@
       "Bash(sed -n '/TABELA: installment_items/,/TABELA: loans/p' docs/migrations/0003_recurrences_invoices_installments_loans.sql)",
       "Bash(npm test *)",
       "Bash(npx eslint *)",
-      "Bash(grep -rn '\\\\.from\\(\"categories\"\\)\\\\s*$\\\\|\\\\.from\\(\"categories\"\\)\\\\.insert\\\\|from\\(\"categories\"\\)' /home/td-fguerra/Documentos/GitHub/gerente-fina/src --include=\"*.ts\" --include=\"*.tsx\" -A1)"
+      "Bash(grep -rn '\\\\.from\\(\"categories\"\\)\\\\s*$\\\\|\\\\.from\\(\"categories\"\\)\\\\.insert\\\\|from\\(\"categories\"\\)' /home/td-fguerra/Documentos/GitHub/gerente-fina/src --include=\"*.ts\" --include=\"*.tsx\" -A1)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3)",
+      "Bash(echo \"grep exit: $?\")"
     ]
   }
 }
