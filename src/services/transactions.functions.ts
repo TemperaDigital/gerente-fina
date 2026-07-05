@@ -871,6 +871,30 @@ export const discardTransaction = createServerFn({ method: "POST" })
   });
 
 // ---------------------------------------------------------------------------
+// bulkDiscardTransactions — exclusão em lote a partir da seleção múltipla na
+// tela de Lançamentos. Um único DELETE ... WHERE id IN (...) em vez de N
+// chamadas separadas. Parcelas de installment_purchases porventura incluídas
+// no lote simplesmente voltam a "não paga" (installment_items.transaction_id
+// é ON DELETE SET NULL) — mesmo comportamento já estabelecido para a
+// exclusão individual (Missão 12), sem checagem de impacto por item aqui
+// (a tela avisa isso de forma genérica na confirmação, sem bloquear o lote).
+// ---------------------------------------------------------------------------
+export const bulkDiscardTransactions = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z.object({ ids: z.array(z.string().uuid()).min(1).max(500) }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+    const { error, count } = await sb
+      .from("transactions")
+      .delete({ count: "exact" })
+      .in("id", data.ids);
+    if (error) throw new Error(error.message);
+    return { deleted_count: count ?? data.ids.length };
+  });
+
+// ---------------------------------------------------------------------------
 // mergeDuplicateTransactions — fluxo "Mesclar" da fila de conciliação
 //
 // `keep_id` permanece e ABSORVE `dedup_hash`, `source` e `external_id` do
