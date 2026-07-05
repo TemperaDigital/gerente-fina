@@ -22,7 +22,8 @@
       "Bash(timeout 60 npx vite build --mode development)",
       "Bash(grep -n \"'/accounts': typeof AppAccountsRoute$\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routeTree.gen.ts)",
       "Bash(grep -n \"'/_app/accounts': typeof AppAccountsRoute$\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routeTree.gen.ts)",
-      "Bash(grep -n \"Widget de faturas abertas\\\\|</GlassCard>\\\\|\\)}$\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/_app.dashboard.tsx)"
+      "Bash(grep -n \"Widget de faturas abertas\\\\|</GlassCard>\\\\|\\)}$\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/_app.dashboard.tsx)",
+      "Bash(git merge *)"
     ]
   }
 }
