@@ -1,102 +1,37 @@
+## Diagnóstico do estado atual
 
-# Virada de Produção — Gerente FINA
+### ✅ Rotas — saudáveis
+`src/routeTree.gen.ts` contém as 18 entradas esperadas, incluindo `/agendamentos` (13 ocorrências no arquivo gerado: `AppAgendamentosRoute` + `AppAgendamentosRouteImport`, registradas em `FileRoutesByFullPath`, `FileRoutesByTo`, `FileRoutesById`, `FileRouteTypes.fullPaths/to/id`, `FileRoutesByPath`, `AppRouteChildren`). Todos os 17 arquivos `.tsx` em `src/routes/` estão mapeados 1:1.
 
-Ciclo único com typecheck limpo e `vite build` verde. Remove o usuário semente (`primopobre@gmail.com`) e liga o sistema à sessão real do Supabase Auth.
+### ✅ Build de produção — passa
+`bun run build` conclui com sucesso (`✓ built in 1.47s`), Nitro gera `dist/server/wrangler.json`, `.wrangler/deploy/config.json` e `dist/client/_headers`. Deploy no Cloudflare Workers está apto.
 
----
+### ❌ Typecheck (`tsgo --noEmit`) — 10 erros
+Violação da Cláusula Pétrea #2 do AGENTS.md ("100% limpa antes de commit"). Todos os erros são do mesmo tema: a rota `/dashboard` passou a exigir um parâmetro de busca (`search`) e vários call-sites de `<Link to="/dashboard">` / `navigate({ to: "/dashboard" })` / `redirect({ to: "/dashboard" })` não estão passando `search`.
 
-## 1. Autenticação Real e Proteção de Rotas
+Arquivos e linhas afetados:
+- `src/components/app-shell.tsx:56, 105` — `<Link to="/dashboard">` sem `search`.
+- `src/routes/_app.accounts.tsx:161` — idem.
+- `src/routes/_app.credit-cards.tsx:154` — idem.
+- `src/routes/index.tsx:16, 39` — `redirect`/`navigate` para `/dashboard` sem `search`.
+- `src/routes/_app.dashboard.tsx:159` — `from: "/_app/dashboard"` deve ser `"/dashboard"`.
+- `src/routes/_app.dashboard.tsx:209, 259` — updater passando `{ month }` isolado (schema exige `search` completo).
+- `src/routes/_app.dashboard.tsx:369` — `<Link to="/transactions">` com `{ month }` mas faltando `page` (obrigatório).
 
-### 1.1 Substituir `resolveActiveUserId`
-- Reescrever `src/lib/supabase/resolve-user.ts` para:
-  - Ler o cookie `sb-<project>-auth-token` via `getCookie` do `@tanstack/react-start/server`.
-  - Validar o token com `supabaseAdmin.auth.getUser(token)` (não confia no client).
-  - Retornar `user.id`. Se ausente ou inválido, `throw new Error("UNAUTHENTICATED")`.
-  - Remover totalmente o fallback do seed `primopobre@gmail.com` e o `createSeedUser`.
-- Todas as server functions que já usam `resolveActiveUserId()` continuam funcionando — apenas passam a exigir sessão.
+Nenhum erro toca lógica de negócio; são só assinaturas de navegação desatualizadas em relação ao search-schema atual das rotas `/dashboard` e `/transactions`.
 
-### 1.2 Cliente Supabase no browser
-- Ajustar `src/lib/supabase/client.ts` para persistir sessão em `localStorage` **e** espelhar em cookie (`sb-<ref>-auth-token`) para que o SSR leia — usar `storage: cookieStorage` via helper local ou registrar `onAuthStateChange` que sincroniza `document.cookie`.
+## Plano (somente ajustes de tipagem/navegação, zero lógica)
 
-### 1.3 Rotas de auth (Shadcn/UI, pt-BR)
-- Criar:
-  - `src/routes/login.tsx` — email + senha, botão "Entrar", link p/ cadastro e "Esqueci a senha".
-  - `src/routes/signup.tsx` — email + senha + confirmação. `emailRedirectTo: window.location.origin`.
-  - `src/routes/forgot-password.tsx` — `resetPasswordForEmail` com `redirectTo: origin + /reset-password`.
-  - `src/routes/reset-password.tsx` — detecta `type=recovery`, chama `updateUser({ password })`.
-- Todas rotas públicas (fora de proteção), com `head()` próprio em pt-BR.
+1. **Ler** os search-schemas de `_app.dashboard.tsx` e `_app.transactions.index.tsx` para descobrir o shape/default exato exigido (`month`, `page`, etc.).
+2. **`src/routes/index.tsx`** — adicionar `search: { month: <default>, ... }` no `redirect` e no `navigate` para `/dashboard`.
+3. **`src/components/app-shell.tsx`** (linhas 56 e 105) — passar `search={{ ... }}` no `<Link to="/dashboard">` ou usar `search={(prev) => prev}` se quisermos preservar o atual.
+4. **`src/routes/_app.accounts.tsx:161`** e **`_app.credit-cards.tsx:154`** — mesma correção do item 3.
+5. **`src/routes/_app.dashboard.tsx`**:
+   - linha 159: trocar `from: "/_app/dashboard"` por `from: "/dashboard"`.
+   - linhas 209 e 259: usar updater funcional `search: (prev) => ({ ...prev, month: novo })` para satisfazer o schema completo.
+   - linha 369: no `<Link to="/transactions">`, incluir `page: 1` junto de `month`.
+6. **Revalidar**: rodar `bunx tsgo --noEmit` (deve ficar 0 erros) e `bun run build` (deve continuar passando).
 
-### 1.4 Guarda global
-- Criar layout pathless `src/routes/_app.tsx` com `beforeLoad` que chama `supabase.auth.getSession()`; se ausente → `redirect({ to: "/login" })`. `ssr: false`.
-- Mover as rotas internas (`dashboard`, `transactions*`, `accounts`, `credit-cards`, `categories`, `installments`, `budgets`, `forecast`, `settings`, `chat`, `import`, `open-finance`) para nomes prefixados `_app.<rota>.tsx` (renomear arquivos preservando conteúdo).
-- Rota `/` (index) permanece pública e redireciona para `/dashboard` quando logado, `/login` quando não.
-
-### 1.5 Onboarding blank-state
-- Novo componente `src/components/onboarding/first-account-modal.tsx` (Shadcn `Dialog`).
-- No `_app.tsx` (após auth), disparar `useQuery` que checa `accounts.count` + `categories.count`. Se ambos 0, abrir modal convidando a cadastrar a primeira conta (link para `/accounts`).
-
----
-
-## 2. Refinamento do `/forecast`
-
-### 2.1 Controles de Horizonte
-- Adicionar `ToggleGroup` (Shadcn) com opções 30/60/90 dias no cabeçalho. Estado local `horizon`, invalidar `queryKey: ["forecast", horizon]`.
-- `getForecast({ data: { days } })` já aceita param — apenas passar dinamicamente.
-
-### 2.2 Estados da tela
-- Loading: skeleton de KPIs + gráfico (usar `Skeleton` do Shadcn), enquanto `isFetching`.
-- Empty state: se `result.points.length === 0` **ou** `Number(result.avg_daily_expense) === 0` com <30 dias de histórico → card "Histórico insuficiente" (mín. 30 dias de despesas para calcular média móvel).
-- Sinalizar no backend: adicionar campo `has_sufficient_history: boolean` em `ForecastResultDTO` (true se >=30 dias com transações debit).
-
----
-
-## 3. Blindagem do Restore + Auditoria Durável
-
-### 3.1 Migration nova
-- `docs/migrations/0007_audit_log.sql`:
-  ```sql
-  CREATE TABLE public.audit_log (
-    id uuid primary key default gen_random_uuid(),
-    user_id uuid references auth.users(id) on delete cascade not null,
-    action text not null,           -- 'backup.export' | 'backup.restore' | 'backup.restore.failed'
-    payload jsonb not null default '{}',
-    created_at timestamptz not null default now()
-  );
-  GRANT SELECT, INSERT ON public.audit_log TO authenticated;
-  GRANT ALL ON public.audit_log TO service_role;
-  ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
-  CREATE POLICY "own audit" ON public.audit_log FOR SELECT TO authenticated USING (user_id = auth.uid());
-  CREATE POLICY "insert own audit" ON public.audit_log FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
-  ```
-
-### 3.2 Validação Zod financeira ultra estrita
-- Em `backup.functions.ts`:
-  - Criar `MoneySchema` = `z.string().regex(/^-?\d{1,12}(\.\d{1,2})?$/)` (compatível `numeric(14,2)`).
-  - `TransactionSchema.amount` = `MoneySchema` (aceita string OR number, transformando number com `.toFixed(2)`).
-  - `AccountSchema.credit_limit` = mesma regra, nullable.
-  - Validar totais: rejeitar payloads com `transactions.length > 50000`.
-
-### 3.3 Persistência de auditoria
-- Substituir `console.info("[AUDIT] ...")` por `supabaseAdmin.from("audit_log").insert({ user_id, action, payload })`.
-- Envolver `restoreBackup` em try/catch: em falha, gravar `backup.restore.failed` com `error.message` no payload e re-lançar.
-
-### 3.4 UI de progresso no Restore
-- Em `src/routes/settings.tsx`:
-  - Estado local `restoreState: 'idle' | 'reading' | 'validating' | 'uploading' | 'done' | 'error'`.
-  - Renderizar `<Progress>` (Shadcn) + label textual durante etapas.
-  - Ao concluir, exibir toast Sonner com contagens (`accounts_upserted`, etc.).
-
----
-
-## Técnico
-
-- **Renomeações**: usar `mv` para prefixar rotas internas com `_app.`. Regenerar `routeTree.gen.ts` automaticamente pelo plugin Vite.
-- **Cookie SSR**: chave = `sb-${SUPABASE_PROJECT_ID}-auth-token`. Ler `SUPABASE_PROJECT_ID` de env (já disponível).
-- **Sem seed**: remover `SEED_EMAIL`, `SEED_PASSWORD`, `createSeedUser`, `cachedUserId`.
-- **Type-safety**: manter `resolveActiveUserId(): Promise<string>` — quem chama já espera string, e o throw propaga.
-- **Compat numeric(14,2)**: `MoneySchema` garante formato exato antes do upsert.
-- **Build**: `bun run build` deve terminar em exit 0. `tsgo --noEmit` limpo.
-
----
-
-Confirma para eu executar? É um ciclo grande (≈15 arquivos criados/editados + 1 migration SQL para você aplicar no Supabase).
+## Observações
+- Build/deploy não estão bloqueados hoje (Vite/Nitro ignoram erros de tipo), mas o gate de qualidade do projeto sim.
+- Nada em `services/*`, migrations, RLS, ou motores de invoice/parcelamento será tocado.
