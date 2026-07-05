@@ -158,7 +158,7 @@ function AccountsPage() {
               variant="ghost"
               className="h-9 gap-2 rounded-full border border-white/10 bg-white/[0.04] text-foreground/70 hover:bg-white/10"
             >
-              <Link to="/dashboard">
+              <Link to="/dashboard" search={{ month: currentMonthParam() }}>
                 <ArrowLeft className="size-4" /> Dashboard
               </Link>
             </Button>

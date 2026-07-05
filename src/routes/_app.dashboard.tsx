@@ -156,7 +156,7 @@ const BRL = (value: string | number | null | undefined) =>
 // ---------------------------------------------------------------------------
 function DashboardPage() {
   const { month } = Route.useSearch();
-  const navigate = useNavigate({ from: "/_app/dashboard" });
+  const navigate = useNavigate({ from: "/dashboard" });
   const queryClient = useQueryClient();
 
   const { data: summary } = useSuspenseQuery(summaryQuery(month));
@@ -366,7 +366,7 @@ function DashboardPage() {
                   Despesas por categoria — {monthLabel(month)}
                 </h2>
               </div>
-              <Link to="/transactions" search={{ month }}>
+              <Link to="/transactions" search={{ month, page: 1 }}>
                 <Button variant="ghost" size="sm" className="text-xs text-primary gap-1 px-2">
                   Detalhar <ArrowRight className="size-3" />
                 </Button>
