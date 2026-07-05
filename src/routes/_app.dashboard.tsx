@@ -278,7 +278,7 @@ function DashboardPage() {
             O donut de categorias e o gráfico de fluxo de caixa continuam em
             regime de competência de propósito — servem para "onde o dinheiro
             foi categorizado", não para "quanto saiu da conta". */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-3">
           <GlassCard className="border border-white/10 bg-zinc-900/40 p-5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-foreground/50 uppercase tracking-wide">
@@ -327,56 +327,99 @@ function DashboardPage() {
             </p>
             <p className="mt-1 text-xs text-foreground/30">Receitas − Despesas (caixa)</p>
           </GlassCard>
+        </div>
 
-          <GlassCard
-            className={`border p-5 ${
-              isNegative(cashBasis.available_for_variable)
-                ? "border-red-500/50 bg-red-500/10 ring-1 ring-red-500/40"
-                : "border-white/10 bg-zinc-900/40"
-            }`}
-            title={cashBasis.caveats.join(" ")}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-foreground/50 uppercase tracking-wide">
-                Disponível p/ Variáveis
-              </span>
+        {/* "Saldo do Mês" — composição visível dos 5 componentes, não só o
+            número final (correção final da Missão 16). */}
+        <GlassCard
+          className={`border p-5 sm:p-6 ${
+            isNegative(cashBasis.monthly_balance)
+              ? "border-red-500/50 bg-red-500/10 ring-1 ring-red-500/40"
+              : "border-white/10 bg-zinc-900/40"
+          }`}
+          title={cashBasis.caveats.join(" ")}
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
               <div
                 className={`rounded-full p-1.5 ${
-                  isNegative(cashBasis.available_for_variable)
+                  isNegative(cashBasis.monthly_balance)
                     ? "bg-red-500/20 text-red-400"
                     : "bg-violet-500/10 text-violet-400"
                 }`}
               >
-                {isNegative(cashBasis.available_for_variable) ? (
+                {isNegative(cashBasis.monthly_balance) ? (
                   <AlertTriangle className="size-4" />
                 ) : (
                   <Wallet className="size-4" />
                 )}
               </div>
+              <h2 className="text-sm font-semibold text-foreground/80">Saldo do Mês</h2>
             </div>
             <p
-              className={`mt-3 font-mono text-2xl font-bold tracking-tight ${
-                isNegative(cashBasis.available_for_variable) ? "text-red-400" : "text-foreground/90"
+              className={`font-mono text-2xl font-bold tracking-tight ${
+                isNegative(cashBasis.monthly_balance) ? "text-red-400" : "text-foreground/90"
               }`}
             >
-              {BRL(cashBasis.available_for_variable)}
+              {BRL(cashBasis.monthly_balance)}
             </p>
-            <p
-              className={`mt-1 text-xs ${
-                isNegative(cashBasis.available_for_variable)
-                  ? "font-medium text-red-400/90"
-                  : "text-foreground/30"
-              }`}
-            >
-              {isNegative(cashBasis.available_for_variable)
-                ? "Compromissos já superam a renda do período"
-                : "Após despesas fixas, parcelas e agendamentos"}
-            </p>
-          </GlassCard>
-        </div>
+          </div>
+
+          <div className="grid gap-2 text-sm sm:grid-cols-5">
+            <div className="rounded-lg bg-white/[0.03] p-3">
+              <p className="text-[10px] uppercase tracking-wide text-foreground/40">Receitas</p>
+              <p className="mt-1 font-mono font-semibold text-emerald-300">
+                +{BRL(cashBasis.income_cash)}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3">
+              <p className="text-[10px] uppercase tracking-wide text-foreground/40">Custo Fixo</p>
+              <p className="mt-1 font-mono font-semibold text-rose-300">
+                −{BRL(cashBasis.fixed_expense_cash)}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3">
+              <p className="text-[10px] uppercase tracking-wide text-foreground/40">
+                Custo Variável
+              </p>
+              <p className="mt-1 font-mono font-semibold text-rose-300">
+                −{BRL(cashBasis.variable_expense_cash)}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3">
+              <p className="text-[10px] uppercase tracking-wide text-foreground/40">
+                Fatura de Cartões (paga)
+              </p>
+              <p className="mt-1 font-mono font-semibold text-rose-300">
+                −{BRL(cashBasis.invoice_payment_cash)}
+              </p>
+            </div>
+            <div className="rounded-lg bg-white/[0.03] p-3">
+              <p className="text-[10px] uppercase tracking-wide text-foreground/40">
+                Agendamentos Pendentes
+              </p>
+              <p className="mt-1 font-mono font-semibold text-rose-300">
+                −{BRL(cashBasis.scheduled_pending_cash)}
+              </p>
+            </div>
+          </div>
+
+          <p
+            className={`mt-3 text-xs ${
+              isNegative(cashBasis.monthly_balance)
+                ? "font-medium text-red-400/90"
+                : "text-foreground/30"
+            }`}
+          >
+            {isNegative(cashBasis.monthly_balance)
+              ? "Compromissos já superam a renda do período."
+              : "Receitas menos custos fixos, variáveis, fatura de cartão paga e agendamentos pendentes."}
+          </p>
+        </GlassCard>
         <p className="text-[11px] text-foreground/30">
-          * Disponível p/ Variáveis não inclui parcelas de empréstimos, financiamentos ou
-          consórcios — sem vínculo confiável com lançamentos no schema atual.
+          * Saldo do Mês não inclui parcelas de cartão (só conta quando a fatura é paga) nem
+          parcelas de empréstimos, financiamentos ou consórcios — sem vínculo confiável com
+          lançamentos no schema atual.
         </p>
 
         {/* Gráficos: barras (histórico) + donut (mês atual) */}

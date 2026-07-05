@@ -786,4 +786,62 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Verificação:** `npx tsc --noEmit` limpo · `npm test` 73/73 · eslint sem erros reais (fora do ruído pré-existente de CRLF/prettier no resto do repo).
 
-**Status:** não commitado ainda (aguardando confirmação do usuário).
+**Status:** commitado (`e7657b6`, direto na branch `main` por outra sessão/ferramenta — trazido para este branch via fast-forward antes da correção abaixo).
+
+---
+
+## 26. Correção final — card "Saldo do Mês" (substitui a Missão 25/"Disponível para Variáveis")
+
+- **Achado de infraestrutura antes de codar:** a Missão 25 acima (commit
+  `e7657b6`) havia sido feita diretamente na branch `main`, fora deste
+  branch de trabalho (`feat/clean-link-routes`) — provavelmente por outra
+  sessão/ferramenta rodando em paralelo. Confirmado via `git fetch` que não
+  havia divergência real (meu branch é ancestral direto de `main`, só
+  faltava esse 1 commit) — trouxe com `git merge origin/main --ff-only`
+  (fast-forward puro, sem conflito) antes de aplicar a correção.
+- Card renomeado para **"Saldo do Mês"**, com fórmula substituída por
+  completo: Receitas − Custo Fixo − Custo Variável − Fatura de Cartões
+  (paga) − Agendamentos pendentes do período — todos em regime de caixa
+  (`account.type IN ('bank','cash')`).
+- **Removida por completo** a inclusão de parcelas de `installment_purchases`
+  (de qualquer vencimento) do cálculo — parcela de cartão só afeta a conta
+  corrente quando a fatura é paga (já capturado em "Fatura de Cartões
+  paga"); contá-la também duplicaria/anteciparia a despesa.
+- Nova conta explícita "Fatura de Cartões (paga)" (perna débito de
+  `invoice_payment` em bank/cash), antes só embutida dentro de "Despesas
+  (caixa)" sem aparecer separadamente.
+- Empréstimos/financiamentos/consórcios continuam de fora (mesmo achado da
+  Missão 12 — `loans` não tem vínculo com `transactions`), documentado nos
+  `caveats`.
+- Categorias com `nature` nula (legado anterior à migration 0012, sem
+  backfill) entram em "Custo Variável" por padrão — garante que Custo Fixo
+  + Custo Variável + Fatura paga somem exatamente "Despesas (caixa)" (item
+  de composição pedido pelo usuário), por construção do código, não por
+  coincidência.
+- Aritmética extraída para função pura `computeMonthlyBalance`
+  (`src/lib/finance/cash-basis.ts`) e testada: propriedade de sanidade
+  (agendamentos pendentes nunca tornam o saldo mais otimista, já que
+  `amount > 0` é constraint da tabela `recurrences`) e casos de
+  regressão/composição.
+- Card redesenhado no Dashboard: 5 componentes visíveis lado a lado + saldo
+  final em destaque (vermelho quando negativo). KPIs de Receitas/Despesas/
+  Resultado voltaram a um grid de 3 colunas (o card de saldo agora é largo,
+  abaixo deles, com espaço para a composição).
+- **Não foi possível validar contra dados reais do Supabase neste ambiente**
+  (sem `service_role` configurada) — recomendo o mesmo teste manual já
+  sinalizado na Missão 25: escolher um mês onde as despesas de fato
+  superaram as receitas e confirmar que "Saldo do Mês" aparece negativo.
+
+**Arquivos criados:**
+- `src/lib/finance/cash-basis.ts`
+- `src/lib/finance/cash-basis.test.ts`
+
+**Arquivos alterados:**
+- `src/services/dashboard.functions.ts`
+- `src/routes/_app.dashboard.tsx`
+
+**Commit:** `2dd0e9c`.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 77/77 · eslint sem erros reais.
+
+**Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).

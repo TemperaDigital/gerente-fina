@@ -11,6 +11,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { addAmounts, toCents, fromCents } from "@/lib/finance/money";
+import { computeMonthlyBalance } from "@/lib/finance/cash-basis";
 
 // -----------------------------------------------------------------------------
 // Tipos públicos (DTOs)
@@ -104,7 +105,8 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
   });
 
 // -----------------------------------------------------------------------------
-// getCashBasisSummary — KPIs do topo do Dashboard em REGIME DE CAIXA (Missão 16)
+// getCashBasisSummary — KPIs do topo do Dashboard em REGIME DE CAIXA (Missão 16,
+// card "Saldo do Mês" corrigido em definitivo na correção final)
 //
 // Diferente de getDashboardSummary (regime de COMPETÊNCIA, via monthly_dre):
 // aqui só contamos dinheiro que de fato entrou/saiu de contas bank/cash no
@@ -112,14 +114,33 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
 // pagamento da fatura — por isso ela NÃO entra em "Despesas (caixa)" no mês
 // da compra, e o pagamento de fatura (perna débito em bank/cash) SIM entra.
 //
-// "Disponível para Variáveis" = Receitas (caixa) − Compromissos, onde
-// Compromissos = Despesas Fixas (caixa) + parcelas de cartão ainda não
-// postadas com vencimento no período + recorrências de despesa (bank/cash)
-// ainda não materializadas com vencimento no período. Empréstimos/financia-
-// mentos/consórcios (`loans`) ficam de fora: o schema não vincula `loans` a
-// `transactions` (mesmo achado da Missão 12), então não há como saber com
-// confiança quais parcelas vencem em cada mês — inventar uma aproximação
-// para dado financeiro é pior do que documentar a lacuna (ver `caveats`).
+// Atenção de nomenclatura: existe uma conta chamada "CAIXA" (Caixa Econômica
+// Federal, account.type='bank') — NUNCA inferir bank/cash pelo nome da
+// conta, sempre pelo campo account.type real (ver isCashAccount abaixo).
+//
+// Saldo do Mês = Receitas − Custo Fixo − Custo Variável − Fatura de Cartões
+// (paga) − Agendamentos pendentes do período. Todos em regime de caixa,
+// restritos a account.type IN ('bank','cash') no período selecionado.
+//
+// Ficam de fora DESTA fórmula, de propósito:
+//  - Parcelas de installment_purchases, de QUALQUER vencimento (presente ou
+//    futuro). Parcela de cartão é dívida de CARTÃO — só afeta a conta
+//    corrente quando a FATURA é paga, o que já está capturado no componente
+//    "Fatura de Cartões (paga)" acima. Contar a parcela aqui duplicaria/
+//    anteciparia essa despesa incorretamente.
+//  - Qualquer transaction vinculada a account.type='credit_card'.
+//  - Recorrências vinculadas a conta credit_card — essas continuam
+//    materializando automaticamente (Missão 7), fora desta conta.
+//  - Empréstimos/financiamentos/consórcios (`loans`): o schema não vincula
+//    `loans` a `transactions` (mesmo achado da Missão 12), então não há como
+//    saber com confiança o vencimento de cada parcela neste período —
+//    inventar uma aproximação é pior do que documentar a lacuna (`caveats`).
+//
+// Categorias de despesa com `nature` NULL (legado anterior à migration 0012,
+// que não fez backfill retroativo) entram em "Custo Variável" por padrão —
+// mesma convenção de default já usada na Missão 11 para categorias novas —
+// garantindo que Custo Fixo + Custo Variável + Fatura paga sempre somem
+// exatamente "Despesas (caixa)".
 // -----------------------------------------------------------------------------
 
 export interface CashBasisSummaryDTO {
@@ -128,17 +149,20 @@ export interface CashBasisSummaryDTO {
   expense_cash: string;
   net_cash: string;
   fixed_expense_cash: string;
-  installments_pending: string;
-  recurrences_pending: string;
-  committed_total: string;
-  available_for_variable: string;
+  variable_expense_cash: string;
+  invoice_payment_cash: string;
+  scheduled_pending_cash: string;
+  monthly_balance: string;
   caveats: string[];
 }
 
 function monthBounds(referenceMonth: string): { start: string; end: string } {
   const [y, m] = referenceMonth.split("-").map(Number);
   const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return { start: referenceMonth, end: `${referenceMonth.slice(0, 8)}${String(lastDay).padStart(2, "0")}` };
+  return {
+    start: referenceMonth,
+    end: `${referenceMonth.slice(0, 8)}${String(lastDay).padStart(2, "0")}`,
+  };
 }
 
 function isCashAccount(type: AccountType | null | undefined): boolean {
@@ -155,12 +179,10 @@ export const getCashBasisSummary = createServerFn({ method: "GET" })
     const referenceMonth = resolveReferenceMonth(data?.month);
     const { start, end } = monthBounds(referenceMonth);
 
-    // ---- Receitas / Despesas em regime de caixa ---------------------------
+    // ---- Receitas / Custo Fixo / Custo Variável / Fatura paga --------------
     const { data: txRows, error: txErr } = await sb
       .from("transactions")
-      .select(
-        "kind, type, amount, accounts:account_id ( type ), categories:category_id ( nature )",
-      )
+      .select("kind, type, amount, accounts:account_id ( type ), categories:category_id ( nature )")
       .eq("user_id", userId)
       .in("kind", ["income", "expense", "invoice_payment"])
       .gte("occurred_on", start)
@@ -168,8 +190,9 @@ export const getCashBasisSummary = createServerFn({ method: "GET" })
     if (txErr) throw new Error(txErr.message);
 
     let incomeCents = 0n;
-    let expenseCents = 0n;
     let fixedExpenseCents = 0n;
+    let variableExpenseCents = 0n;
+    let invoicePaymentCents = 0n;
 
     for (const r of (txRows ?? []) as unknown as Array<{
       kind: "income" | "expense" | "invoice_payment";
@@ -179,42 +202,27 @@ export const getCashBasisSummary = createServerFn({ method: "GET" })
       categories?: { nature?: "FIXA" | "VARIÁVEL" | null } | null;
     }>) {
       const accType = r.accounts?.type;
-      if (r.kind === "income" && isCashAccount(accType)) {
+      if (!isCashAccount(accType)) continue; // credit_card nunca entra nesta conta
+
+      if (r.kind === "income") {
         incomeCents += toCents(r.amount);
-      } else if (r.kind === "expense" && isCashAccount(accType)) {
+      } else if (r.kind === "expense") {
         const cents = toCents(r.amount);
-        expenseCents += cents;
         if (r.categories?.nature === "FIXA") fixedExpenseCents += cents;
-      } else if (r.kind === "invoice_payment" && r.type === "debit" && isCashAccount(accType)) {
+        else variableExpenseCents += cents; // VARIÁVEL ou nature nula (default)
+      } else if (r.kind === "invoice_payment" && r.type === "debit") {
         // Perna débito do pagamento de fatura — dinheiro saindo de bank/cash
         // de verdade (a perna crédito, no cartão, não conta — não é "caixa").
-        expenseCents += toCents(r.amount);
+        invoicePaymentCents += toCents(r.amount);
       }
     }
 
-    // ---- Compromissos (a): parcelas de cartão ainda não postadas ----------
-    // Mesma convenção já usada em getForecast: transaction_id nulo = parcela
-    // futura ainda não lançada no livro-caixa.
-    const { data: instRows, error: instErr } = await sb
-      .from("installment_items")
-      .select("amount")
-      .eq("user_id", userId)
-      .is("transaction_id", null)
-      .gte("due_date", start)
-      .lte("due_date", end);
-    if (instErr) throw new Error(instErr.message);
+    const expenseCents = fixedExpenseCents + variableExpenseCents + invoicePaymentCents;
 
-    let installmentsCents = 0n;
-    for (const r of (instRows ?? []) as Array<{ amount: string }>) {
-      installmentsCents += toCents(r.amount);
-    }
-
-    // ---- Compromissos (b): recorrências de despesa (bank/cash) ainda não
-    // materializadas — contas credit_card são auto-materializadas pelo motor
-    // (recurrence-materializer.functions.ts) e já viram transaction real
-    // quando vencem, então já estão cobertas (ou não, se no futuro) por essa
-    // mesma lógica de fatura; aqui só contamos o que ainda depende de
-    // confirmação manual do usuário (scheduled-items.functions.ts).
+    // ---- Agendamentos pendentes do período (só bank/cash, só despesa —
+    // recorrências de receita não entram: a fórmula só SUBTRAI compromissos.
+    // Contas credit_card são auto-materializadas pelo motor da Missão 7 e não
+    // entram aqui.) ------------------------------------------------------
     const { data: recRows, error: recErr } = await sb
       .from("recurrences")
       .select("amount, accounts:account_id ( type )")
@@ -225,16 +233,21 @@ export const getCashBasisSummary = createServerFn({ method: "GET" })
       .lte("next_run_on", end);
     if (recErr) throw new Error(recErr.message);
 
-    let recurrencesCents = 0n;
+    let scheduledCents = 0n;
     for (const r of (recRows ?? []) as unknown as Array<{
       amount: string;
       accounts?: { type?: AccountType } | null;
     }>) {
-      if (isCashAccount(r.accounts?.type)) recurrencesCents += toCents(r.amount);
+      if (isCashAccount(r.accounts?.type)) scheduledCents += toCents(r.amount);
     }
 
-    const committedCents = fixedExpenseCents + installmentsCents + recurrencesCents;
-    const availableCents = incomeCents - committedCents;
+    const monthlyBalanceCents = computeMonthlyBalance({
+      incomeCents,
+      fixedExpenseCents,
+      variableExpenseCents,
+      invoicePaymentCents,
+      scheduledPendingCents: scheduledCents,
+    });
 
     return {
       reference_month: referenceMonth,
@@ -242,12 +255,13 @@ export const getCashBasisSummary = createServerFn({ method: "GET" })
       expense_cash: fromCents(expenseCents),
       net_cash: fromCents(incomeCents - expenseCents),
       fixed_expense_cash: fromCents(fixedExpenseCents),
-      installments_pending: fromCents(installmentsCents),
-      recurrences_pending: fromCents(recurrencesCents),
-      committed_total: fromCents(committedCents),
-      available_for_variable: fromCents(availableCents),
+      variable_expense_cash: fromCents(variableExpenseCents),
+      invoice_payment_cash: fromCents(invoicePaymentCents),
+      scheduled_pending_cash: fromCents(scheduledCents),
+      monthly_balance: fromCents(monthlyBalanceCents),
       caveats: [
         "Não inclui parcelas de empréstimos, financiamentos ou consórcios (loans): o schema atual não vincula loans a transactions, então não é possível determinar com confiança o vencimento de cada parcela neste período.",
+        'Parcelas de cartão (installment_purchases) não entram nesta conta em nenhuma hipótese — seu impacto na conta corrente só acontece quando a fatura é paga, já capturado em "Fatura de Cartões (paga)".',
       ],
     };
   });
@@ -258,7 +272,7 @@ export const getCashBasisSummary = createServerFn({ method: "GET" })
 
 export interface MonthlyDreDTO {
   reference_month: string; // YYYY-MM-DD (primeiro dia do mês)
-  label: string;           // "Jan/25", "Fev/25", etc.
+  label: string; // "Jan/25", "Fev/25", etc.
   income: number;
   expense: number;
   net_result: number;
@@ -297,8 +311,10 @@ export const getMonthlyDreHistory = createServerFn({ method: "GET" })
       const match = (rows ?? []).find((r) => r.reference_month === key);
       result.push({
         reference_month: key,
-        label: d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" })
-               .replace(".", "").replace(" de ", "/"),
+        label: d
+          .toLocaleDateString("pt-BR", { month: "short", year: "2-digit" })
+          .replace(".", "")
+          .replace(" de ", "/"),
         income: Number(match?.income ?? 0),
         expense: Number(match?.expense ?? 0),
         net_result: Number(match?.net_result ?? 0),
@@ -306,7 +322,6 @@ export const getMonthlyDreHistory = createServerFn({ method: "GET" })
     }
     return result;
   });
-
 
 export interface OpenInvoiceDTO {
   invoice_id: string;
@@ -320,69 +335,68 @@ export interface OpenInvoiceDTO {
   past_closing: boolean;
 }
 
-export const getOpenCreditCardInvoices = createServerFn({ method: "GET" })
-  .handler(async () => {
-    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
-    const sb = getSupabaseAdmin();
+export const getOpenCreditCardInvoices = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+  const sb = getSupabaseAdmin();
 
-    const { data, error } = await sb
-      .from("credit_card_invoices")
-      .select(
-        `id, account_id, reference_month, closing_date, due_date,
+  const { data, error } = await sb
+    .from("credit_card_invoices")
+    .select(
+      `id, account_id, reference_month, closing_date, due_date,
          accounts:account_id ( name )`,
-      )
-      .eq("status", "open")
-      .order("due_date", { ascending: true });
+    )
+    .eq("status", "open")
+    .order("due_date", { ascending: true });
 
-    if (error) throw new Error(error.message);
+  if (error) throw new Error(error.message);
 
-    const invoiceIds = (data ?? []).map((r) => (r as { id: string }).id);
-    // Total real: soma de despesas atreladas à fatura menos pagamentos (perna credit).
-    const totals = new Map<string, number>();
-    if (invoiceIds.length > 0) {
-      const { data: expenseRows } = await sb
-        .from("transactions")
-        .select("invoice_id, amount")
-        .in("invoice_id", invoiceIds)
-        .eq("kind", "expense");
-      for (const r of (expenseRows ?? []) as Array<{ invoice_id: string; amount: string }>) {
-        totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + Number(r.amount));
-      }
-      const { data: paymentRows } = await sb
-        .from("transactions")
-        .select("paid_invoice_id, amount, type")
-        .in("paid_invoice_id", invoiceIds)
-        .eq("kind", "invoice_payment")
-        .eq("type", "credit");
-      for (const r of (paymentRows ?? []) as Array<{
-        paid_invoice_id: string;
-        amount: string;
-      }>) {
-        totals.set(r.paid_invoice_id, (totals.get(r.paid_invoice_id) ?? 0) - Number(r.amount));
-      }
+  const invoiceIds = (data ?? []).map((r) => (r as { id: string }).id);
+  // Total real: soma de despesas atreladas à fatura menos pagamentos (perna credit).
+  const totals = new Map<string, number>();
+  if (invoiceIds.length > 0) {
+    const { data: expenseRows } = await sb
+      .from("transactions")
+      .select("invoice_id, amount")
+      .in("invoice_id", invoiceIds)
+      .eq("kind", "expense");
+    for (const r of (expenseRows ?? []) as Array<{ invoice_id: string; amount: string }>) {
+      totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + Number(r.amount));
     }
+    const { data: paymentRows } = await sb
+      .from("transactions")
+      .select("paid_invoice_id, amount, type")
+      .in("paid_invoice_id", invoiceIds)
+      .eq("kind", "invoice_payment")
+      .eq("type", "credit");
+    for (const r of (paymentRows ?? []) as Array<{
+      paid_invoice_id: string;
+      amount: string;
+    }>) {
+      totals.set(r.paid_invoice_id, (totals.get(r.paid_invoice_id) ?? 0) - Number(r.amount));
+    }
+  }
 
-    const today = new Date().toISOString().slice(0, 10);
-    const items: OpenInvoiceDTO[] = (data ?? []).map((r) => {
-      const row = r as Record<string, unknown> & {
-        accounts?: { name?: string | null } | null;
-      };
-      const id = row.id as string;
-      const closing_date = row.closing_date as string;
-      const total = Math.max(0, totals.get(id) ?? 0);
-      return {
-        invoice_id: id,
-        account_id: row.account_id as string,
-        account_name: row.accounts?.name ?? "Cartão",
-        reference_month: row.reference_month as string,
-        closing_date,
-        due_date: row.due_date as string,
-        total_amount: total.toFixed(2),
-        past_closing: today > closing_date,
-      };
-    });
-    return items;
+  const today = new Date().toISOString().slice(0, 10);
+  const items: OpenInvoiceDTO[] = (data ?? []).map((r) => {
+    const row = r as Record<string, unknown> & {
+      accounts?: { name?: string | null } | null;
+    };
+    const id = row.id as string;
+    const closing_date = row.closing_date as string;
+    const total = Math.max(0, totals.get(id) ?? 0);
+    return {
+      invoice_id: id,
+      account_id: row.account_id as string,
+      account_name: row.accounts?.name ?? "Cartão",
+      reference_month: row.reference_month as string,
+      closing_date,
+      due_date: row.due_date as string,
+      total_amount: total.toFixed(2),
+      past_closing: today > closing_date,
+    };
   });
+  return items;
+});
 
 // -----------------------------------------------------------------------------
 // getCategoryBreakdown — donut "para onde foi meu dinheiro" no Dashboard
@@ -427,10 +441,7 @@ export const getCategoryBreakdown = createServerFn({ method: "GET" })
 
     // Enriquece com icon/color das categorias (uma query em lote)
     const catIds = rows.map((r) => r.category_id);
-    const { data: cats } = await sb
-      .from("categories")
-      .select("id, icon, color")
-      .in("id", catIds);
+    const { data: cats } = await sb.from("categories").select("id, icon, color").in("id", catIds);
 
     const catMap = new Map((cats ?? []).map((c) => [c.id, c]));
 
