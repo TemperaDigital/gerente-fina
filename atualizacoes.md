@@ -723,3 +723,67 @@ cronológica, com os arquivos criados/alterados em cada uma.
 **Verificação:** `npx tsc --noEmit` limpo · `npm test` 73/73 · eslint sem erros reais.
 
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
+
+---
+
+## 25. KPIs do Dashboard em regime de caixa + card "Disponível para Variáveis"
+
+- Os 3 KPIs do topo (Receitas, Despesas, Resultado líquido) usavam
+  `monthly_dre` — regime de COMPETÊNCIA, incluindo compras no cartão do mês
+  corrente mesmo que o dinheiro só saia da conta no mês seguinte (pagamento
+  da fatura). Passaram a usar uma nova leitura em REGIME DE CAIXA: só conta
+  dinheiro que de fato entrou/saiu de contas `bank`/`cash` no período.
+- Nova server function `getCashBasisSummary` (`src/services/dashboard.functions.ts`):
+  - **Receitas (caixa):** `kind='income'` em contas bank/cash.
+  - **Despesas (caixa):** `kind='expense'` em contas bank/cash **+** a perna
+    débito de `kind='invoice_payment'` em contas bank/cash (o pagamento de
+    fatura saindo da conta corrente). Despesas em cartão (`credit_card`) NÃO
+    entram — só entram quando a fatura é paga, no mês do pagamento.
+  - **Despesas Fixas (caixa):** subconjunto de Despesas (caixa) cuja
+    categoria tem `nature='FIXA'` (migration 0012) — automaticamente exclui
+    `invoice_payment` (categoria sempre nula por CHECK).
+  - **Disponível para Variáveis** = Receitas (caixa) − Compromissos, onde
+    Compromissos = Despesas Fixas (caixa) + parcelas de cartão com
+    vencimento no período ainda não postadas (`installment_items` com
+    `transaction_id` nulo — mesma convenção já usada em `getForecast`) +
+    recorrências de despesa em contas bank/cash com vencimento no período
+    ainda não materializadas (`recurrences` ativas — as de cartão já são
+    materializadas automaticamente pelo motor e viram `transaction` real).
+  - **Empréstimos/financiamentos/consórcios (`loans`) ficam de fora do
+    cálculo de Compromissos** — mesmo achado da Missão 12: `loans` não tem
+    nenhum vínculo com `transactions` no schema atual, então não há como
+    saber com confiança o vencimento de cada parcela por mês. Em vez de
+    inventar uma aproximação, o DTO devolve um array `caveats` com essa
+    limitação documentada, exibido como nota no rodapé dos KPIs e no
+    `title` do card.
+- Dashboard (`_app.dashboard.tsx`): os 4 cards de KPI continuam em uma
+  grade `sm:grid-cols-2 lg:grid-cols-4` — removido o card solto "Saldo
+  Consolidado" (informação já existe, mais correta, por conta individual no
+  `AccountsWidget`) e no lugar entrou "Disponível p/ Variáveis", com
+  destaque visual forte (fundo/anel vermelho + ícone de alerta) quando
+  negativo — sinal de que o usuário já comprometeu mais do que vai receber.
+- **Teste de sanidade (analítico, não numérico contra dado real — ver
+  limitação abaixo):** pela própria fórmula da view `account_balances`
+  (migration 0004), o saldo de uma conta é `Σ(credit) − Σ(debit)` de todas
+  as suas transações. Somando isso só para contas bank/cash e só dentro do
+  período: `income` credita, `expense` debita, a perna débito de
+  `invoice_payment` debita (a perna crédito cai no cartão, fora do grupo
+  bank/cash) e as duas pernas de `transfer` sempre caem dentro do próprio
+  grupo bank/cash (debita numa conta, credita noutra), então se cancelam na
+  soma agregada. Logo, `Δ saldo(bank/cash)` no período é algebricamente
+  igual a `income_cash − expense_cash`, ou seja, a `net_cash` retornado —
+  não é uma aproximação, é a mesma soma vista de dois jeitos.
+  **Limitação:** não havia credencial de `service_role`
+  (`GERENTEFINA_SERVICE_ROLE_KEY`) disponível neste ambiente de execução
+  para rodar essa conferência contra dados reais do Supabase — recomenda-se
+  rodar manualmente uma vez em produção (comparar `net_cash` do card com a
+  variação real do saldo somado das contas bank/cash no mês) antes de
+  confiar cegamente no card em decisões financeiras.
+
+**Arquivos alterados:**
+- `src/services/dashboard.functions.ts`
+- `src/routes/_app.dashboard.tsx`
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 73/73 · eslint sem erros reais (fora do ruído pré-existente de CRLF/prettier no resto do repo).
+
+**Status:** não commitado ainda (aguardando confirmação do usuário).

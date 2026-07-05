@@ -10,7 +10,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { addAmounts } from "@/lib/finance/money";
+import { addAmounts, toCents, fromCents } from "@/lib/finance/money";
 
 // -----------------------------------------------------------------------------
 // Tipos públicos (DTOs)
@@ -101,6 +101,155 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
       accounts,
     };
     return summary;
+  });
+
+// -----------------------------------------------------------------------------
+// getCashBasisSummary — KPIs do topo do Dashboard em REGIME DE CAIXA (Missão 16)
+//
+// Diferente de getDashboardSummary (regime de COMPETÊNCIA, via monthly_dre):
+// aqui só contamos dinheiro que de fato entrou/saiu de contas bank/cash no
+// período. Uma compra no cartão de crédito não sai da conta corrente até o
+// pagamento da fatura — por isso ela NÃO entra em "Despesas (caixa)" no mês
+// da compra, e o pagamento de fatura (perna débito em bank/cash) SIM entra.
+//
+// "Disponível para Variáveis" = Receitas (caixa) − Compromissos, onde
+// Compromissos = Despesas Fixas (caixa) + parcelas de cartão ainda não
+// postadas com vencimento no período + recorrências de despesa (bank/cash)
+// ainda não materializadas com vencimento no período. Empréstimos/financia-
+// mentos/consórcios (`loans`) ficam de fora: o schema não vincula `loans` a
+// `transactions` (mesmo achado da Missão 12), então não há como saber com
+// confiança quais parcelas vencem em cada mês — inventar uma aproximação
+// para dado financeiro é pior do que documentar a lacuna (ver `caveats`).
+// -----------------------------------------------------------------------------
+
+export interface CashBasisSummaryDTO {
+  reference_month: string; // YYYY-MM-01
+  income_cash: string;
+  expense_cash: string;
+  net_cash: string;
+  fixed_expense_cash: string;
+  installments_pending: string;
+  recurrences_pending: string;
+  committed_total: string;
+  available_for_variable: string;
+  caveats: string[];
+}
+
+function monthBounds(referenceMonth: string): { start: string; end: string } {
+  const [y, m] = referenceMonth.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { start: referenceMonth, end: `${referenceMonth.slice(0, 8)}${String(lastDay).padStart(2, "0")}` };
+}
+
+function isCashAccount(type: AccountType | null | undefined): boolean {
+  return type === "bank" || type === "cash";
+}
+
+export const getCashBasisSummary = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => DashboardInput.parse(input))
+  .handler(async ({ data }): Promise<CashBasisSummaryDTO> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { resolveActiveUserId } = await import("@/lib/supabase/resolve-user");
+    const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
+    const referenceMonth = resolveReferenceMonth(data?.month);
+    const { start, end } = monthBounds(referenceMonth);
+
+    // ---- Receitas / Despesas em regime de caixa ---------------------------
+    const { data: txRows, error: txErr } = await sb
+      .from("transactions")
+      .select(
+        "kind, type, amount, accounts:account_id ( type ), categories:category_id ( nature )",
+      )
+      .eq("user_id", userId)
+      .in("kind", ["income", "expense", "invoice_payment"])
+      .gte("occurred_on", start)
+      .lte("occurred_on", end);
+    if (txErr) throw new Error(txErr.message);
+
+    let incomeCents = 0n;
+    let expenseCents = 0n;
+    let fixedExpenseCents = 0n;
+
+    for (const r of (txRows ?? []) as unknown as Array<{
+      kind: "income" | "expense" | "invoice_payment";
+      type: "debit" | "credit";
+      amount: string;
+      accounts?: { type?: AccountType } | null;
+      categories?: { nature?: "FIXA" | "VARIÁVEL" | null } | null;
+    }>) {
+      const accType = r.accounts?.type;
+      if (r.kind === "income" && isCashAccount(accType)) {
+        incomeCents += toCents(r.amount);
+      } else if (r.kind === "expense" && isCashAccount(accType)) {
+        const cents = toCents(r.amount);
+        expenseCents += cents;
+        if (r.categories?.nature === "FIXA") fixedExpenseCents += cents;
+      } else if (r.kind === "invoice_payment" && r.type === "debit" && isCashAccount(accType)) {
+        // Perna débito do pagamento de fatura — dinheiro saindo de bank/cash
+        // de verdade (a perna crédito, no cartão, não conta — não é "caixa").
+        expenseCents += toCents(r.amount);
+      }
+    }
+
+    // ---- Compromissos (a): parcelas de cartão ainda não postadas ----------
+    // Mesma convenção já usada em getForecast: transaction_id nulo = parcela
+    // futura ainda não lançada no livro-caixa.
+    const { data: instRows, error: instErr } = await sb
+      .from("installment_items")
+      .select("amount")
+      .eq("user_id", userId)
+      .is("transaction_id", null)
+      .gte("due_date", start)
+      .lte("due_date", end);
+    if (instErr) throw new Error(instErr.message);
+
+    let installmentsCents = 0n;
+    for (const r of (instRows ?? []) as Array<{ amount: string }>) {
+      installmentsCents += toCents(r.amount);
+    }
+
+    // ---- Compromissos (b): recorrências de despesa (bank/cash) ainda não
+    // materializadas — contas credit_card são auto-materializadas pelo motor
+    // (recurrence-materializer.functions.ts) e já viram transaction real
+    // quando vencem, então já estão cobertas (ou não, se no futuro) por essa
+    // mesma lógica de fatura; aqui só contamos o que ainda depende de
+    // confirmação manual do usuário (scheduled-items.functions.ts).
+    const { data: recRows, error: recErr } = await sb
+      .from("recurrences")
+      .select("amount, accounts:account_id ( type )")
+      .eq("user_id", userId)
+      .eq("active", true)
+      .eq("kind", "expense")
+      .gte("next_run_on", start)
+      .lte("next_run_on", end);
+    if (recErr) throw new Error(recErr.message);
+
+    let recurrencesCents = 0n;
+    for (const r of (recRows ?? []) as unknown as Array<{
+      amount: string;
+      accounts?: { type?: AccountType } | null;
+    }>) {
+      if (isCashAccount(r.accounts?.type)) recurrencesCents += toCents(r.amount);
+    }
+
+    const committedCents = fixedExpenseCents + installmentsCents + recurrencesCents;
+    const availableCents = incomeCents - committedCents;
+
+    return {
+      reference_month: referenceMonth,
+      income_cash: fromCents(incomeCents),
+      expense_cash: fromCents(expenseCents),
+      net_cash: fromCents(incomeCents - expenseCents),
+      fixed_expense_cash: fromCents(fixedExpenseCents),
+      installments_pending: fromCents(installmentsCents),
+      recurrences_pending: fromCents(recurrencesCents),
+      committed_total: fromCents(committedCents),
+      available_for_variable: fromCents(availableCents),
+      caveats: [
+        "Não inclui parcelas de empréstimos, financiamentos ou consórcios (loans): o schema atual não vincula loans a transactions, então não é possível determinar com confiança o vencimento de cada parcela neste período.",
+      ],
+    };
   });
 
 // -----------------------------------------------------------------------------

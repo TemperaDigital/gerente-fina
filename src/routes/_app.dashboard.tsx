@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { AccountsWidget } from "@/components/dashboard/accounts-widget";
 import {
   getDashboardSummary,
+  getCashBasisSummary,
   getOpenCreditCardInvoices,
   getMonthlyDreHistory,
   getCategoryBreakdown,
@@ -70,6 +71,12 @@ const summaryQuery = (month: string) =>
   queryOptions({
     queryKey: ["dashboard", "summary", month],
     queryFn: () => getDashboardSummary({ data: { month } }),
+  });
+
+const cashBasisQuery = (month: string) =>
+  queryOptions({
+    queryKey: ["dashboard", "cash-basis", month],
+    queryFn: () => getCashBasisSummary({ data: { month } }),
   });
 
 const invoicesQuery = () =>
@@ -122,6 +129,7 @@ export const Route = createFileRoute("/_app/dashboard")({
     const month = /^\d{4}-\d{2}$/.test(raw?.month ?? "") ? raw.month : currentMonth();
     await Promise.all([
       context.queryClient.ensureQueryData(summaryQuery(month)),
+      context.queryClient.ensureQueryData(cashBasisQuery(month)),
       context.queryClient.ensureQueryData(invoicesQuery()),
       context.queryClient.ensureQueryData(budgetsQuery(month)),
       context.queryClient.ensureQueryData(dreHistoryQuery()),
@@ -160,6 +168,7 @@ function DashboardPage() {
   const queryClient = useQueryClient();
 
   const { data: summary } = useSuspenseQuery(summaryQuery(month));
+  const { data: cashBasis } = useSuspenseQuery(cashBasisQuery(month));
   const { data: invoices } = useSuspenseQuery(invoicesQuery());
   const { data: budgets } = useSuspenseQuery(budgetsQuery(month));
   const { data: dreHistory } = useSuspenseQuery(dreHistoryQuery());
@@ -264,29 +273,12 @@ function DashboardPage() {
           </div>
         </div>
 
-        {/* KPIs do mês selecionado */}
+        {/* KPIs do mês selecionado — REGIME DE CAIXA (Missão 16): só conta
+            dinheiro que de fato entrou/saiu de contas bank/cash no período.
+            O donut de categorias e o gráfico de fluxo de caixa continuam em
+            regime de competência de propósito — servem para "onde o dinheiro
+            foi categorizado", não para "quanto saiu da conta". */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <GlassCard className="border border-white/10 bg-zinc-900/40 p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-foreground/50 uppercase tracking-wide">
-                Saldo Consolidado
-              </span>
-              <div className="rounded-full bg-primary/10 p-1.5 text-primary">
-                <Wallet className="size-4" />
-              </div>
-            </div>
-            <p
-              className={`mt-3 font-mono text-2xl font-bold tracking-tight ${
-                isNegative(summary.consolidated_balance) ? "text-red-400" : "text-foreground/90"
-              }`}
-            >
-              {BRL(summary.consolidated_balance)}
-            </p>
-            <p className="mt-1 text-xs text-foreground/30">
-              {summary.accounts.length} conta(s) ativa(s)
-            </p>
-          </GlassCard>
-
           <GlassCard className="border border-white/10 bg-zinc-900/40 p-5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-foreground/50 uppercase tracking-wide">
@@ -297,9 +289,9 @@ function DashboardPage() {
               </div>
             </div>
             <p className="mt-3 font-mono text-2xl font-bold tracking-tight text-emerald-300">
-              {BRL(summary.income)}
+              {BRL(cashBasis.income_cash)}
             </p>
-            <p className="mt-1 text-xs text-foreground/30">Sem fluxos neutros</p>
+            <p className="mt-1 text-xs text-foreground/30">Regime de caixa — contas e dinheiro</p>
           </GlassCard>
 
           <GlassCard className="border border-white/10 bg-zinc-900/40 p-5">
@@ -312,9 +304,9 @@ function DashboardPage() {
               </div>
             </div>
             <p className="mt-3 font-mono text-2xl font-bold tracking-tight text-red-300">
-              {BRL(summary.expense)}
+              {BRL(cashBasis.expense_cash)}
             </p>
-            <p className="mt-1 text-xs text-foreground/30">Categorizado por DRE</p>
+            <p className="mt-1 text-xs text-foreground/30">Regime de caixa — inclui fatura paga</p>
           </GlassCard>
 
           <GlassCard className="border border-white/10 bg-zinc-900/40 p-5">
@@ -328,14 +320,64 @@ function DashboardPage() {
             </div>
             <p
               className={`mt-3 font-mono text-2xl font-bold tracking-tight ${
-                isNegative(summary.net_result) ? "text-red-400" : "text-foreground/90"
+                isNegative(cashBasis.net_cash) ? "text-red-400" : "text-foreground/90"
               }`}
             >
-              {BRL(summary.net_result)}
+              {BRL(cashBasis.net_cash)}
             </p>
-            <p className="mt-1 text-xs text-foreground/30">{invoices.length} fatura(s) aberta(s)</p>
+            <p className="mt-1 text-xs text-foreground/30">Receitas − Despesas (caixa)</p>
+          </GlassCard>
+
+          <GlassCard
+            className={`border p-5 ${
+              isNegative(cashBasis.available_for_variable)
+                ? "border-red-500/50 bg-red-500/10 ring-1 ring-red-500/40"
+                : "border-white/10 bg-zinc-900/40"
+            }`}
+            title={cashBasis.caveats.join(" ")}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground/50 uppercase tracking-wide">
+                Disponível p/ Variáveis
+              </span>
+              <div
+                className={`rounded-full p-1.5 ${
+                  isNegative(cashBasis.available_for_variable)
+                    ? "bg-red-500/20 text-red-400"
+                    : "bg-violet-500/10 text-violet-400"
+                }`}
+              >
+                {isNegative(cashBasis.available_for_variable) ? (
+                  <AlertTriangle className="size-4" />
+                ) : (
+                  <Wallet className="size-4" />
+                )}
+              </div>
+            </div>
+            <p
+              className={`mt-3 font-mono text-2xl font-bold tracking-tight ${
+                isNegative(cashBasis.available_for_variable) ? "text-red-400" : "text-foreground/90"
+              }`}
+            >
+              {BRL(cashBasis.available_for_variable)}
+            </p>
+            <p
+              className={`mt-1 text-xs ${
+                isNegative(cashBasis.available_for_variable)
+                  ? "font-medium text-red-400/90"
+                  : "text-foreground/30"
+              }`}
+            >
+              {isNegative(cashBasis.available_for_variable)
+                ? "Compromissos já superam a renda do período"
+                : "Após despesas fixas, parcelas e agendamentos"}
+            </p>
           </GlassCard>
         </div>
+        <p className="text-[11px] text-foreground/30">
+          * Disponível p/ Variáveis não inclui parcelas de empréstimos, financiamentos ou
+          consórcios — sem vínculo confiável com lançamentos no schema atual.
+        </p>
 
         {/* Gráficos: barras (histórico) + donut (mês atual) */}
         <div className="grid gap-6 lg:grid-cols-2">
