@@ -278,6 +278,11 @@ function ChatPage() {
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
         toast.success("Lançamento criado via IA!");
       }
+      if (result.transactionDeleted) {
+        queryClient.invalidateQueries({ queryKey: ["transactions"] });
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+        toast.success("Lançamento excluído via IA!");
+      }
     } catch (err) {
       setMessages((prev) => [
         ...prev,
