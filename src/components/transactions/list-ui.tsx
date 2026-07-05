@@ -189,6 +189,16 @@ function formatBR(date: string): string {
   return `${d}/${m}/${y}`;
 }
 
+/** "2026-07-01" -> "07/2026" — mês da fatura de cartão a que a despesa foi anexada. */
+function formatInvoiceMonth(referenceMonth: string): string {
+  const [y, m] = referenceMonth.split("-");
+  return `${m}/${y}`;
+}
+
+function natureLabel(nature: "FIXA" | "VARIÁVEL"): string {
+  return nature === "FIXA" ? "Fixa" : "Variável";
+}
+
 export function TransactionsTable({
   items,
   page,
@@ -365,10 +375,19 @@ function TransactionRow({
                 Fatura
               </Badge>
             )}
+            {it.invoice_reference_month && (
+              <Badge
+                variant="outline"
+                className="border-orange-400/30 bg-orange-400/10 px-1.5 py-0 text-[10px] font-semibold text-orange-300"
+              >
+                Fat. {formatInvoiceMonth(it.invoice_reference_month)}
+              </Badge>
+            )}
           </div>
           <div className="mt-0.5 truncate text-xs text-foreground/50">
             {it.account_name ?? "—"}
             {it.category_name ? ` · ${it.category_name}` : ""}
+            {it.category_nature ? ` (${natureLabel(it.category_nature)})` : ""}
           </div>
         </div>
 

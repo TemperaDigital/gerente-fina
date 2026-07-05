@@ -41,6 +41,10 @@ export interface TransactionListItemDTO {
   transfer_counterpart_name?: string | null;
   /** Progresso de parcelas (ex.: "3/12") quando vinculado a installment_items. */
   installment_progress?: string | null;
+  /** Natureza da categoria (Fixa/Variável) — migration 0012. */
+  category_nature: "FIXA" | "VARIÁVEL" | null;
+  /** Mês de referência (YYYY-MM-01) da fatura de cartão a que esta despesa foi anexada, se houver. */
+  invoice_reference_month: string | null;
   created_at: string;
 }
 
@@ -104,7 +108,7 @@ type TxRow = {
   source: string | null;
   created_at: string;
   accounts?: { name?: string | null } | null;
-  categories?: { name?: string | null } | null;
+  categories?: { name?: string | null; nature?: "FIXA" | "VARIÁVEL" | null } | null;
 };
 
 /**
@@ -159,6 +163,21 @@ async function enrichTransactionRows(
     }
   }
 
+  // Mês de referência da fatura (para a coluna "Fatura" em despesas de cartão).
+  const invoiceIds = Array.from(
+    new Set(baseRows.filter((r) => r.invoice_id).map((r) => r.invoice_id!)),
+  );
+  const referenceMonthByInvoice = new Map<string, string>();
+  if (invoiceIds.length > 0) {
+    const { data: invoices } = await sb
+      .from("credit_card_invoices")
+      .select("id, reference_month")
+      .in("id", invoiceIds);
+    for (const inv of (invoices ?? []) as Array<{ id: string; reference_month: string }>) {
+      referenceMonthByInvoice.set(inv.id, inv.reference_month);
+    }
+  }
+
   return baseRows.map((row) => {
     let counterpart: string | null = null;
     if (row.transfer_id) {
@@ -190,6 +209,10 @@ async function enrichTransactionRows(
       source: row.source,
       transfer_counterpart_name: counterpart,
       installment_progress: installmentByTx.get(row.id) ?? null,
+      category_nature: row.categories?.nature ?? null,
+      invoice_reference_month: row.invoice_id
+        ? (referenceMonthByInvoice.get(row.invoice_id) ?? null)
+        : null,
       created_at: row.created_at,
     };
   });
@@ -221,7 +244,7 @@ export const getTransactionsList = createServerFn({ method: "GET" })
          occurred_on, transfer_id, invoice_id, paid_invoice_id,
          recurrence_id, source, created_at,
          accounts:account_id ( name ),
-         categories:category_id ( name )`,
+         categories:category_id ( name, nature )`,
         { count: "exact" },
       )
       .order("occurred_on", { ascending: false })
@@ -328,7 +351,7 @@ export const getTransactionsForExport = createServerFn({ method: "GET" })
          occurred_on, transfer_id, invoice_id, paid_invoice_id,
          recurrence_id, source, created_at,
          accounts:account_id ( name ),
-         categories:category_id ( name )`,
+         categories:category_id ( name, nature )`,
       )
       .order("occurred_on", { ascending: false })
       .order("created_at", { ascending: false })
@@ -408,6 +431,10 @@ export const getReviewQueue = createServerFn({ method: "GET" }).handler(
         paid_invoice_id: (r.paid_invoice_id as string | null) ?? null,
         recurrence_id: (r.recurrence_id as string | null) ?? null,
         source: (r.source as string | null) ?? null,
+        // Fila de conciliação é uma heurística leve para duplicatas — não
+        // busca nature/fatura, foco é só decidir manter vs. mesclar.
+        category_nature: null,
+        invoice_reference_month: null,
         created_at: r.created_at as string,
       };
       const list = groups.get(r.dedup_hash) ?? [];
