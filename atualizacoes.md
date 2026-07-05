@@ -599,4 +599,66 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Verificação:** `npx tsc --noEmit` limpo · `npm test` 64/64 · eslint sem erros reais.
 
+**Status:** enviado ao GitHub (`git push`).
+
+---
+
+## 22. Contas a Vencer — /agendamentos + widget no Dashboard (correção de comportamento por tipo de conta)
+
+- Mission recebida como correção urgente a uma "Missão 7" que, na
+  investigação, não existia ainda no código de forma alguma (nem tela, nem
+  widget, nem distinção de conta no motor) — reportado ao usuário antes de
+  codar; ele optou por terminar a Missão 12 primeiro e só depois seguir com
+  esta.
+- **Parte 1 (schema/motor):** `materializeDueRecurrences` agora NUNCA
+  materializa sozinho recorrências de conta bank/cash — só credit_card
+  continua automática. Nova frequência `'once'` (migration 0016,
+  `ALTER TYPE ... ADD VALUE`) para ocorrência única; `computeNextRun` lança
+  erro de propósito se chamada para `'once'`, `occurrencesUntil` trata como
+  caso especial. Testes novos (`recurrence-schedule.test.ts`, 9 casos).
+  Novo `scheduled-items.functions.ts`: `listScheduledItems` (leitura) e
+  `confirmScheduledItem` ("Marcar como pago/recebido" — cria o lançamento
+  real via `createTransactionEntry` e avança a partir da data
+  ORIGINALMENTE agendada, não da data real de confirmação, evitando
+  arrastar o calendário por atrasos pontuais).
+  `createTransactionEntry` ganhou campo aditivo opcional
+  `link_recurrence_id` (vincula a uma recorrência JÁ EXISTENTE, distinto de
+  `recurrence` que cria uma nova — necessário porque a função original não
+  tinha como vincular a uma recorrência existente).
+- **Parte 2 (tela):** `/agendamentos` lista agendamentos ativos agrupados
+  em Atrasados/Próximos 30 dias/Mais adiante. CRUD completo
+  (create/update/delete) com um único campo de data no formulário
+  representando `next_run_on` — `day_of_month` é sempre derivado dela, não
+  é campo separado (simplificação deliberada, não coberta explicitamente
+  na missão). Ação por item conforme tipo de conta. Exclusão não apaga
+  lançamentos já materializados (`recurrence_id` é `ON DELETE SET NULL`).
+  Link adicionado ao menu.
+- **Parte 3 (widget):** "Contas a Vencer" no Dashboard, reaproveitando
+  `listScheduledItems` com a MESMA query key da tela `/agendamentos`
+  (invalidação compartilhada automática), filtrado para 30 dias +
+  atrasados, até 5 itens, sem ação de confirmar (só lembrete).
+- **Nota técnica sobre `routeTree.gen.ts`:** uma regeneração via `vite
+  build` local introduziu um bloco de augmentação de tipos ausente do
+  arquivo committado, que quebrou o typecheck de várias rotas
+  pré-existentes — revertido; apliquei manualmente só o trecho aditivo da
+  rota nova, no mesmo formato mecânico do gerador.
+
+**Arquivos criados:**
+- `docs/migrations/0016_recurrence_once.sql`
+- `src/lib/finance/recurrence-schedule.test.ts`
+- `src/services/scheduled-items.functions.ts`
+- `src/routes/_app.agendamentos.tsx`
+
+**Arquivos alterados:**
+- `src/lib/finance/recurrence-schedule.ts`
+- `src/services/recurrence-materializer.functions.ts`
+- `src/services/transactions.functions.ts` (`link_recurrence_id`)
+- `src/components/app-shell.tsx`
+- `src/routeTree.gen.ts`
+- `src/routes/_app.dashboard.tsx`
+
+**Commits:** `01c29fb` (Parte 1), `08afdc5` (Parte 2), `2c7acbe` (auto-commit da ferramenta do usuário, capturou parte do trabalho da Parte 3 em andamento), `738c9af` (Parte 3, finalização).
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 73/73 · eslint sem erros reais.
+
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
