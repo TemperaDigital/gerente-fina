@@ -661,4 +661,35 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Verificação:** `npx tsc --noEmit` limpo · `npm test` 73/73 · eslint sem erros reais.
 
+**Status:** enviado ao GitHub (`git push`).
+
+---
+
+## 23. Exportação e tela de Lançamentos ganham colunas de Fatura e Natureza
+
+- Pedido do usuário a partir de um exemplo de CSV exportado (6 colunas):
+  acrescentar "Fatura" (mês de referência da fatura de cartão) e "Tipo de
+  Despesa" (Fixa/Variável), totalizando 8 colunas no CSV/impressão — e
+  exibir a mesma informação na tela de Lançamentos.
+- "Fatura": `transactions.invoice_id` já é preenchido automaticamente pelo
+  trigger `tg_attach_credit_card_invoice` (migration 0005) para despesas em
+  cartão — só precisei juntar com `credit_card_invoices.reference_month` e
+  formatar como MM/AAAA. "Tipo de Despesa": `categories.nature`
+  (Fixa/Variável, migration 0012).
+- `enrichTransactionRows` (compartilhada por `getTransactionsList` e
+  `getTransactionsForExport` desde a Missão 10) ganhou uma query em lote
+  para o mês de fatura, além de incluir `nature` no join de categorias já
+  existente — sem duplicar lógica entre listagem paginada e exportação.
+- Tela de Lançamentos: badge "Fat. MM/AAAA" quando aplicável, e
+  "(Fixa/Variável)" ao lado do nome da categoria na linha.
+
+**Arquivos alterados:**
+- `src/services/transactions.functions.ts`
+- `src/components/transactions/export-print-dialog.tsx`
+- `src/components/transactions/list-ui.tsx`
+
+**Commit:** `d41c222`.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 73/73 · eslint sem erros reais.
+
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
