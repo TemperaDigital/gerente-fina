@@ -114,9 +114,7 @@ export const Route = createFileRoute("/_app/dashboard")({
   // C3: mês persistido na URL
   validateSearch: (raw): DashSearch => ({
     month:
-      typeof raw.month === "string" && /^\d{4}-\d{2}$/.test(raw.month)
-        ? raw.month
-        : currentMonth(),
+      typeof raw.month === "string" && /^\d{4}-\d{2}$/.test(raw.month) ? raw.month : currentMonth(),
   }),
 
   loader: async ({ context, location }) => {
@@ -214,13 +212,10 @@ function DashboardPage() {
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
-
         {/* Header + seletor de mês */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-              Visão Geral
-            </h1>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Visão Geral</h1>
             <p className="mt-0.5 text-sm text-foreground/50">
               Saúde do seu ecossistema financeiro em tempo real.
             </p>
@@ -338,9 +333,7 @@ function DashboardPage() {
             >
               {BRL(summary.net_result)}
             </p>
-            <p className="mt-1 text-xs text-foreground/30">
-              {invoices.length} fatura(s) aberta(s)
-            </p>
+            <p className="mt-1 text-xs text-foreground/30">{invoices.length} fatura(s) aberta(s)</p>
           </GlassCard>
         </div>
 
@@ -393,9 +386,7 @@ function DashboardPage() {
                 <h2 className="text-sm font-semibold text-foreground/80">
                   Orçamentos — {monthLabel(month)}
                 </h2>
-                <span className="text-xs font-medium text-primary">
-                  Top {topBudgets.length}
-                </span>
+                <span className="text-xs font-medium text-primary">Top {topBudgets.length}</span>
               </div>
 
               <div className="space-y-4">
@@ -551,7 +542,6 @@ function DashboardPage() {
             </div>
           </GlassCard>
         )}
-
       </div>
     </AppShell>
   );
