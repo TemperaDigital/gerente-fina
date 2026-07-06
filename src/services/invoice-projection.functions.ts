@@ -8,6 +8,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { computeInvoiceDueDate } from "@/lib/finance/invoice-due";
+import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 
 const Input = z.object({
   account_id: z.string().uuid(),
@@ -30,11 +31,13 @@ export const projectInvoiceForPurchase = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<InvoiceProjectionDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const { data: acc, error } = await sb
       .from("accounts")
       .select("id, name, type, closing_day, due_day")
       .eq("id", data.account_id)
+      .eq("user_id", userId)
       .maybeSingle();
 
     if (error) throw new Error(error.message);

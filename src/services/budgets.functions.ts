@@ -19,9 +19,11 @@ export interface BudgetDTO {
   percent: number;
 }
 
-
 const Input = z.object({
-  month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  month: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional(),
 });
 
 export const listBudgets = createServerFn({ method: "GET" })
@@ -29,10 +31,11 @@ export const listBudgets = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<BudgetDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const now = new Date();
-    const month = data.month ??
-      `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    const month =
+      data.month ?? `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
     const [y, m] = month.split("-").map(Number);
     const first = `${y}-${String(m).padStart(2, "0")}-01`;
     const lastDay = new Date(y, m, 0).getDate();
@@ -40,19 +43,21 @@ export const listBudgets = createServerFn({ method: "GET" })
 
     const { data: budgets, error } = await sb
       .from("budgets")
-      .select(`id, category_id, amount, reference_month,
-               categories:category_id ( name, icon )`)
+      .select(
+        `id, category_id, amount, reference_month,
+               categories:category_id ( name, icon )`,
+      )
+      .eq("user_id", userId)
       .or(`reference_month.is.null,reference_month.eq.${first}`);
     if (error) throw new Error(error.message);
 
-    const catIds = Array.from(
-      new Set((budgets ?? []).map((b) => b.category_id as string)),
-    );
+    const catIds = Array.from(new Set((budgets ?? []).map((b) => b.category_id as string)));
     const spentMap = new Map<string, number>(); // cents
     if (catIds.length > 0) {
       const { data: tx } = await sb
         .from("transactions")
         .select("category_id, amount")
+        .eq("user_id", userId)
         .eq("kind", "expense")
         .in("category_id", catIds)
         .gte("occurred_on", first)
@@ -69,13 +74,15 @@ export const listBudgets = createServerFn({ method: "GET" })
       for (const [k, v] of spentByCat) spentMap.set(k, Number(v));
     }
 
-    return ((budgets ?? []) as unknown as Array<{
-      id: string;
-      category_id: string;
-      amount: string;
-      reference_month: string | null;
-      categories?: { name?: string | null; icon?: string | null } | null;
-    }>).map((b) => {
+    return (
+      (budgets ?? []) as unknown as Array<{
+        id: string;
+        category_id: string;
+        amount: string;
+        reference_month: string | null;
+        categories?: { name?: string | null; icon?: string | null } | null;
+      }>
+    ).map((b) => {
       const amountCents = toCents(b.amount);
       const spentCents = BigInt(spentMap.get(b.category_id) ?? 0);
       const remainingCents = amountCents - spentCents;
@@ -97,7 +104,11 @@ export const listBudgets = createServerFn({ method: "GET" })
 const UpsertInput = z.object({
   category_id: z.string().uuid(),
   amount: z.union([z.string(), z.number()]),
-  reference_month: z.string().regex(/^\d{4}-\d{2}$/).optional().nullable(),
+  reference_month: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional()
+    .nullable(),
 });
 
 export const upsertBudget = createServerFn({ method: "POST" })
@@ -109,27 +120,49 @@ export const upsertBudget = createServerFn({ method: "POST" })
     const ref = data.reference_month ? `${data.reference_month}-01` : null;
     const normalized = fromCents(toCents(data.amount));
     if (toCents(normalized) <= 0n) throw new Error("Valor do orçamento deve ser maior que zero.");
-    const { error } = await sb.from("budgets").upsert(
-      {
-        user_id: userId,
-        category_id: data.category_id,
-        amount: normalized,
-        reference_month: ref,
-      },
-      { onConflict: "user_id,category_id,reference_month" },
-    );
+
+    // upsert_budget não valida dono de _category_id (só grava com o
+    // _user_id que a gente manda) — sem checar aqui, dava pra criar um
+    // orçamento vinculado à categoria de outro usuário.
+    const { data: cat, error: catErr } = await sb
+      .from("categories")
+      .select("id")
+      .eq("id", data.category_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (catErr) throw new Error(catErr.message);
+    if (!cat) throw new Error("Categoria não pertence ao usuário.");
+
+    // budgets_user_cat_month_unique (migration 0006) é um índice de EXPRESSÃO
+    // (coalesce(reference_month, ...)) — supabase-js .upsert() só sabe montar
+    // ON CONFLICT com lista simples de colunas, não consegue direcionar para
+    // um índice de expressão. RPC faz o INSERT ... ON CONFLICT direto em SQL
+    // (migration 0017), onde isso é suportado nativamente.
+    const { error } = await sb.rpc("upsert_budget", {
+      _user_id: userId,
+      _category_id: data.category_id,
+      _amount: normalized,
+      _reference_month: ref,
+    });
     if (error) throw new Error(error.message);
     return { ok: true };
   });
 
 export const deleteBudget = createServerFn({ method: "POST" })
-  .inputValidator((i: unknown) =>
-    z.object({ id: z.string().uuid() }).parse(i),
-  )
+  .inputValidator((i: unknown) => z.object({ id: z.string().uuid() }).parse(i))
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const { error } = await sb.from("budgets").delete().eq("id", data.id);
+    const userId = await resolveActiveUserId();
+    const { error, data: deleted } = await sb
+      .from("budgets")
+      .delete()
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!deleted || deleted.length === 0) {
+      throw new Error("Orçamento não encontrado ou não pertence ao usuário.");
+    }
     return { ok: true };
   });

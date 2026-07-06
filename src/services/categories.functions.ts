@@ -20,14 +20,15 @@ export interface CategoryDTO {
   archived_at: string | null;
 }
 
-
 export const listCategories = createServerFn({ method: "GET" }).handler(
   async (): Promise<CategoryDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
     const { data, error } = await sb
       .from("categories")
       .select("id, name, kind, parent_id, icon, color, nature, archived_at")
+      .eq("user_id", userId)
       .order("kind", { ascending: true })
       .order("name", { ascending: true });
     if (error) throw new Error(error.message);
@@ -74,7 +75,8 @@ export const updateCategory = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const { error } = await sb
+    const userId = await resolveActiveUserId();
+    const { error, data: updated } = await sb
       .from("categories")
       .update({
         name: data.name,
@@ -84,23 +86,32 @@ export const updateCategory = createServerFn({ method: "POST" })
         color: data.color ?? null,
         nature: data.nature ?? null,
       })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!updated || updated.length === 0) {
+      throw new Error("Categoria não encontrada ou não pertence ao usuário.");
+    }
     return { ok: true };
   });
 
 export const archiveCategory = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const { error } = await sb
+    const userId = await resolveActiveUserId();
+    const { error, data: updated } = await sb
       .from("categories")
       .update({ archived_at: new Date().toISOString() })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!updated || updated.length === 0) {
+      throw new Error("Categoria não encontrada ou não pertence ao usuário.");
+    }
     return { ok: true };
   });
 
@@ -116,9 +127,15 @@ export const seedDefaultCategories = createServerFn({ method: "POST" }).handler(
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
 
+    // BUG real corrigido aqui: sem filtrar por user_id, esta query podia achar
+    // uma categoria "pai" pertencente a OUTRO usuário (auth real permite mais
+    // de um usuário cadastrado, mesmo num app de uso pessoal) — e a trigger
+    // do banco corretamente rejeitava o INSERT com "parent category belongs
+    // to another user" ao tentar prender uma subcategoria nova nela.
     const { data: existing, error: exErr } = await sb
       .from("categories")
       .select("id, parent_id, name, kind")
+      .eq("user_id", userId)
       .is("archived_at", null);
     if (exErr) throw new Error(exErr.message);
 
@@ -163,9 +180,7 @@ export const seedDefaultCategories = createServerFn({ method: "POST" }).handler(
       }
 
       const childNameSet = new Set(
-        existingRows
-          .filter((c) => c.parent_id === parentId)
-          .map((c) => c.name.toLowerCase()),
+        existingRows.filter((c) => c.parent_id === parentId).map((c) => c.name.toLowerCase()),
       );
 
       for (const childName of group.children) {
@@ -187,4 +202,5 @@ export const seedDefaultCategories = createServerFn({ method: "POST" }).handler(
     }
 
     return { created, skipped };
-  });
+  },
+);

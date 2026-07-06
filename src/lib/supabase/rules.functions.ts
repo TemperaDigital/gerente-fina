@@ -37,8 +37,8 @@ export function derivePattern(description: string): { pattern: string; match_typ
   // Remove tokens numéricos longos, datas e códigos de parcela comuns em extratos
   p = p
     .replace(/\d{2}\/\d{2}(\/\d{2,4})?/g, " ") // datas
-    .replace(/\bparc(ela)?\s*\d+\/\d+/g, " ")  // "parcela 3/12"
-    .replace(/\b\d{4,}\b/g, " ")               // números longos (ids, cartões)
+    .replace(/\bparc(ela)?\s*\d+\/\d+/g, " ") // "parcela 3/12"
+    .replace(/\b\d{4,}\b/g, " ") // números longos (ids, cartões)
     .replace(/\s+/g, " ")
     .trim();
   // Se sobrou muito pouco, usa a descrição normalizada inteira
@@ -109,7 +109,9 @@ export const listClassificationRules = createServerFn({ method: "GET" }).handler
 
     const { data, error } = await sb
       .from("classification_rules")
-      .select("id, pattern, match_type, category_id, kind, hit_count, last_used_at, categories(name)")
+      .select(
+        "id, pattern, match_type, category_id, kind, hit_count, last_used_at, categories(name)",
+      )
       .eq("user_id", userId)
       .order("hit_count", { ascending: false });
 
@@ -123,8 +125,7 @@ export const listClassificationRules = createServerFn({ method: "GET" }).handler
       kind: r.kind as "income" | "expense",
       hit_count: r.hit_count as number,
       last_used_at: r.last_used_at as string,
-      category_name:
-        (r.categories as { name?: string } | null)?.name ?? "(categoria removida)",
+      category_name: (r.categories as { name?: string } | null)?.name ?? "(categoria removida)",
     }));
   },
 );
@@ -171,6 +172,19 @@ export const learnClassificationRules = createServerFn({ method: "POST" })
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
 
+    // Blindagem: category_id vem do cliente — nunca aceita categoria de outro usuário
+    const uniqueCategoryIds = Array.from(new Set(data.rows.map((r) => r.category_id)));
+    const { data: ownedCats, error: catOwnErr } = await sb
+      .from("categories")
+      .select("id")
+      .eq("user_id", userId)
+      .in("id", uniqueCategoryIds);
+    if (catOwnErr) throw new Error(catOwnErr.message);
+    const ownedCatSet = new Set((ownedCats ?? []).map((c) => c.id as string));
+    for (const id of uniqueCategoryIds) {
+      if (!ownedCatSet.has(id)) throw new Error(`Categoria ${id} não pertence ao usuário.`);
+    }
+
     // Agrupa por (pattern, category, kind) para não gravar a mesma regra N vezes
     const grouped = new Map<
       string,
@@ -207,7 +221,8 @@ export const learnClassificationRules = createServerFn({ method: "POST" })
             category_id: g.category_id,
             last_used_at: new Date().toISOString(),
           })
-          .eq("id", existing.id as string);
+          .eq("id", existing.id as string)
+          .eq("user_id", userId);
       } else {
         await sb.from("classification_rules").insert({
           user_id: userId,

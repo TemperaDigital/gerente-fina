@@ -366,6 +366,7 @@ async function toolCreateTransaction(
       const { data: found } = await sb
         .from("categories")
         .select("id")
+        .eq("user_id", userId)
         .eq("kind", args.kind)
         .ilike("name", cleanName)
         .is("archived_at", null)
@@ -437,6 +438,7 @@ async function toolCreateTransaction(
 
 async function toolQuerySummary(
   sb: SupabaseClient,
+  userId: string,
   categories: Array<{ id: string; name: string; kind: string }>,
   args: z.infer<typeof QuerySummaryArgs>,
 ): Promise<unknown> {
@@ -464,6 +466,7 @@ async function toolQuerySummary(
   let query = sb
     .from("transactions")
     .select("id, description, amount, occurred_on, kind, accounts:account_id ( name )")
+    .eq("user_id", userId)
     .order("occurred_on", { ascending: false })
     .range(0, 4999); // teto de segurança — app monousuário, não é exportação
 
@@ -498,6 +501,7 @@ async function toolQuerySummary(
 
 async function toolIncomeExpenseReport(
   sb: SupabaseClient,
+  userId: string,
   args: z.infer<typeof IncomeExpenseReportArgs>,
 ): Promise<unknown> {
   const referenceMonth = `${args.year}-${String(args.month).padStart(2, "0")}-01`;
@@ -506,11 +510,13 @@ async function toolIncomeExpenseReport(
     sb
       .from("monthly_dre")
       .select("income, expense, net_result")
+      .eq("user_id", userId)
       .eq("reference_month", referenceMonth)
       .maybeSingle(),
     sb
       .from("monthly_dre_by_category")
       .select("category_name, kind, total_amount, transactions_count")
+      .eq("user_id", userId)
       .eq("reference_month", referenceMonth)
       .order("total_amount", { ascending: false }),
   ]);
@@ -547,13 +553,14 @@ async function toolIncomeExpenseReport(
   };
 }
 
-async function toolInstallmentsReport(sb: SupabaseClient): Promise<unknown> {
+async function toolInstallmentsReport(sb: SupabaseClient, userId: string): Promise<unknown> {
   const { data, error } = await sb
     .from("installment_purchases")
     .select(
       `description, total_amount, installments_count,
        installment_items ( amount, due_date, transaction_id )`,
     )
+    .eq("user_id", userId)
     .eq("status", "active");
   if (error) return { ok: false, error: error.message };
 
@@ -605,11 +612,13 @@ async function toolInstallmentsReport(sb: SupabaseClient): Promise<unknown> {
 
 async function toolFindCandidates(
   sb: SupabaseClient,
+  userId: string,
   args: z.infer<typeof FindCandidatesArgs>,
 ): Promise<unknown> {
   let query = sb
     .from("transactions")
     .select("id, description, amount, occurred_on, kind, accounts:account_id ( name )")
+    .eq("user_id", userId)
     .order("occurred_on", { ascending: false })
     .limit(50);
 
@@ -650,6 +659,7 @@ async function toolFindCandidates(
 
 async function toolDeleteTransaction(
   sb: SupabaseClient,
+  userId: string,
   args: z.infer<typeof DeleteTxArgs>,
 ): Promise<{
   ok: boolean;
@@ -666,6 +676,7 @@ async function toolDeleteTransaction(
     .from("transactions")
     .delete()
     .eq("id", args.id)
+    .eq("user_id", userId)
     .select("id, description, amount")
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
@@ -692,8 +703,18 @@ async function computeReply(data: z.infer<typeof schema>): Promise<ChatResponse>
   const userId = await resolveActiveUserId();
 
   const [accRes, catRes] = await Promise.all([
-    sb.from("accounts").select("id, name, type").is("archived_at", null).order("name"),
-    sb.from("categories").select("id, name, kind").is("archived_at", null).order("name"),
+    sb
+      .from("accounts")
+      .select("id, name, type")
+      .eq("user_id", userId)
+      .is("archived_at", null)
+      .order("name"),
+    sb
+      .from("categories")
+      .select("id, name, kind")
+      .eq("user_id", userId)
+      .is("archived_at", null)
+      .order("name"),
   ]);
   if (accRes.error)
     return {
@@ -816,25 +837,25 @@ async function computeReply(data: z.infer<typeof schema>): Promise<ChatResponse>
           case "query_transactions_summary": {
             const parsed = QuerySummaryArgs.safeParse(rawArgs);
             toolResult = parsed.success
-              ? await toolQuerySummary(sb, categories, parsed.data)
+              ? await toolQuerySummary(sb, userId, categories, parsed.data)
               : { ok: false, error: parsed.error.message };
             break;
           }
           case "get_income_expense_report": {
             const parsed = IncomeExpenseReportArgs.safeParse(rawArgs);
             toolResult = parsed.success
-              ? await toolIncomeExpenseReport(sb, parsed.data)
+              ? await toolIncomeExpenseReport(sb, userId, parsed.data)
               : { ok: false, error: parsed.error.message };
             break;
           }
           case "get_installments_report": {
-            toolResult = await toolInstallmentsReport(sb);
+            toolResult = await toolInstallmentsReport(sb, userId);
             break;
           }
           case "find_transaction_candidates": {
             const parsed = FindCandidatesArgs.safeParse(rawArgs);
             toolResult = parsed.success
-              ? await toolFindCandidates(sb, parsed.data)
+              ? await toolFindCandidates(sb, userId, parsed.data)
               : { ok: false, error: parsed.error.message };
             break;
           }
@@ -844,7 +865,7 @@ async function computeReply(data: z.infer<typeof schema>): Promise<ChatResponse>
               toolResult = { ok: false, error: parsed.error.message };
               break;
             }
-            const delResult = await toolDeleteTransaction(sb, parsed.data);
+            const delResult = await toolDeleteTransaction(sb, userId, parsed.data);
             toolResult = delResult;
             if (delResult.ok) transactionDeleted = true;
             break;
@@ -878,6 +899,19 @@ async function persistChatMessage(
   sb: import("@supabase/supabase-js").SupabaseClient,
   params: { user_id: string; thread_id: string; role: "user" | "assistant"; content: string },
 ): Promise<void> {
+  // thread_id chega do cliente (sendChatMessage não tem outro jeito de saber
+  // em qual conversa persistir) — nunca confia que é do próprio usuário sem
+  // checar, senão um request malicioso injeta mensagem/toca updated_at de
+  // conversa alheia.
+  const { data: thread, error: threadErr } = await sb
+    .from("chat_threads")
+    .select("id")
+    .eq("id", params.thread_id)
+    .eq("user_id", params.user_id)
+    .maybeSingle();
+  if (threadErr) throw new Error(threadErr.message);
+  if (!thread) throw new Error("Conversa não encontrada ou não pertence ao usuário.");
+
   const { error: insErr } = await sb.from("chat_messages").insert({
     user_id: params.user_id,
     thread_id: params.thread_id,
@@ -889,7 +923,8 @@ async function persistChatMessage(
   const { error: updErr } = await sb
     .from("chat_threads")
     .update({ updated_at: new Date().toISOString() })
-    .eq("id", params.thread_id);
+    .eq("id", params.thread_id)
+    .eq("user_id", params.user_id);
   if (updErr) throw new Error(updErr.message);
 }
 
@@ -1005,11 +1040,13 @@ export const getChatThreadMessages = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<ChatMessageDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const { data: rows, error } = await sb
       .from("chat_messages")
       .select("id, role, content, created_at")
       .eq("thread_id", data.thread_id)
+      .eq("user_id", userId)
       .order("created_at", { ascending: true });
     if (error) throw new Error(error.message);
     return (rows ?? []) as ChatMessageDTO[];
@@ -1027,6 +1064,16 @@ export const appendChatMessage = createServerFn({ method: "POST" })
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
+
+    const { data: thread, error: threadErr } = await sb
+      .from("chat_threads")
+      .select("id")
+      .eq("id", data.thread_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (threadErr) throw new Error(threadErr.message);
+    if (!thread) throw new Error("Conversa não encontrada ou não pertence ao usuário.");
+
     await persistChatMessage(sb, {
       user_id: userId,
       thread_id: data.thread_id,
@@ -1041,7 +1088,16 @@ export const deleteChatThread = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const { error } = await sb.from("chat_threads").delete().eq("id", data.thread_id);
+    const userId = await resolveActiveUserId();
+    const { error, data: deleted } = await sb
+      .from("chat_threads")
+      .delete()
+      .eq("id", data.thread_id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!deleted || deleted.length === 0) {
+      throw new Error("Conversa não encontrada ou não pertence ao usuário.");
+    }
     return { ok: true };
   });

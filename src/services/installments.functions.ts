@@ -15,6 +15,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 
 export interface InstallmentPurchaseDTO {
   id: string;
@@ -34,6 +35,7 @@ export const listInstallmentPurchases = createServerFn({ method: "GET" }).handle
   async (): Promise<InstallmentPurchaseDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
     const { data, error } = await sb
       .from("installment_purchases")
       .select(
@@ -42,6 +44,7 @@ export const listInstallmentPurchases = createServerFn({ method: "GET" }).handle
          categories:category_id ( name ),
          installment_items ( amount, due_date, transaction_id )`,
       )
+      .eq("user_id", userId)
       .order("purchased_on", { ascending: false });
     if (error) throw new Error(error.message);
 
@@ -109,6 +112,7 @@ export interface LoanDTO {
 export const listLoans = createServerFn({ method: "GET" }).handler(async (): Promise<LoanDTO[]> => {
   const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
   const sb = getSupabaseAdmin();
+  const userId = await resolveActiveUserId();
   const { data, error } = await sb
     .from("loans")
     .select(
@@ -117,6 +121,7 @@ export const listLoans = createServerFn({ method: "GET" }).handler(async (): Pro
          contemplated_at,
          accounts:account_id ( name )`,
     )
+    .eq("user_id", userId)
     .order("start_on", { ascending: false });
   if (error) throw new Error(error.message);
   return (
@@ -144,6 +149,20 @@ export const deleteInstallmentPurchase = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<DeleteInstallmentPurchaseResultDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
+
+    // delete_installment_purchase (migration 0015) é security definer e não
+    // recebe/valida user_id — quem precisa garantir posse é esta camada,
+    // antes de sequer chamar a RPC.
+    const { data: owned, error: ownErr } = await sb
+      .from("installment_purchases")
+      .select("id")
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (ownErr) throw new Error(ownErr.message);
+    if (!owned) throw new Error("Parcelamento não encontrado ou não pertence ao usuário.");
+
     const { data: rpcResult, error } = await sb.rpc("delete_installment_purchase", {
       _purchase_id: data.id,
     });
@@ -163,7 +182,16 @@ export const deleteLoan = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const { error } = await sb.from("loans").delete().eq("id", data.id);
+    const userId = await resolveActiveUserId();
+    const { error, data: deleted } = await sb
+      .from("loans")
+      .delete()
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!deleted || deleted.length === 0) {
+      throw new Error("Registro não encontrado ou não pertence ao usuário.");
+    }
     return { ok: true };
   });

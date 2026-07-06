@@ -32,7 +32,6 @@ export interface AccountWithBalanceDTO {
   overdraft_start_date?: string | null;
 }
 
-
 // ---------------------------------------------------------------------------
 // listAccounts
 // ---------------------------------------------------------------------------
@@ -46,12 +45,14 @@ export const listAccounts = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<AccountWithBalanceDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     let q = sb
       .from("accounts")
       .select(
         "id, name, type, institution, color, icon, credit_limit_cents, initial_balance_cents, overdraft_limit_cents, overdraft_start_date, closing_day, due_day, archived_at, created_at",
       )
+      .eq("user_id", userId)
       .order("name", { ascending: true });
     if (data.type) q = q.eq("type", data.type);
     if (!data.include_archived) q = q.is("archived_at", null);
@@ -60,10 +61,7 @@ export const listAccounts = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
 
     const ids = (accts ?? []).map((a: any) => a.id);
-    const balanceMap = new Map<
-      string,
-      { balance: string; count: number; last: string | null }
-    >();
+    const balanceMap = new Map<string, { balance: string; count: number; last: string | null }>();
     if (ids.length > 0) {
       const { data: bals, error: bErr } = await sb
         .from("account_balances")
@@ -131,16 +129,14 @@ const CreateInput = z
       if (!v.closing_day || !v.due_day || v.credit_limit_cents == null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message:
-            "Cartão exige limite, dia de fechamento e dia de vencimento.",
+          message: "Cartão exige limite, dia de fechamento e dia de vencimento.",
         });
       }
     } else {
       if (v.closing_day || v.due_day || v.credit_limit_cents != null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message:
-            "Apenas cartões podem ter limite/fechamento/vencimento.",
+          message: "Apenas cartões podem ter limite/fechamento/vencimento.",
         });
       }
     }
@@ -174,27 +170,27 @@ export const createAccount = createServerFn({ method: "POST" })
     return { id: row.id };
   });
 
-const UpdateInput = z
-  .object({
-    id: z.string().uuid(),
-    name: z.string().trim().min(1).max(80),
-    institution: z.string().trim().max(80).optional().nullable(),
-    color: z.string().trim().max(20).optional().nullable(),
-    icon: z.string().optional().nullable(),
-    credit_limit_cents: z.number().int().nonnegative().optional().nullable(),
-    initial_balance_cents: z.number().int().optional().nullable(),
-    overdraft_limit_cents: z.number().int().nonnegative().optional().nullable(),
-    closing_day: day.optional().nullable(),
-    due_day: day.optional().nullable(),
-  });
+const UpdateInput = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(80),
+  institution: z.string().trim().max(80).optional().nullable(),
+  color: z.string().trim().max(20).optional().nullable(),
+  icon: z.string().optional().nullable(),
+  credit_limit_cents: z.number().int().nonnegative().optional().nullable(),
+  initial_balance_cents: z.number().int().optional().nullable(),
+  overdraft_limit_cents: z.number().int().nonnegative().optional().nullable(),
+  closing_day: day.optional().nullable(),
+  due_day: day.optional().nullable(),
+});
 
 export const updateAccount = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => UpdateInput.parse(input))
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
-    const { error } = await sb
+    const { error, data: updated } = await sb
       .from("accounts")
       .update({
         name: data.name,
@@ -207,22 +203,31 @@ export const updateAccount = createServerFn({ method: "POST" })
         closing_day: data.closing_day ?? null,
         due_day: data.due_day ?? null,
       })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!updated || updated.length === 0) {
+      throw new Error("Conta não encontrada ou não pertence ao usuário.");
+    }
     return { ok: true };
   });
 
 export const archiveAccount = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ id: z.string().uuid() }).parse(input),
-  )
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const { error } = await sb
+    const userId = await resolveActiveUserId();
+    const { error, data: updated } = await sb
       .from("accounts")
       .update({ archived_at: new Date().toISOString() })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!updated || updated.length === 0) {
+      throw new Error("Conta não encontrada ou não pertence ao usuário.");
+    }
     return { ok: true };
   });

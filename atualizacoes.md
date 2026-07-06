@@ -844,4 +844,134 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Verificação:** `npx tsc --noEmit` limpo · `npm test` 77/77 · eslint sem erros reais.
 
+**Status:** enviado ao GitHub (`git push`), já mesclado em `main` via PR.
+
+---
+
+## 27. Ajuste de rótulos no card "Saldo do Mês"
+
+- "Custo Fixo" → "Despesas Fixas"; "Custo Variável" → "Despesas Variáveis".
+  Pedido pontual do usuário depois de testar a Missão 26 — só rótulo, sem
+  mudança de fórmula/cálculo.
+
+**Arquivos alterados:**
+- `src/routes/_app.dashboard.tsx`
+
+**Commit:** `3a4e3f7`.
+
+**Status:** enviado ao GitHub (`git push`).
+
+---
+
+## 28. Cabeçalho do Dashboard com localização, data por extenso e clima
+
+- Nova barra compacta acima do título "Visão Geral": data completa (dia da
+  semana, dia, mês, ano em pt-BR), cidade e condições climáticas do dia.
+- 100% client-side, sem secret/backend novo: geolocalização via
+  `navigator.geolocation` (permissão do navegador), cidade via reverse
+  geocoding gratuito e sem chave (BigDataCloud), clima via Open-Meteo
+  (gratuito, sem chave, CORS liberado para uso direto do browser).
+- Cache de 20 minutos em `sessionStorage` para não repetir a consulta a
+  cada navegação/troca de mês. Falha silenciosa em qualquer etapa
+  (permissão negada, geolocalização indisponível, API fora do ar) — a data
+  continua aparecendo sozinha, nunca bloqueia nem quebra o Dashboard.
+- Sem CSP configurada no projeto que precisasse de ajuste para liberar os
+  dois domínios externos novos (confirmado antes de codar).
+
+**Arquivos criados:**
+- `src/components/dashboard/location-weather-bar.tsx`
+
+**Arquivos alterados:**
+- `src/routes/_app.dashboard.tsx`
+
+**Commit:** `b703b40`.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 77/77 · eslint sem erros reais.
+
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
+
+---
+
+## 29. Correção de isolamento de dados entre usuários (auditoria completa de segurança)
+
+**Origem:** dois bugs relatados pelo usuário — erro de "ON CONFLICT" ao
+salvar orçamento em `/budgets`, e `Falha ao criar "Açougue": parent category
+belongs to another user` ao clicar em "Importar categorias padrão" em
+`/categories`. A investigação do segundo revelou que o app tem múltiplos
+usuários reais cadastrados (confirmado pelo usuário: "é intencional, mais
+de uma pessoa usa o app") — o que tornou a causa raiz muito mais séria do
+que um bug pontual: **quase todo o backend lia/gravava dados sem filtrar
+pelo usuário ativo**, confiando apenas no service-role client do Supabase
+(que ignora RLS por completo). RLS existe no banco mas nunca foi a camada
+de proteção real — quem protege é o código TypeScript, e ele tinha buracos
+sistemáticos.
+
+**Bug 1 — orçamento não salva:** `budgets_user_cat_month_unique` é um
+índice único de EXPRESSÃO (`coalesce(reference_month, ...)`), que
+`supabase-js .upsert({onConflict})` não consegue direcionar (só aceita
+lista simples de colunas). Corrigido com uma RPC nova (`upsert_budget`,
+migration 0017) que faz o `INSERT ... ON CONFLICT` direto em SQL.
+
+**Bug 2 — categorias padrão:** `seedDefaultCategories` buscava a categoria
+"pai" já existente sem filtrar por `user_id` — podia achar o pai de OUTRO
+usuário, e o trigger do banco corretamente rejeitava o `INSERT` da
+subcategoria nova. Corrigido com `.eq("user_id", userId)`.
+
+**Auditoria completa — dois tipos de buraco encontrados e fechados em
+praticamente todo `src/services/*.functions.ts` e `src/lib/supabase/
+*.functions.ts`:**
+
+1. **Leitura sem filtro:** consultas (`SELECT`/`UPDATE`/`DELETE`) que não
+   restringiam por `.eq("user_id", userId)`, permitindo ver, editar ou
+   apagar dado de outro usuário. Afetava praticamente toda tela: contas,
+   categorias, lançamentos, orçamentos, faturas, parcelamentos, empréstimos,
+   agendamentos, chat IA, dashboard, previsão. Alguns updates (`updateAccount`,
+   `archiveAccount`, `updateCategory`, `archiveCategory`) não tinham
+   NENHUMA checagem de dono — qualquer usuário autenticado podia renomear ou
+   arquivar conta/categoria de outra pessoa só sabendo o UUID.
+2. **Escrita com FK não validada (mais grave):** vários formulários
+   gravam um lançamento/orçamento/recorrência do PRÓPRIO usuário mas com
+   `account_id`/`category_id`/`recurrence_id` escolhido pelo cliente sem
+   checar se aquele id pertence a ele. Como a view `account_balances` soma
+   por `account_id` sem checar dono da transação, isso permitia CORROMPER
+   o saldo da conta de outra pessoa lançando uma "transação sua" apontando
+   pra conta alheia. Corrigido em `createTransactionEntry`,
+   `updateTransactionEntry`, `convertTransactionEntry`, `createScheduledItem`,
+   `updateScheduledItem`, `upsertBudget`, `commitImport`/`commitSmartImport`
+   (categoria e recorrência vindas do importador) e `learnClassificationRules`.
+3. **`restoreBackup` (achado à parte, o mais sério):** o restore de backup
+   fazia `upsert({onConflict:"id"})` com ids vindos direto do arquivo JSON
+   enviado pelo usuário — um arquivo adulterado com o UUID de uma conta/
+   categoria/transação de OUTRO usuário sobrescreveria silenciosamente
+   aquela linha, inclusive trocando o dono (`user_id`) dela para o
+   atacante. Corrigido com uma checagem prévia que aborta a restauração
+   inteira se qualquer id do arquivo já pertencer a outro usuário.
+4. **Chat IA:** `sendChatMessage` gravava mensagem numa `thread_id`
+   informada pelo cliente sem checar se a conversa era dele — permitia
+   injetar mensagem em conversa alheia. Corrigido movendo a checagem de
+   dono para dentro do helper compartilhado `persistChatMessage`.
+
+**Arquivos criados:**
+- `docs/migrations/0017_upsert_budget_rpc.sql`
+
+**Arquivos alterados:**
+- `src/services/budgets.functions.ts`, `categories.functions.ts`,
+  `accounts.functions.ts`, `lookups.functions.ts`, `chat.functions.ts`,
+  `invoices.functions.ts`, `invoice-projection.functions.ts`,
+  `installments.functions.ts`, `forecast.functions.ts`,
+  `dashboard.functions.ts`, `scheduled-items.functions.ts`,
+  `transactions.functions.ts`, `recurrence-materializer.functions.ts`,
+  `backup.functions.ts`
+- `src/lib/supabase/import.functions.ts`, `rules.functions.ts`
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 77/77 · `eslint --fix`
+sem erros novos (os poucos `no-explicit-any` remanescentes são débito de
+lint pré-existente, não introduzidos por esta missão).
+
+**Pendências conhecidas:** `src/services/recurrences.functions.ts` não foi
+tocado — confirmado que não é importado em lugar nenhum (código morto,
+substituído pela Missão 7), candidato a remoção futura. A migration 0017
+(RPC nova) precisa ser aplicada manualmente no Supabase antes do deploy,
+como as anteriores.
+
+**Status:** aguardando confirmação do usuário para commit/push.
