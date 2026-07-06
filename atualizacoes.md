@@ -844,4 +844,48 @@ cronológica, com os arquivos criados/alterados em cada uma.
 
 **Verificação:** `npx tsc --noEmit` limpo · `npm test` 77/77 · eslint sem erros reais.
 
+**Status:** enviado ao GitHub (`git push`), já mesclado em `main` via PR.
+
+---
+
+## 27. Ajuste de rótulos no card "Saldo do Mês"
+
+- "Custo Fixo" → "Despesas Fixas"; "Custo Variável" → "Despesas Variáveis".
+  Pedido pontual do usuário depois de testar a Missão 26 — só rótulo, sem
+  mudança de fórmula/cálculo.
+
+**Arquivos alterados:**
+- `src/routes/_app.dashboard.tsx`
+
+**Commit:** `3a4e3f7`.
+
+**Status:** enviado ao GitHub (`git push`).
+
+---
+
+## 28. Cabeçalho do Dashboard com localização, data por extenso e clima
+
+- Nova barra compacta acima do título "Visão Geral": data completa (dia da
+  semana, dia, mês, ano em pt-BR), cidade e condições climáticas do dia.
+- 100% client-side, sem secret/backend novo: geolocalização via
+  `navigator.geolocation` (permissão do navegador), cidade via reverse
+  geocoding gratuito e sem chave (BigDataCloud), clima via Open-Meteo
+  (gratuito, sem chave, CORS liberado para uso direto do browser).
+- Cache de 20 minutos em `sessionStorage` para não repetir a consulta a
+  cada navegação/troca de mês. Falha silenciosa em qualquer etapa
+  (permissão negada, geolocalização indisponível, API fora do ar) — a data
+  continua aparecendo sozinha, nunca bloqueia nem quebra o Dashboard.
+- Sem CSP configurada no projeto que precisasse de ajuste para liberar os
+  dois domínios externos novos (confirmado antes de codar).
+
+**Arquivos criados:**
+- `src/components/dashboard/location-weather-bar.tsx`
+
+**Arquivos alterados:**
+- `src/routes/_app.dashboard.tsx`
+
+**Commit:** `b703b40`.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 77/77 · eslint sem erros reais.
+
 **Status:** não enviado ao GitHub ainda (aguardando confirmação do usuário para push).
