@@ -12,6 +12,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 // -----------------------------------------------------------------------------
 // Schemas Zod — contrato do arquivo .fina-backup.json
@@ -111,9 +112,21 @@ export const exportBackup = createServerFn({ method: "GET" }).handler(
     const userId = await resolveActiveUserId();
 
     const [accRes, catRes, txRes] = await Promise.all([
-      sb.from("accounts").select("id, name, type, currency, credit_limit, closing_day, due_day, archived_at").eq("user_id", userId),
-      sb.from("categories").select("id, name, kind, parent_id, icon, color, archived_at").eq("user_id", userId),
-      sb.from("transactions").select("id, account_id, category_id, kind, type, amount, occurred_on, description, notes, transfer_id, paid_invoice_id").eq("user_id", userId).order("occurred_on", { ascending: true }),
+      sb
+        .from("accounts")
+        .select("id, name, type, currency, credit_limit, closing_day, due_day, archived_at")
+        .eq("user_id", userId),
+      sb
+        .from("categories")
+        .select("id, name, kind, parent_id, icon, color, archived_at")
+        .eq("user_id", userId),
+      sb
+        .from("transactions")
+        .select(
+          "id, account_id, category_id, kind, type, amount, occurred_on, description, notes, transfer_id, paid_invoice_id",
+        )
+        .eq("user_id", userId)
+        .order("occurred_on", { ascending: true }),
     ]);
 
     if (accRes.error) throw new Error(`accounts: ${accRes.error.message}`);
@@ -136,6 +149,34 @@ export const exportBackup = createServerFn({ method: "GET" }).handler(
     return payload;
   },
 );
+
+// -----------------------------------------------------------------------------
+// Blindagem: ids no arquivo de backup são escolhidos pelo próprio arquivo
+// (histórico da exportação), NUNCA pelo servidor. upsert({onConflict:"id"})
+// sobrescreveria silenciosamente uma linha de OUTRO usuário se o id colidir
+// (por acaso ou de propósito) — aqui rejeitamos a restauração inteira antes
+// de gravar qualquer coisa caso algum id já pertença a outro usuário.
+// -----------------------------------------------------------------------------
+async function assertRestorableIds(
+  sb: SupabaseClient,
+  table: "accounts" | "categories" | "transactions",
+  ids: string[],
+  userId: string,
+): Promise<void> {
+  const CHUNK = 500;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const slice = ids.slice(i, i + CHUNK);
+    const { data, error } = await sb.from(table).select("id, user_id").in("id", slice);
+    if (error) throw new Error(error.message);
+    for (const row of (data ?? []) as Array<{ id: string; user_id: string }>) {
+      if (row.user_id !== userId) {
+        throw new Error(
+          `Restauração abortada: o id ${row.id} em "${table}" já pertence a outro usuário.`,
+        );
+      }
+    }
+  }
+}
 
 // -----------------------------------------------------------------------------
 // restoreBackup
@@ -168,26 +209,56 @@ export const restoreBackup = createServerFn({ method: "POST" })
       const categories = payload.categories.map((c) => ({ ...c, user_id: userId }));
       const transactions = payload.transactions.map((t) => ({ ...t, user_id: userId }));
 
+      // Blindagem: account_id/category_id de cada transação também são ids
+      // escolhidos pelo arquivo — sem trigger de banco que valide dono nesse
+      // caminho (diferente de categories.parent_id, que tem trigger própria),
+      // então checamos aqui antes de gravar qualquer coisa.
+      const referencedAccountIds = Array.from(
+        new Set([...accounts.map((a) => a.id), ...transactions.map((t) => t.account_id)]),
+      );
+      await assertRestorableIds(sb, "accounts", referencedAccountIds, userId);
+
+      const referencedCategoryIds = Array.from(
+        new Set([
+          ...categories.map((c) => c.id),
+          ...transactions.map((t) => t.category_id).filter((id): id is string => !!id),
+        ]),
+      );
+      await assertRestorableIds(sb, "categories", referencedCategoryIds, userId);
+
       let accountsUp = 0;
       let categoriesUp = 0;
       let transactionsUp = 0;
 
       if (accounts.length > 0) {
-        const { error, count } = await sb.from("accounts").upsert(accounts, { onConflict: "id", count: "exact" });
+        const { error, count } = await sb
+          .from("accounts")
+          .upsert(accounts, { onConflict: "id", count: "exact" });
         if (error) throw new Error(`Falha ao restaurar contas: ${error.message}`);
         accountsUp = count ?? accounts.length;
       }
       if (categories.length > 0) {
-        const { error, count } = await sb.from("categories").upsert(categories, { onConflict: "id", count: "exact" });
+        const { error, count } = await sb
+          .from("categories")
+          .upsert(categories, { onConflict: "id", count: "exact" });
         if (error) throw new Error(`Falha ao restaurar categorias: ${error.message}`);
         categoriesUp = count ?? categories.length;
       }
       if (transactions.length > 0) {
+        await assertRestorableIds(
+          sb,
+          "transactions",
+          transactions.map((t) => t.id),
+          userId,
+        );
         const chunk = 500;
         for (let i = 0; i < transactions.length; i += chunk) {
           const slice = transactions.slice(i, i + chunk);
-          const { error, count } = await sb.from("transactions").upsert(slice, { onConflict: "id", count: "exact" });
-          if (error) throw new Error(`Falha ao restaurar transações (bloco ${i}): ${error.message}`);
+          const { error, count } = await sb
+            .from("transactions")
+            .upsert(slice, { onConflict: "id", count: "exact" });
+          if (error)
+            throw new Error(`Falha ao restaurar transações (bloco ${i}): ${error.message}`);
           transactionsUp += count ?? slice.length;
         }
       }

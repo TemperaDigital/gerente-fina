@@ -65,7 +65,9 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => DashboardInput.parse(input))
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { resolveActiveUserId } = await import("@/lib/supabase/resolve-user");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
     const referenceMonth = resolveReferenceMonth(data?.month);
 
     const [balancesRes, dreRes] = await Promise.all([
@@ -74,10 +76,12 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
         .select(
           "account_id, account_name, account_type, balance, transactions_count, last_movement_on",
         )
+        .eq("user_id", userId)
         .order("account_name", { ascending: true }),
       sb
         .from("monthly_dre")
         .select("income, expense, net_result")
+        .eq("user_id", userId)
         .eq("reference_month", referenceMonth)
         .maybeSingle(),
     ]);
@@ -285,7 +289,9 @@ export const getMonthlyDreHistory = createServerFn({ method: "GET" })
   })
   .handler(async ({ data }): Promise<MonthlyDreDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { resolveActiveUserId } = await import("@/lib/supabase/resolve-user");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     // Pega os últimos N meses em ordem cronológica
     const since = new Date();
@@ -296,6 +302,7 @@ export const getMonthlyDreHistory = createServerFn({ method: "GET" })
     const { data: rows, error } = await sb
       .from("monthly_dre")
       .select("reference_month, income, expense, net_result")
+      .eq("user_id", userId)
       .gte("reference_month", sinceStr)
       .order("reference_month", { ascending: true });
 
@@ -337,7 +344,9 @@ export interface OpenInvoiceDTO {
 
 export const getOpenCreditCardInvoices = createServerFn({ method: "GET" }).handler(async () => {
   const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+  const { resolveActiveUserId } = await import("@/lib/supabase/resolve-user");
   const sb = getSupabaseAdmin();
+  const userId = await resolveActiveUserId();
 
   const { data, error } = await sb
     .from("credit_card_invoices")
@@ -345,6 +354,7 @@ export const getOpenCreditCardInvoices = createServerFn({ method: "GET" }).handl
       `id, account_id, reference_month, closing_date, due_date,
          accounts:account_id ( name )`,
     )
+    .eq("user_id", userId)
     .eq("status", "open")
     .order("due_date", { ascending: true });
 
@@ -358,6 +368,7 @@ export const getOpenCreditCardInvoices = createServerFn({ method: "GET" }).handl
       .from("transactions")
       .select("invoice_id, amount")
       .in("invoice_id", invoiceIds)
+      .eq("user_id", userId)
       .eq("kind", "expense");
     for (const r of (expenseRows ?? []) as Array<{ invoice_id: string; amount: string }>) {
       totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + Number(r.amount));
@@ -366,6 +377,7 @@ export const getOpenCreditCardInvoices = createServerFn({ method: "GET" }).handl
       .from("transactions")
       .select("paid_invoice_id, amount, type")
       .in("paid_invoice_id", invoiceIds)
+      .eq("user_id", userId)
       .eq("kind", "invoice_payment")
       .eq("type", "credit");
     for (const r of (paymentRows ?? []) as Array<{
@@ -425,13 +437,16 @@ export const getCategoryBreakdown = createServerFn({ method: "GET" })
   })
   .handler(async ({ data }): Promise<CategoryBreakdownDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { resolveActiveUserId } = await import("@/lib/supabase/resolve-user");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const referenceMonth = `${data.month}-01`;
 
     const { data: rows, error } = await sb
       .from("monthly_dre_by_category")
       .select("category_id, category_name, total_amount, transactions_count")
+      .eq("user_id", userId)
       .eq("reference_month", referenceMonth)
       .eq("kind", data.kind)
       .order("total_amount", { ascending: false });
@@ -441,7 +456,11 @@ export const getCategoryBreakdown = createServerFn({ method: "GET" })
 
     // Enriquece com icon/color das categorias (uma query em lote)
     const catIds = rows.map((r) => r.category_id);
-    const { data: cats } = await sb.from("categories").select("id, icon, color").in("id", catIds);
+    const { data: cats } = await sb
+      .from("categories")
+      .select("id, icon, color")
+      .eq("user_id", userId)
+      .in("id", catIds);
 
     const catMap = new Map((cats ?? []).map((c) => [c.id, c]));
 

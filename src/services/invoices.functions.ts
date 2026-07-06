@@ -4,6 +4,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 
 export interface InvoiceMasterDTO {
   account_id: string;
@@ -24,10 +25,12 @@ export const listInvoiceMasters = createServerFn({ method: "GET" }).handler(
   async (): Promise<InvoiceMasterDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const { data: cards, error } = await sb
       .from("accounts")
       .select("id, name, closing_day, due_day, credit_limit_cents")
+      .eq("user_id", userId)
       .eq("type", "credit_card")
       .is("archived_at", null)
       .order("name");
@@ -40,6 +43,7 @@ export const listInvoiceMasters = createServerFn({ method: "GET" }).handler(
         .from("credit_card_invoices")
         .select("id, account_id, reference_month, closing_date, due_date")
         .in("account_id", ids)
+        .eq("user_id", userId)
         .eq("status", "open");
 
       const invRows = (invs ?? []) as Array<{
@@ -56,6 +60,7 @@ export const listInvoiceMasters = createServerFn({ method: "GET" }).handler(
           .from("transactions")
           .select("invoice_id, amount")
           .in("invoice_id", invIds)
+          .eq("user_id", userId)
           .eq("kind", "expense");
         for (const r of (exp ?? []) as Array<{ invoice_id: string; amount: string }>) {
           totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + Number(r.amount));
@@ -64,6 +69,7 @@ export const listInvoiceMasters = createServerFn({ method: "GET" }).handler(
           .from("transactions")
           .select("paid_invoice_id, amount")
           .in("paid_invoice_id", invIds)
+          .eq("user_id", userId)
           .eq("kind", "invoice_payment")
           .eq("type", "credit");
         for (const r of (pay ?? []) as Array<{ paid_invoice_id: string; amount: string }>) {
@@ -114,11 +120,13 @@ export const listInvoicesForPayment = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<InvoiceForPaymentDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const { data: rows, error } = await sb
       .from("credit_card_invoices")
       .select("id, reference_month, closing_date, due_date, status")
       .eq("account_id", data.account_id)
+      .eq("user_id", userId)
       .in("status", ["open", "closed"])
       .order("due_date", { ascending: false });
     if (error) throw new Error(error.message);
@@ -151,7 +159,10 @@ export interface InvoiceDetailDTO {
 
 const DetailInput = z.object({
   account_id: z.string().uuid(),
-  reference_month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  reference_month: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional(),
 });
 
 export const getInvoiceDetail = createServerFn({ method: "GET" })
@@ -159,11 +170,13 @@ export const getInvoiceDetail = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<InvoiceDetailDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const { data: monthsRaw, error: mErr } = await sb
       .from("credit_card_invoices")
       .select("id, reference_month, closing_date, due_date, status")
       .eq("account_id", data.account_id)
+      .eq("user_id", userId)
       .order("reference_month", { ascending: false });
     if (mErr) throw new Error(mErr.message);
 
@@ -181,6 +194,7 @@ export const getInvoiceDetail = createServerFn({ method: "GET" })
         .from("transactions")
         .select("invoice_id, amount")
         .in("invoice_id", invIds)
+        .eq("user_id", userId)
         .eq("kind", "expense");
       for (const r of (exp ?? []) as Array<{ invoice_id: string; amount: string }>) {
         totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + Number(r.amount));
@@ -189,6 +203,7 @@ export const getInvoiceDetail = createServerFn({ method: "GET" })
         .from("transactions")
         .select("paid_invoice_id, amount")
         .in("paid_invoice_id", invIds)
+        .eq("user_id", userId)
         .eq("kind", "invoice_payment")
         .eq("type", "credit");
       for (const r of (pay ?? []) as Array<{ paid_invoice_id: string; amount: string }>) {
@@ -210,8 +225,7 @@ export const getInvoiceDetail = createServerFn({ method: "GET" })
       const ref = `${data.reference_month}-01`;
       current = months.find((m) => m.reference_month === ref) ?? null;
     } else {
-      current =
-        months.find((m) => m.status === "open") ?? months[0] ?? null;
+      current = months.find((m) => m.status === "open") ?? months[0] ?? null;
     }
 
     let lines: InvoiceLineDTO[] = [];
@@ -223,15 +237,18 @@ export const getInvoiceDetail = createServerFn({ method: "GET" })
            categories:category_id ( name )`,
         )
         .eq("invoice_id", current.invoice_id)
+        .eq("user_id", userId)
         .order("occurred_on", { ascending: true });
       if (tErr) throw new Error(tErr.message);
-      lines = ((tx ?? []) as unknown as Array<{
-        id: string;
-        occurred_on: string;
-        description: string | null;
-        amount: string;
-        categories?: { name?: string | null } | null;
-      }>).map((t) => ({
+      lines = (
+        (tx ?? []) as unknown as Array<{
+          id: string;
+          occurred_on: string;
+          description: string | null;
+          amount: string;
+          categories?: { name?: string | null } | null;
+        }>
+      ).map((t) => ({
         id: t.id,
         occurred_on: t.occurred_on,
         description: t.description,

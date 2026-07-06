@@ -223,6 +223,7 @@ export const getTransactionsList = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<TransactionsListDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     let from = data.from;
     let to = data.to;
@@ -247,6 +248,7 @@ export const getTransactionsList = createServerFn({ method: "GET" })
          categories:category_id ( name, nature )`,
         { count: "exact" },
       )
+      .eq("user_id", userId)
       .order("occurred_on", { ascending: false })
       .order("created_at", { ascending: false })
       .range(rangeFrom, rangeTo);
@@ -319,6 +321,7 @@ export const getTransactionsForExport = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<TransactionListItemDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     let from: string | undefined;
     let to: string | undefined;
@@ -338,6 +341,7 @@ export const getTransactionsForExport = createServerFn({ method: "GET" })
       const { data: accs, error: accErr } = await sb
         .from("accounts")
         .select("id")
+        .eq("user_id", userId)
         .in("type", typesFilter);
       if (accErr) throw new Error(accErr.message);
       accountIds = (accs ?? []).map((a) => a.id as string);
@@ -353,6 +357,7 @@ export const getTransactionsForExport = createServerFn({ method: "GET" })
          accounts:account_id ( name ),
          categories:category_id ( name, nature )`,
       )
+      .eq("user_id", userId)
       .order("occurred_on", { ascending: false })
       .order("created_at", { ascending: false })
       .range(0, EXPORT_ROW_LIMIT - 1);
@@ -379,6 +384,7 @@ export const getReviewQueue = createServerFn({ method: "GET" }).handler(
   async (): Promise<ReviewGroupDTO[]> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     // O UNIQUE parcial em (user_id, dedup_hash) impede DOIS hashes iguais via
     // INSERT direto. A fila de conciliação real é alimentada por importações
@@ -397,6 +403,7 @@ export const getReviewQueue = createServerFn({ method: "GET" }).handler(
          accounts:account_id ( name ),
          categories:category_id ( name )`,
       )
+      .eq("user_id", userId)
       .not("dedup_hash", "is", null)
       .in("source", ["import", "pluggy"])
       .order("dedup_hash", { ascending: true })
@@ -577,9 +584,58 @@ export const createTransactionEntry = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => CreateInput.parse(input))
   .handler(async ({ data }): Promise<CreateTransactionResultDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { accountBelongsToUser } = await import("@/lib/finance/active-account.server");
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
     const warnings: string[] = [];
+
+    // Blindagem: TODO id vindo do cliente (conta, contraparte, categoria,
+    // recorrência, fatura) precisa pertencer ao usuário ativo — sem isso um
+    // request malicioso grava lançamento seu com FK apontando pra dado de
+    // outro usuário, corrompendo o saldo da CONTA ALHEIA (account_balances
+    // agrega só por account_id, sem checar dono da transação).
+    const accountOk = await accountBelongsToUser(sb, userId, data.account_id);
+    if (!accountOk) throw new Error("Conta não pertence ao usuário ou foi arquivada.");
+
+    if (data.counterpart_account_id) {
+      const counterpartOk = await accountBelongsToUser(sb, userId, data.counterpart_account_id);
+      if (!counterpartOk) {
+        throw new Error("Conta de destino não pertence ao usuário ou foi arquivada.");
+      }
+    }
+
+    if (data.category_id) {
+      const { data: cat, error: catErr } = await sb
+        .from("categories")
+        .select("id")
+        .eq("id", data.category_id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (catErr) throw new Error(catErr.message);
+      if (!cat) throw new Error("Categoria não pertence ao usuário.");
+    }
+
+    if (data.link_recurrence_id) {
+      const { data: rec, error: recErr } = await sb
+        .from("recurrences")
+        .select("id")
+        .eq("id", data.link_recurrence_id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (recErr) throw new Error(recErr.message);
+      if (!rec) throw new Error("Recorrência não pertence ao usuário.");
+    }
+
+    if (data.paid_invoice_id) {
+      const { data: inv, error: invErr } = await sb
+        .from("credit_card_invoices")
+        .select("id")
+        .eq("id", data.paid_invoice_id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (invErr) throw new Error(invErr.message);
+      if (!inv) throw new Error("Fatura não encontrada ou não pertence ao usuário.");
+    }
 
     // -------- TRANSFER (2 pernas vinculadas por transfer_id) ---------------
     if (data.kind === "transfer") {
@@ -671,6 +727,7 @@ export const createTransactionEntry = createServerFn({ method: "POST" })
         .from("accounts")
         .select("type, closing_day, due_day")
         .eq("id", data.account_id)
+        .eq("user_id", userId)
         .maybeSingle();
       if (accErr) throw new Error(accErr.message);
       if (!acc || acc.type !== "credit_card") {
@@ -820,6 +877,7 @@ export const getTransactionDeleteImpact = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<TransactionDeleteImpactDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const { data: item, error } = await sb
       .from("installment_items")
@@ -827,6 +885,7 @@ export const getTransactionDeleteImpact = createServerFn({ method: "GET" })
         "purchase_id, installment_number, installment_purchases:purchase_id ( description, installments_count )",
       )
       .eq("transaction_id", data.id)
+      .eq("user_id", userId)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!item) return { linked_installment: null };
@@ -841,6 +900,7 @@ export const getTransactionDeleteImpact = createServerFn({ method: "GET" })
       .from("installment_items")
       .select("id", { count: "exact", head: true })
       .eq("purchase_id", typed.purchase_id)
+      .eq("user_id", userId)
       .not("transaction_id", "is", null);
     if (countErr) throw new Error(countErr.message);
 
@@ -865,8 +925,17 @@ export const discardTransaction = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const { error } = await sb.from("transactions").delete().eq("id", data.id);
+    const userId = await resolveActiveUserId();
+    const { error, data: deleted } = await sb
+      .from("transactions")
+      .delete()
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!deleted || deleted.length === 0) {
+      throw new Error("Lançamento não encontrado ou não pertence ao usuário.");
+    }
     return { ok: true };
   });
 
@@ -886,12 +955,14 @@ export const bulkDiscardTransactions = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
     const { error, count } = await sb
       .from("transactions")
       .delete({ count: "exact" })
-      .in("id", data.ids);
+      .in("id", data.ids)
+      .eq("user_id", userId);
     if (error) throw new Error(error.message);
-    return { deleted_count: count ?? data.ids.length };
+    return { deleted_count: count ?? 0 };
   });
 
 // ---------------------------------------------------------------------------
@@ -918,11 +989,13 @@ export const mergeDuplicateTransactions = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const { data: keeperBefore, error: kErr } = await sb
       .from("transactions")
       .select("id, dedup_hash, source, external_id")
       .eq("id", data.keep_id)
+      .eq("user_id", userId)
       .maybeSingle();
     if (kErr) throw new Error(kErr.message);
     if (!keeperBefore) throw new Error("Transação a preservar não encontrada.");
@@ -930,7 +1003,8 @@ export const mergeDuplicateTransactions = createServerFn({ method: "POST" })
     const { data: absorbed, error: aErr } = await sb
       .from("transactions")
       .select("id, dedup_hash, source, external_id")
-      .in("id", data.absorb_ids);
+      .in("id", data.absorb_ids)
+      .eq("user_id", userId);
     if (aErr) throw new Error(aErr.message);
     if (!absorbed || absorbed.length === 0) {
       throw new Error("Itens a absorver não encontrados.");
@@ -944,7 +1018,11 @@ export const mergeDuplicateTransactions = createServerFn({ method: "POST" })
     // Ordem crítica: DELETE primeiro libera o índice UNIQUE parcial em
     // (user_id, dedup_hash), evitando conflito quando o keeper for
     // re-hasheado pelo trigger ao receber source='import'/'pluggy'.
-    const { error: dErr } = await sb.from("transactions").delete().in("id", data.absorb_ids);
+    const { error: dErr } = await sb
+      .from("transactions")
+      .delete()
+      .in("id", data.absorb_ids)
+      .eq("user_id", userId);
     if (dErr) throw new Error(`Falha ao remover duplicatas: ${dErr.message}`);
 
     // Patch: preserva amarração do Open Finance (external_id) e marca source
@@ -954,7 +1032,11 @@ export const mergeDuplicateTransactions = createServerFn({ method: "POST" })
     if (donor.external_id && !keeperBefore.external_id) patch.external_id = donor.external_id;
 
     if (Object.keys(patch).length > 0) {
-      const { error: uErr } = await sb.from("transactions").update(patch).eq("id", data.keep_id);
+      const { error: uErr } = await sb
+        .from("transactions")
+        .update(patch)
+        .eq("id", data.keep_id)
+        .eq("user_id", userId);
       if (uErr) {
         // Não há rollback dos deletes; logamos via warning no retorno.
         throw new Error(`Duplicatas removidas, mas falha ao absorver metadados: ${uErr.message}`);
@@ -996,6 +1078,7 @@ export const getTransactionById = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<TransactionDetailDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
     const { data: row, error } = await sb
       .from("transactions")
@@ -1007,6 +1090,7 @@ export const getTransactionById = createServerFn({ method: "GET" })
          categories:category_id ( name )`,
       )
       .eq("id", data.id)
+      .eq("user_id", userId)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!row) throw new Error("Lançamento não encontrado.");
@@ -1017,6 +1101,7 @@ export const getTransactionById = createServerFn({ method: "GET" })
         "installment_number, purchase_id, installment_purchases:purchase_id ( description, installments_count )",
       )
       .eq("transaction_id", data.id)
+      .eq("user_id", userId)
       .maybeSingle();
 
     const instTyped = instRow as unknown as {
@@ -1039,6 +1124,7 @@ export const getTransactionById = createServerFn({ method: "GET" })
         .from("transactions")
         .select("account_id, accounts:account_id ( name )")
         .eq("transfer_id", rowTransferId)
+        .eq("user_id", userId)
         .neq("id", data.id)
         .maybeSingle();
       transferCounterpartName =
@@ -1109,9 +1195,27 @@ export const updateTransactionEntry = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => UpdateTxInput.parse(input))
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { accountBelongsToUser } = await import("@/lib/finance/active-account.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
 
-    const { error } = await sb
+    // Blindagem: account_id/category_id NOVOS também vêm do cliente — sem
+    // checar dono aqui, dava pra repontar um lançamento próprio pra conta/
+    // categoria de outro usuário (corrompendo o saldo da conta alheia).
+    const accountOk = await accountBelongsToUser(sb, userId, data.account_id);
+    if (!accountOk) throw new Error("Conta não pertence ao usuário ou foi arquivada.");
+    if (data.category_id) {
+      const { data: cat, error: catErr } = await sb
+        .from("categories")
+        .select("id")
+        .eq("id", data.category_id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (catErr) throw new Error(catErr.message);
+      if (!cat) throw new Error("Categoria não pertence ao usuário.");
+    }
+
+    const { error, data: updated } = await sb
       .from("transactions")
       .update({
         description: data.description,
@@ -1121,8 +1225,13 @@ export const updateTransactionEntry = createServerFn({ method: "POST" })
         category_id: data.category_id ?? null,
         notes: data.notes ?? null,
       })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!updated || updated.length === 0) {
+      throw new Error("Lançamento não encontrado ou não pertence ao usuário.");
+    }
     return { ok: true };
   });
 
@@ -1190,7 +1299,60 @@ export const convertTransactionEntry = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => ConvertInput.parse(input))
   .handler(async ({ data }): Promise<ConvertTransactionResultDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { accountBelongsToUser } = await import("@/lib/finance/active-account.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
+
+    // convert_transaction_entry (migration 0013) é security definer e roda
+    // via service_role — ela não tem acesso a auth.uid() para validar posse
+    // sozinha, e reaproveita o user_id da própria transação para a linha
+    // nova (nunca troca de dono). Quem PRECISA garantir que o usuário ativo
+    // é o dono da transação é esta camada, antes de sequer chamar a RPC.
+    const { data: ownerRow, error: ownerErr } = await sb
+      .from("transactions")
+      .select("id")
+      .eq("id", data.transaction_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (ownerErr) throw new Error(ownerErr.message);
+    if (!ownerRow) throw new Error("Lançamento não encontrado ou não pertence ao usuário.");
+
+    // A RPC também não valida dono de account_id/category_id/counterpart/
+    // fatura — só reaproveita o v_user_id da transação original. Sem checar
+    // aqui, a conversão gravaria a linha nova com FK pra conta/categoria/
+    // fatura de outro usuário (mesma corrupção de account_balances do
+    // createTransactionEntry).
+    const accountOk = await accountBelongsToUser(sb, userId, data.account_id);
+    if (!accountOk) throw new Error("Conta não pertence ao usuário ou foi arquivada.");
+
+    if (data.counterpart_account_id) {
+      const counterpartOk = await accountBelongsToUser(sb, userId, data.counterpart_account_id);
+      if (!counterpartOk) {
+        throw new Error("Conta de destino não pertence ao usuário ou foi arquivada.");
+      }
+    }
+
+    if (data.category_id) {
+      const { data: cat, error: catErr } = await sb
+        .from("categories")
+        .select("id")
+        .eq("id", data.category_id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (catErr) throw new Error(catErr.message);
+      if (!cat) throw new Error("Categoria não pertence ao usuário.");
+    }
+
+    if (data.paid_invoice_id) {
+      const { data: inv, error: invErr } = await sb
+        .from("credit_card_invoices")
+        .select("id")
+        .eq("id", data.paid_invoice_id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (invErr) throw new Error(invErr.message);
+      if (!inv) throw new Error("Fatura não encontrada ou não pertence ao usuário.");
+    }
 
     const idempotencyKey =
       data.new_kind === "invoice_payment" ? (data.idempotency_key ?? crypto.randomUUID()) : null;

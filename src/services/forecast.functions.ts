@@ -70,7 +70,8 @@ export const getForecast = createServerFn({ method: "GET" })
     // 1) Saldo consolidado atual
     const { data: balances, error: balErr } = await sb
       .from("account_balances")
-      .select("balance");
+      .select("balance")
+      .eq("user_id", userId);
     if (balErr) throw new Error(`account_balances: ${balErr.message}`);
     let currentBalance = "0.00";
     for (const b of (balances ?? []) as Array<{ balance: string | null }>) {
@@ -113,10 +114,7 @@ export const getForecast = createServerFn({ method: "GET" })
     for (const it of (items ?? []) as Array<{ amount: string; due_date: string }>) {
       const c = toCents(it.amount);
       totalPendingCents += c;
-      installmentsByDay.set(
-        it.due_date,
-        (installmentsByDay.get(it.due_date) ?? 0n) + c,
-      );
+      installmentsByDay.set(it.due_date, (installmentsByDay.get(it.due_date) ?? 0n) + c);
     }
 
     // 4) Projeção dia a dia

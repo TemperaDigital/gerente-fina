@@ -12,6 +12,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 import {
   computeNextRun,
@@ -177,7 +178,8 @@ export const confirmScheduledItem = createServerFn({ method: "POST" })
       const { error: updErr } = await sb
         .from("recurrences")
         .update({ active: false })
-        .eq("id", typed.id);
+        .eq("id", typed.id)
+        .eq("user_id", userId);
       if (updErr) throw new Error(updErr.message);
       return { created_count: 1, deactivated: true };
     }
@@ -191,7 +193,8 @@ export const confirmScheduledItem = createServerFn({ method: "POST" })
     const { error: updErr } = await sb
       .from("recurrences")
       .update({ next_run_on: newNextRun, active: !shouldDeactivate })
-      .eq("id", typed.id);
+      .eq("id", typed.id)
+      .eq("user_id", userId);
     if (updErr) throw new Error(updErr.message);
 
     return { created_count: 1, deactivated: shouldDeactivate };
@@ -248,6 +251,26 @@ const CreateScheduledItemInput = z
   .object(ScheduledItemFields)
   .superRefine(validateScheduledItemDates);
 
+async function assertOwnedAccountAndCategory(
+  sb: SupabaseClient,
+  userId: string,
+  accountId: string,
+  categoryId: string,
+): Promise<void> {
+  const { accountBelongsToUser } = await import("@/lib/finance/active-account.server");
+  const accountOk = await accountBelongsToUser(sb, userId, accountId);
+  if (!accountOk) throw new Error("Conta não pertence ao usuário ou foi arquivada.");
+
+  const { data: cat, error: catErr } = await sb
+    .from("categories")
+    .select("id")
+    .eq("id", categoryId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (catErr) throw new Error(catErr.message);
+  if (!cat) throw new Error("Categoria não pertence ao usuário.");
+}
+
 export const createScheduledItem = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => CreateScheduledItemInput.parse(input))
   .handler(async ({ data }): Promise<{ id: string }> => {
@@ -255,6 +278,8 @@ export const createScheduledItem = createServerFn({ method: "POST" })
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
     const type = data.kind === "income" ? "credit" : "debit";
+
+    await assertOwnedAccountAndCategory(sb, userId, data.account_id, data.category_id);
 
     const { data: created, error } = await sb
       .from("recurrences")
@@ -288,9 +313,12 @@ export const updateScheduledItem = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
     const type = data.kind === "income" ? "credit" : "debit";
 
-    const { error } = await sb
+    await assertOwnedAccountAndCategory(sb, userId, data.account_id, data.category_id);
+
+    const { error, data: updated } = await sb
       .from("recurrences")
       .update({
         account_id: data.account_id,
@@ -305,8 +333,13 @@ export const updateScheduledItem = createServerFn({ method: "POST" })
         next_run_on: data.date,
         end_on: data.frequency === "once" ? null : (data.end_on ?? null),
       })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!updated || updated.length === 0) {
+      throw new Error("Agendamento não encontrado ou não pertence ao usuário.");
+    }
     return { ok: true };
   });
 
@@ -318,7 +351,16 @@ export const deleteScheduledItem = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
-    const { error } = await sb.from("recurrences").delete().eq("id", data.id);
+    const userId = await resolveActiveUserId();
+    const { error, data: deleted } = await sb
+      .from("recurrences")
+      .delete()
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!deleted || deleted.length === 0) {
+      throw new Error("Agendamento não encontrado ou não pertence ao usuário.");
+    }
     return { ok: true };
   });

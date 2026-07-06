@@ -155,6 +155,19 @@ export const commitImport = createServerFn({ method: "POST" })
       if (!ok) throw new Error(`Conta ${accId} não pertence ao usuário ou foi arquivada.`);
     }
 
+    // Blindagem: idem para categoria (id escolhido pelo cliente)
+    const uniqueCategoryIds = Array.from(new Set(data.rows.map((r) => r.category_id)));
+    const { data: ownedCats, error: catOwnErr } = await sb
+      .from("categories")
+      .select("id")
+      .eq("user_id", userId)
+      .in("id", uniqueCategoryIds);
+    if (catOwnErr) throw new Error(catOwnErr.message);
+    const ownedCatSet = new Set((ownedCats ?? []).map((c) => c.id as string));
+    for (const id of uniqueCategoryIds) {
+      if (!ownedCatSet.has(id)) throw new Error(`Categoria ${id} não pertence ao usuário.`);
+    }
+
     const payload = data.rows.map((row) => ({
       user_id: userId,
       account_id: row.account_id,
@@ -393,6 +406,7 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
     const { data: cats, error: catErr } = await sb
       .from("categories")
       .select("id, name, kind")
+      .eq("user_id", userId)
       .is("archived_at", null);
     if (catErr) throw new Error(`Falha ao ler categorias: ${catErr.message}`);
     const categories = cats ?? [];
@@ -447,6 +461,7 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
       .from("accounts")
       .select("type, closing_day, due_day")
       .eq("id", data.account_id)
+      .eq("user_id", userId)
       .maybeSingle();
     const isCardAccount = accountRow?.type === "credit_card";
 
@@ -455,6 +470,7 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
           .from("installment_purchases")
           .select("id, description, installments_count")
           .eq("account_id", data.account_id)
+          .eq("user_id", userId)
           .eq("status", "active")
       : { data: [] as Array<{ id: string; description: string; installments_count: number }> };
 
@@ -462,6 +478,7 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
       .from("recurrences")
       .select("id, description, kind")
       .eq("account_id", data.account_id)
+      .eq("user_id", userId)
       .eq("active", true);
 
     // Últimas transações da conta — heurística "descrição+valor repetidos em
@@ -471,6 +488,7 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
       .from("transactions")
       .select("description, amount, kind, occurred_on")
       .eq("account_id", data.account_id)
+      .eq("user_id", userId)
       .order("occurred_on", { ascending: false })
       .limit(500);
 
@@ -688,6 +706,40 @@ export const commitSmartImport = createServerFn({ method: "POST" })
         if (!ok) throw new Error(`Conta ${accId} não pertence ao usuário.`);
       }
 
+      // Blindagem de categoria/recorrência existentes (ids escolhidos pelo
+      // cliente) — nunca confia em ids vindos do request sem checar dono.
+      const uniqueCategoryIds = Array.from(
+        new Set(data.rows.map((r) => r.category_id).filter((id): id is string => !!id)),
+      );
+      if (uniqueCategoryIds.length > 0) {
+        const { data: ownedCats, error: catOwnErr } = await sb
+          .from("categories")
+          .select("id")
+          .eq("user_id", userId)
+          .in("id", uniqueCategoryIds);
+        if (catOwnErr) throw new Error(catOwnErr.message);
+        const ownedCatSet = new Set((ownedCats ?? []).map((c) => c.id as string));
+        for (const id of uniqueCategoryIds) {
+          if (!ownedCatSet.has(id)) throw new Error(`Categoria ${id} não pertence ao usuário.`);
+        }
+      }
+
+      const uniqueRecurrenceIds = Array.from(
+        new Set(data.rows.map((r) => r.matched_recurrence_id).filter((id): id is string => !!id)),
+      );
+      if (uniqueRecurrenceIds.length > 0) {
+        const { data: ownedRecs, error: recOwnErr } = await sb
+          .from("recurrences")
+          .select("id")
+          .eq("user_id", userId)
+          .in("id", uniqueRecurrenceIds);
+        if (recOwnErr) throw new Error(recOwnErr.message);
+        const ownedRecSet = new Set((ownedRecs ?? []).map((r) => r.id as string));
+        for (const id of uniqueRecurrenceIds) {
+          if (!ownedRecSet.has(id)) throw new Error(`Recorrência ${id} não pertence ao usuário.`);
+        }
+      }
+
       // 1. Resolve categorias novas: agrupa por (nome+kind), cria uma vez só.
       //    Case-insensitive e reaproveita se já existir no banco (corrida segura).
       const newCatKeys = new Map<string, { name: string; kind: "income" | "expense" }>();
@@ -708,6 +760,7 @@ export const commitSmartImport = createServerFn({ method: "POST" })
         const { data: found } = await sb
           .from("categories")
           .select("id")
+          .eq("user_id", userId)
           .eq("kind", cat.kind)
           .ilike("name", cat.name)
           .is("archived_at", null)
@@ -808,6 +861,7 @@ export const commitSmartImport = createServerFn({ method: "POST" })
             .select("id")
             .eq("purchase_id", action.purchase_id)
             .eq("installment_number", action.installment_number)
+            .eq("user_id", userId)
             .is("transaction_id", null)
             .maybeSingle();
           if (itemErr || !targetItem) {
@@ -833,6 +887,7 @@ export const commitSmartImport = createServerFn({ method: "POST" })
             .from("accounts")
             .select("closing_day, due_day")
             .eq("id", row.account_id)
+            .eq("user_id", userId)
             .maybeSingle();
 
           const { totalAmount, amounts } = estimateInstallmentSeries(
@@ -952,6 +1007,7 @@ export const commitSmartImport = createServerFn({ method: "POST" })
           .from("installment_items")
           .update({ transaction_id: txId })
           .eq("id", itemId)
+          .eq("user_id", userId)
           .is("transaction_id", null)
           .select("id");
         if (linkErr || !updated?.length) {

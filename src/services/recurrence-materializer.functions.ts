@@ -159,7 +159,8 @@ export const materializeDueRecurrences = createServerFn({ method: "POST" })
         const { error: updateError } = await sb
           .from("recurrences")
           .update({ active: false })
-          .eq("id", rec.id);
+          .eq("id", rec.id)
+          .eq("user_id", userId);
         if (!updateError) {
           advanced++;
           deactivated++;
@@ -177,7 +178,8 @@ export const materializeDueRecurrences = createServerFn({ method: "POST" })
           next_run_on: newNextRun,
           active: shouldDeactivate ? false : true,
         })
-        .eq("id", rec.id);
+        .eq("id", rec.id)
+        .eq("user_id", userId);
 
       if (!updateError) {
         advanced++;
