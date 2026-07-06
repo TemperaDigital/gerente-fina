@@ -24,7 +24,27 @@
       "Bash(grep -n \"'/_app/accounts': typeof AppAccountsRoute$\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routeTree.gen.ts)",
       "Bash(grep -n \"Widget de faturas abertas\\\\|</GlassCard>\\\\|\\)}$\" /home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/_app.dashboard.tsx)",
       "Bash(git merge *)",
-      "Bash(cd /home/td-fguerra/Documentos/GitHub/gerente-fina *)"
+      "Bash(cd /home/td-fguerra/Documentos/GitHub/gerente-fina *)",
+      "Read(//home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c/**)",
+      "Bash(cd /home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c *)",
+      "Bash(kill 22794)",
+      "Bash(jobs -l)",
+      "Read(//home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/_authenticated/**)",
+      "Bash(nohup npx vite dev --port 5184)",
+      "Bash(echo \"started pid $!\")",
+      "Bash(kill 49186)",
+      "Bash(npm run *)",
+      "Bash(nohup npx vite dev --port 5185)",
+      "Bash(pkill -f \"vite dev --port 5185\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5185/)",
+      "Bash(disown)",
+      "Bash(uuidgen)",
+      "Bash(python3 -c \"import uuid; print\\(uuid.uuid4\\(\\)\\)\")",
+      "Bash(node -e \"console.log\\(crypto.randomUUID\\(\\)\\)\")",
+      "Bash(ls /home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c/supabase/migrations/ | tail -5)",
+      "Read(//home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c/supabase/migrations/**)",
+      "Bash(cat /home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c/supabase/migrations/20260706112923_d360aba5-6a16-43d9-9180-eeaad9f6f0ae.sql)",
+      "Bash(grep -v \"^$\")"
     ],
     "additionalDirectories": [
       "/home/td-fguerra/Documentos/GitHub/gerente-fina/docs/migrations"
