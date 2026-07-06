@@ -373,14 +373,16 @@ function DashboardPage() {
               </p>
             </div>
             <div className="rounded-lg bg-white/[0.03] p-3">
-              <p className="text-[10px] uppercase tracking-wide text-foreground/40">Custo Fixo</p>
+              <p className="text-[10px] uppercase tracking-wide text-foreground/40">
+                Despesas Fixas
+              </p>
               <p className="mt-1 font-mono font-semibold text-rose-300">
                 −{BRL(cashBasis.fixed_expense_cash)}
               </p>
             </div>
             <div className="rounded-lg bg-white/[0.03] p-3">
               <p className="text-[10px] uppercase tracking-wide text-foreground/40">
-                Custo Variável
+                Despesas Variáveis
               </p>
               <p className="mt-1 font-mono font-semibold text-rose-300">
                 −{BRL(cashBasis.variable_expense_cash)}
