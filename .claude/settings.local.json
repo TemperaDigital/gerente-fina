@@ -44,7 +44,9 @@
       "Bash(ls /home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c/supabase/migrations/ | tail -5)",
       "Read(//home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c/supabase/migrations/**)",
       "Bash(cat /home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c/supabase/migrations/20260706112923_d360aba5-6a16-43d9-9180-eeaad9f6f0ae.sql)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Skill(artifact-design)",
+      "Skill(artifact-design:*)"
     ],
     "additionalDirectories": [
       "/home/td-fguerra/Documentos/GitHub/gerente-fina/docs/migrations"
