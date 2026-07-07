@@ -46,7 +46,10 @@
       "Bash(cat /home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c/supabase/migrations/20260706112923_d360aba5-6a16-43d9-9180-eeaad9f6f0ae.sql)",
       "Bash(grep -v \"^$\")",
       "Skill(artifact-design)",
-      "Skill(artifact-design:*)"
+      "Skill(artifact-design:*)",
+      "Bash(cd /home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c && grep -n \"handleEtapaChange = useCallback\" src/routes/_authenticated/processos.\\\\$id.tsx)",
+      "Bash(cd /home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c && grep -n \"smoothstep\\\\|markerEnd\\\\|onEdgesDelete\\\\|onConnect = useCallback\" src/routes/_authenticated/processos.\\\\$id.tsx)",
+      "Bash(cd /home/td-fguerra/Documentos/GitHub/descentralizandotarefas-459cdb7c && sed -n '1122p' src/routes/_authenticated/processos.\\\\$id.tsx)"
     ],
     "additionalDirectories": [
       "/home/td-fguerra/Documentos/GitHub/gerente-fina/docs/migrations"
