@@ -159,7 +159,7 @@ export const exportBackup = createServerFn({ method: "GET" }).handler(
 // -----------------------------------------------------------------------------
 async function assertRestorableIds(
   sb: SupabaseClient,
-  table: "accounts" | "categories" | "transactions",
+  table: "accounts" | "categories" | "transactions" | "credit_card_invoices",
   ids: string[],
   userId: string,
 ): Promise<void> {
@@ -172,6 +172,38 @@ async function assertRestorableIds(
       if (row.user_id !== userId) {
         throw new Error(
           `Restauração abortada: o id ${row.id} em "${table}" já pertence a outro usuário.`,
+        );
+      }
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Blindagem (Missão 30): transfer_id não é FK pra outra tabela — é só um
+// valor de agrupamento reaproveitado pelas 2 pernas de uma transferência
+// dentro da própria `transactions`. Sem checar aqui, um backup adulterado
+// podia gravar uma transação própria com o MESMO transfer_id de uma
+// transferência real de outro usuário — o lookup de "conta contraparte" em
+// enrichTransactionRows (transactions.functions.ts) casava por transfer_id
+// sem filtrar por dono, o que vazava o nome da conta alheia na listagem.
+// -----------------------------------------------------------------------------
+async function assertRestorableTransferIds(
+  sb: SupabaseClient,
+  transferIds: string[],
+  userId: string,
+): Promise<void> {
+  const CHUNK = 500;
+  for (let i = 0; i < transferIds.length; i += CHUNK) {
+    const slice = transferIds.slice(i, i + CHUNK);
+    const { data, error } = await sb
+      .from("transactions")
+      .select("transfer_id, user_id")
+      .in("transfer_id", slice);
+    if (error) throw new Error(error.message);
+    for (const row of (data ?? []) as Array<{ transfer_id: string; user_id: string }>) {
+      if (row.user_id !== userId) {
+        throw new Error(
+          `Restauração abortada: o transfer_id ${row.transfer_id} já pertence a outro usuário.`,
         );
       }
     }
@@ -225,6 +257,27 @@ export const restoreBackup = createServerFn({ method: "POST" })
         ]),
       );
       await assertRestorableIds(sb, "categories", referencedCategoryIds, userId);
+
+      // Blindagem (Missão 30): transfer_id e paid_invoice_id são os outros 2
+      // "ids de outro recurso" que TransactionSchema aceita do arquivo — sem
+      // isso, um backup adulterado podia corromper o saldo devedor de uma
+      // fatura alheia (paid_invoice_id) ou colidir com uma transferência
+      // real de outro usuário (transfer_id). Mesma classe de bug já corrigida
+      // pra account_id/category_id na Missão 29, agora fechada pros 2 campos
+      // que tinham ficado de fora.
+      const referencedTransferIds = Array.from(
+        new Set(transactions.map((t) => t.transfer_id).filter((id): id is string => !!id)),
+      );
+      if (referencedTransferIds.length > 0) {
+        await assertRestorableTransferIds(sb, referencedTransferIds, userId);
+      }
+
+      const referencedInvoiceIds = Array.from(
+        new Set(transactions.map((t) => t.paid_invoice_id).filter((id): id is string => !!id)),
+      );
+      if (referencedInvoiceIds.length > 0) {
+        await assertRestorableIds(sb, "credit_card_invoices", referencedInvoiceIds, userId);
+      }
 
       let accountsUp = 0;
       let categoriesUp = 0;
