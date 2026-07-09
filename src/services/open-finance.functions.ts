@@ -1,5 +1,5 @@
 /**
- * Server Functions — Open Finance (conexões bancárias automáticas).
+ * Server Functions — Open Finance (conexões bancárias).
  *
  * Substitui o acesso direto ao Supabase pelo client anon key no navegador
  * (achado da Missão 30 — auditoria de isolamento entre usuários) pelo mesmo
@@ -8,12 +8,18 @@
  * em profundidade, mas a proteção real — como em toda outra tabela deste
  * projeto — é o filtro explícito abaixo, já que `getSupabaseAdmin()` ignora
  * RLS por completo.
+ *
+ * Sem credenciais Pluggy/Belvo ainda (Missão 31) — toda conexão criada por
+ * aqui é `status: "MANUAL"` (cadastro de referência, sem sincronização
+ * automática). `OUTDATED`/`UPDATED`/`LOGIN_ERROR` ficam reservados pro dia
+ * em que uma integração real existir; `createBankConnection` não aceita
+ * esses valores do cliente de propósito.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 
-export type BankConnectionStatus = "OUTDATED" | "UPDATED" | "LOGIN_ERROR";
+export type BankConnectionStatus = "MANUAL" | "OUTDATED" | "UPDATED" | "LOGIN_ERROR";
 
 export interface BankConnectionDTO {
   id: string;
@@ -40,10 +46,7 @@ export const listBankConnections = createServerFn({ method: "GET" }).handler(
 );
 
 const CreateInput = z.object({
-  provider_item_id: z.string().trim().min(1).max(200),
   institution_name: z.string().trim().min(1).max(120),
-  status: z.enum(["OUTDATED", "UPDATED", "LOGIN_ERROR"]).default("UPDATED"),
-  last_synced_at: z.string().optional().nullable(),
 });
 
 export const createBankConnection = createServerFn({ method: "POST" })
@@ -55,16 +58,13 @@ export const createBankConnection = createServerFn({ method: "POST" })
 
     const { data: row, error } = await sb
       .from("bank_connections")
-      .upsert(
-        {
-          user_id: userId,
-          provider_item_id: data.provider_item_id,
-          institution_name: data.institution_name,
-          status: data.status,
-          last_synced_at: data.last_synced_at ?? new Date().toISOString(),
-        },
-        { onConflict: "user_id,provider_item_id" },
-      )
+      .insert({
+        user_id: userId,
+        provider_item_id: `manual_${crypto.randomUUID()}`,
+        institution_name: data.institution_name,
+        status: "MANUAL",
+        last_synced_at: null,
+      })
       .select("id")
       .single();
     if (error) throw new Error(error.message);

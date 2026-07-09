@@ -17,6 +17,7 @@ import {
   MessageSquare,
   FileUp,
   CalendarClock,
+  Link2,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/transactions", label: "Lançamentos", icon: ArrowLeftRight },
   { to: "/accounts", label: "Contas", icon: Wallet },
+  { to: "/open-finance", label: "Open Finance", icon: Link2 },
   { to: "/credit-cards", label: "Cartões", icon: CreditCard },
   { to: "/import", label: "Importar Extrato", icon: FileUp },
   { to: "/categories", label: "Categorias", icon: Tags },

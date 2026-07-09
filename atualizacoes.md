@@ -1058,3 +1058,53 @@ foi aplicada — precisa rodar manualmente no SQL Editor antes do deploy,
 mesmo fluxo das anteriores.
 
 **Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 31. /open-finance — cadastro manual de instituições (sem credenciais Pluggy/Belvo ainda)
+
+**Origem:** ao investigar a Missão 30, ficou claro que `/open-finance` nunca
+funcionou de verdade: o SDK do Pluggy nunca é carregado no app (nenhum
+script incluído em lugar nenhum), e a Edge Function `open-finance-token`
+não existe neste repo — clicar em "Conectar Nova Conta" sempre falhava
+silenciosamente antes mesmo de chegar no fallback mockado. Usuário confirmou
+que não tem credenciais reais do Pluggy/Belvo ainda e pediu uma tela honesta
+sobre o estado atual, inspirada no layout do concorrente Meu Dinheiro
+(`app.meudinheiroweb.com.br`), adaptada ao visual do projeto.
+
+**Solução:** cadastro **manual** de instituição (só o nome) em vez de
+fingir sincronização automática. Toda conexão criada tem
+`status: "MANUAL"` — `OUTDATED`/`UPDATED`/`LOGIN_ERROR` ficam reservados
+pra quando uma integração real existir.
+
+- Migration `docs/migrations/0020_bank_connections_manual_status.sql` —
+  estende o CHECK de `status` pra aceitar `'MANUAL'` e muda o default.
+- `src/services/open-finance.functions.ts` — `createBankConnection`
+  simplificado pra `{ institution_name }`; `provider_item_id` e `status`
+  gerados no servidor (não mais aceitos do cliente).
+- `src/routes/_app.open-finance.tsx` — reescrita: removido todo o código
+  Pluggy/Edge Function (SDK widget, `syncMutation`, chamada a
+  `open-finance-token`); novo fluxo é um `Dialog` simples com campo de nome
+  + banner explicando que a sincronização automática ainda não existe;
+  cards mostram badge "Cadastro manual" em vez de status de sync falso.
+- `src/components/app-shell.tsx` — rota estava órfã (sem link em nenhum
+  menu); adicionado item "Open Finance" na navegação, ao lado de "Contas".
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 81/81 · eslint sem
+erros novos (só débito de prettier pré-existente nos arquivos tocados).
+Rota testada via `curl` (200, título correto, sem erro de SSR) — **não foi
+possível testar os cliques reais no navegador** (sem `chromium-cli` neste
+ambiente e a tela exige login); recomendo teste manual antes do deploy.
+
+**Arquivos criados:**
+- `docs/migrations/0020_bank_connections_manual_status.sql`
+
+**Arquivos alterados:**
+- `src/services/open-finance.functions.ts`
+- `src/routes/_app.open-finance.tsx`
+- `src/components/app-shell.tsx`
+
+**Pendências:** migration 0020 precisa ser aplicada manualmente no
+Supabase antes do deploy.
+
+**Status:** aguardando confirmação do usuário para commit/push.
