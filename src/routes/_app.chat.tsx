@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
+import { HeaderClockBar } from "@/components/dashboard/header-clock-bar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertDialog,
@@ -356,7 +357,10 @@ function ChatPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-6xl gap-4 px-4 py-4 sm:py-6">
+      <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-6xl flex-col gap-4 px-4 py-4 sm:py-6">
+        <HeaderClockBar />
+
+        <div className="flex min-h-0 flex-1 gap-4">
         {/* Coluna lateral de conversas — desktop */}
         <aside className="hidden w-64 shrink-0 flex-col rounded-xl border border-white/5 bg-zinc-900/30 p-3 md:flex">
           <ThreadList
@@ -527,6 +531,7 @@ function ChatPage() {
               <TooltipContent>Enviar mensagem</TooltipContent>
             </Tooltip>
           </footer>
+        </div>
         </div>
       </div>
 

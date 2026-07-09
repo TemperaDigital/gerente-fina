@@ -1108,3 +1108,175 @@ ambiente e a tela exige login); recomendo teste manual antes do deploy.
 Supabase antes do deploy.
 
 **Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 32. Fix: widget "Minhas Contas & Disponibilidade" misturava cartão com conta corrente
+
+**Bug confirmado pelo usuário:** o widget do Dashboard exibia contas
+`credit_card` (ex: "ICREDITO", "INTERCARD") junto com contas bancárias
+reais, rotulando tudo incorretamente — comparado com `/accounts`, que
+mostra corretamente só as contas bank/cash.
+
+**Causa raiz:** `AccountsWidget` (`accounts-widget.tsx`) lia a propriedade
+`account?.type`, mas o DTO real devolvido por `getDashboardSummary`
+(`AccountBalanceDTO`) usa o campo `account_type`, não `type`. Como `type`
+era sempre `undefined`, o filtro `a?.type !== "credit_card"` nunca excluía
+nada (`undefined !== "credit_card"` é sempre `true`) — cartões passavam
+direto — e a lógica de rótulo (`type === "bank" ? ... : ...`) sempre caía
+no branch "else", já que `undefined !== "bank"`.
+
+**Correção:**
+- Filtro trocado de deny-list (`!== "credit_card"`) para allow-list
+  explícito: `account_type === "bank" || account_type === "cash"` — não
+  deixa passar um tipo novo por engano no futuro.
+- Ícone e rótulo agora leem `account?.account_type` (campo correto);
+  rótulo por tipo real: "Conta Corrente" (bank) / "Dinheiro" (cash).
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 81/81 · eslint sem
+erros novos (o `no-explicit-any` da prop `accounts: any[]` já existia
+antes, não foi introduzido por este fix).
+
+**Arquivos alterados:**
+- `src/components/dashboard/accounts-widget.tsx`
+
+**Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 33. Missão 17: Seletor de período inteligente (mês ou ano inteiro) no Dashboard
+
+**Pedido:** substituir o navegador de mês (setas anterior/próximo) por um
+seletor mais rico — calendário/popover com ano+mês livre, mais um modo
+"ano inteiro" que agrega o ano todo.
+
+**Decisão de reaproveitamento (pedida explicitamente na missão):**
+`src/components/ui/calendar.tsx` é um wrapper do `react-day-picker` pra
+seleção de **dia** individual, com tema claro (`bg-background`/`bg-card`)
+— não serve pra seleção de mês/ano sem customização pesada da grade e do
+tema (o Dashboard usa visual dark-glass, `bg-zinc-900`/`backdrop-blur`).
+Já existia `GooglePeriodPicker` em `primitives.tsx` (usado em
+`/transactions`) — popover com navegação de ano + grade de 12 meses,
+exatamente o formato certo e já no visual certo. Em vez de duplicar do
+zero, criei um `PeriodPicker` novo no mesmo arquivo que generaliza esse
+padrão pra também representar "ano inteiro" (com um botão extra no
+popover) — `GooglePeriodPicker` ficou intocado (só mês) pra não arriscar
+regressão em `/transactions`.
+
+**Estado na URL:** o parâmetro `?month=` continua sendo o único usado
+(evita duplicar param e quebrar `/accounts` e `/credit-cards`, que já
+linkam pra `/dashboard` com `search={{month}}`) — agora aceita tanto
+`YYYY-MM` (mês) quanto `YYYY` (ano inteiro), distinguido por regex.
+Achado no caminho: o parser de search padrão do TanStack Router coage
+valor puramente numérico (`?month=2026`) pra `number`, não `string` — sem
+tratar isso, o modo ano não validava. `normalizePeriodSearch` aceita os
+dois tipos.
+
+**Quais widgets agregam por ano vs. continuam fixos (decisão documentada
+no topo de `dashboard.tsx`):**
+- **Agregam o ano inteiro:** KPIs (Receitas/Despesas/Resultado líquido) e
+  "Saldo do Mês" → "Saldo do Ano" (`getCashBasisSummary` com `{year}` em
+  vez de `{month}`, soma jan-dez); donut de categorias (`getCategoryBreakdown`
+  com `{year}`, soma as 12 linhas mensais da view `monthly_dre_by_category`
+  por categoria).
+- **Continuam fixos, não agregam:** `CashflowChart` continua mostrando os
+  últimos 6 meses sempre (histórico de tendência, não um recorte do
+  período selecionado — já era assim antes da missão). Widget de
+  Orçamentos é mensal por natureza (um teto de gasto não tem sentido
+  comparado contra 12x de gasto) — passou a mostrar sempre o **mês
+  corrente real**, independente do período selecionado no Dashboard
+  (também corrige, de bônus, um mismatch pré-existente: o cabeçalho já
+  dizia "Orçamentos — {mês selecionado}" mas os dados vinham sempre do mês
+  real, porque `listBudgets` nunca recebia o `month` — só o rótulo estava
+  errado, agora está consistente). AccountsWidget, Faturas Abertas e
+  Contas a Vencer já eram widgets de estado atual (saldo/fatura/agendamento
+  reais), não dependiam do período selecionado antes nem depois.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 81/81 · eslint sem
+erros novos (só prettier pré-existente + 1 warning de fast-refresh do
+mesmo padrão já presente no arquivo). Testado via `curl`: `/dashboard`,
+`/dashboard?month=2026-07` e `/dashboard?month=2026` resolvem 200 sem erro
+de SSR — **não foi possível testar os cliques reais no popover** (sem
+`chromium-cli` neste ambiente + tela exige login); recomendo teste manual
+antes do deploy.
+
+**Arquivos alterados:**
+- `src/routes/_app.dashboard.tsx`
+- `src/components/dashboard/primitives.tsx`
+- `src/services/dashboard.functions.ts`
+
+**Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 34. Cabeçalho de clima/relógio digital em 5 telas + calculadora financeira global (HP12C)
+
+**Pedido:** aplicar um novo visual de cabeçalho (fornecido como referência
+`DashboardHeader.jsx`: cartão com gradiente, clima e relógio digital) no
+lugar do `LocationWeatherBar` atual, replicado em Dashboard, Chat IA,
+Configurações, Lançamentos e Parcelas & Dívidas — mais uma calculadora
+financeira acessível de qualquer tela.
+
+**Cabeçalho (`HeaderClockBar`):** novo componente
+(`src/components/dashboard/header-clock-bar.tsx`) que funde a lógica de
+dados já existente em `LocationWeatherBar` (geolocalização do navegador +
+BigDataCloud + Open-Meteo, cache 20min em sessionStorage, falha silenciosa
+em qualquer etapa) com a apresentação nova: cartão com gradiente radial que
+muda de cor por condição climática, ícone dia/noite, e relógio "digital"
+(mono, tabular-nums, brilho sutil via text-shadow, dois-pontos piscando) —
+sem depender de fonte externa nova (nenhuma fonte Google Fonts estava
+configurada no projeto; optei por não introduzir essa dependência sem
+combinar antes). `location-weather-bar.tsx` foi removido (virou código
+morto depois da troca, sem nenhum outro import).
+
+Inserido nas 5 telas. Chat IA precisou de ajuste de layout (era um
+`flex h-[calc(100vh-4rem)]` de altura fixa) — virou `flex-col`, com o
+cabeçalho como bloco fixo no topo e a área de conversa (sidebar + chat) num
+`flex-1 min-h-0` que preenche o resto da altura, pra não quebrar o scroll
+interno da janela de mensagens.
+
+**Calculadora financeira (`FinancialCalculator`):**
+- Motor puro e testado em `src/lib/finance/hp12c.ts`: TVM completo (N, i,
+  PV, PMT, FV) na convenção HP12C real (dinheiro que entra é positivo, que
+  sai é negativo; modo "END"/fim de período — "BEGIN" fica fora de escopo
+  por ora). `solveFV`/`solvePV`/`solvePMT`/`solveN` por fórmula fechada;
+  `solveI` numérico (Newton-Raphson com derivada por diferença central,
+  com fallback pra bisseção se não convergir) — não existe fórmula fechada
+  pra taxa. Mais uma calculadora básica de 4 operações (reducer puro,
+  mesmo padrão testável). 13 testes novos em `hp12c.test.ts`, incluindo
+  round-trip de PMT→N→i contra um financiamento de referência (1000 a
+  2%/mês em 12 parcelas ⇒ PMT ≈ -94,56 — bate com tabela de amortização
+  padrão).
+- UI em `src/components/calculator/financial-calculator.tsx`: abas
+  "Básica" (teclado numérico) e "Financeira (HP12C)" (5 campos N/i/PV/PMT/
+  FV, cada um com botão "Resolver" que calcula a partir dos outros 4).
+- Acesso: botão flutuante fixo (canto inferior direito, `AppShell`) abre a
+  calculadora num Dialog **de qualquer tela** — satisfaz o pedido "clica em
+  que tela estiver e aparece uma calculadora" sem precisar navegar. Mais
+  uma rota dedicada `/calculadora` (também no menu de navegação) pra quem
+  preferir tela cheia.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 94/94 (13 novos) ·
+eslint sem erros novos (só prettier pré-existente). Testado via `curl`:
+`/dashboard`, `/calculadora`, `/chat`, `/settings`, `/transactions`,
+`/installments` resolvem sem erro de SSR — **não foi possível testar
+cliques reais** (sem `chromium-cli` neste ambiente + login necessário);
+recomendo teste manual antes do deploy, em especial os cálculos da aba
+financeira e o layout do Chat.
+
+**Arquivos criados:**
+- `src/components/dashboard/header-clock-bar.tsx`
+- `src/components/calculator/financial-calculator.tsx`
+- `src/lib/finance/hp12c.ts` + `hp12c.test.ts`
+- `src/routes/_app.calculadora.tsx`
+
+**Arquivos alterados:**
+- `src/routes/_app.dashboard.tsx`, `_app.chat.tsx`, `_app.settings.tsx`,
+  `_app.transactions.index.tsx`, `_app.installments.tsx`
+- `src/components/app-shell.tsx`
+
+**Arquivos removidos:**
+- `src/components/dashboard/location-weather-bar.tsx` (substituído por
+  `header-clock-bar.tsx`, sem mais nenhum import)
+
+**Status:** aguardando confirmação do usuário para commit/push.

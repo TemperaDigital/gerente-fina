@@ -2,9 +2,18 @@
  * Rota /dashboard — Painel de Controle Principal.
  *
  * C2: Gráfico de barras Receitas × Despesas (últimos 6 meses) via CashflowChart.
- * C3: Filtro de mês persistido na URL via validateSearch — padrão mês atual.
- *     O parâmetro ?month=YYYY-MM é repassado para getDashboardSummary e controla
- *     KPIs + widget de orçamentos. O gráfico sempre mostra os últimos 6 meses.
+ *     Sempre fixo nos últimos 6 meses, independente do período selecionado
+ *     abaixo — é um histórico de tendência, não um recorte do período atual
+ *     (decisão da Missão 17, documentada em atualizacoes.md).
+ * C3/Missão 17: período persistido na URL via validateSearch — mês
+ *     (`?month=YYYY-MM`, padrão) OU ano inteiro (`?month=YYYY`). O mesmo
+ *     parâmetro `month` carrega os dois formatos pra não quebrar os outros
+ *     lugares do app que já linkam pra cá com `search={{month}}`
+ *     (/accounts, /credit-cards) — o formato é distinguido por regex.
+ *     Controla KPIs de regime de caixa, "Saldo do Mês/Ano" e o donut de
+ *     categorias. O widget de Orçamentos é mensal por natureza (um teto não
+ *     agrega por ano) — sempre mostra o mês corrente real, independente do
+ *     período selecionado aqui.
  */
 import { useEffect, useRef } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
@@ -16,23 +25,26 @@ import {
   TrendingUp,
   ArrowRight,
   CreditCard,
-  ChevronLeft,
-  ChevronRight,
-  CalendarDays,
   CalendarClock,
   AlertTriangle,
   BarChart3,
   PieChart as PieChartIcon,
 } from "lucide-react";
 
-import { GlassCard } from "@/components/dashboard/primitives";
+import {
+  GlassCard,
+  PeriodPicker,
+  periodLabel,
+  formatMonthLabel,
+  type DashboardPeriod,
+} from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
 import { CashflowChart } from "@/components/dashboard/cashflow-chart";
 import { CategoryDonut } from "@/components/dashboard/category-donut";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { AccountsWidget } from "@/components/dashboard/accounts-widget";
-import { LocationWeatherBar } from "@/components/dashboard/location-weather-bar";
+import { HeaderClockBar } from "@/components/dashboard/header-clock-bar";
 import {
   getDashboardSummary,
   getCashBasisSummary,
@@ -46,23 +58,26 @@ import { listScheduledItems } from "@/services/scheduled-items.functions";
 import { toCents, fromCents, safePercent } from "@/lib/finance/money";
 
 // ---------------------------------------------------------------------------
-// Helpers de mês
+// Helpers de mês / período (Missão 17)
 // ---------------------------------------------------------------------------
 function currentMonth(): string {
   const now = new Date();
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-function monthLabel(ym: string): string {
-  const [y, m] = ym.split("-");
-  const d = new Date(Number(y), Number(m) - 1, 1);
-  return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+/** Search param `month` aceita "YYYY-MM" (mês) OU "YYYY" (ano inteiro). */
+function isYearOnly(value: string): boolean {
+  return /^\d{4}$/.test(value);
 }
 
-function addMonth(ym: string, delta: number): string {
-  const [y, m] = ym.split("-").map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+/** Deriva o período tipado (mês ou ano) a partir do valor cru da URL. */
+function periodFromSearch(value: string): DashboardPeriod {
+  return isYearOnly(value) ? { mode: "year", year: Number(value) } : { mode: "month", month: value };
+}
+
+/** Serializa o período de volta pro formato aceito pelo search param `month`. */
+function periodToSearch(period: DashboardPeriod): string {
+  return period.mode === "year" ? String(period.year) : period.month;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,10 +89,13 @@ const summaryQuery = (month: string) =>
     queryFn: () => getDashboardSummary({ data: { month } }),
   });
 
-const cashBasisQuery = (month: string) =>
+const cashBasisQuery = (period: DashboardPeriod) =>
   queryOptions({
-    queryKey: ["dashboard", "cash-basis", month],
-    queryFn: () => getCashBasisSummary({ data: { month } }),
+    queryKey: ["dashboard", "cash-basis", periodToSearch(period)],
+    queryFn: () =>
+      getCashBasisSummary({
+        data: period.mode === "year" ? { year: period.year } : { month: period.month },
+      }),
   });
 
 const invoicesQuery = () =>
@@ -86,9 +104,12 @@ const invoicesQuery = () =>
     queryFn: () => getOpenCreditCardInvoices(),
   });
 
-const budgetsQuery = (month: string) =>
+// Orçamentos são mensais por natureza (um teto não agrega por ano) — sempre
+// mostra o mês corrente REAL, independente do período selecionado no
+// Dashboard (decisão da Missão 17, ver comentário no topo do arquivo).
+const budgetsQuery = () =>
   queryOptions({
-    queryKey: ["dashboard", "budgets", month],
+    queryKey: ["dashboard", "budgets", currentMonth()],
     queryFn: () => listBudgets({ data: {} }),
   });
 
@@ -99,10 +120,16 @@ const dreHistoryQuery = () =>
     staleTime: 5 * 60 * 1000,
   });
 
-const breakdownQuery = (month: string) =>
+const breakdownQuery = (period: DashboardPeriod) =>
   queryOptions({
-    queryKey: ["dashboard", "breakdown", month],
-    queryFn: () => getCategoryBreakdown({ data: { month, kind: "expense" } }),
+    queryKey: ["dashboard", "breakdown", periodToSearch(period)],
+    queryFn: () =>
+      getCategoryBreakdown({
+        data:
+          period.mode === "year"
+            ? { year: period.year, kind: "expense" }
+            : { month: period.month, kind: "expense" },
+      }),
   });
 
 const scheduledQuery = () =>
@@ -116,25 +143,44 @@ const scheduledQuery = () =>
 // ---------------------------------------------------------------------------
 type DashSearch = { month: string };
 
+/**
+ * Normaliza o `month` bruto vindo da URL pra "YYYY-MM" ou "YYYY" (ano
+ * inteiro). O parser de search padrão do TanStack Router coage valores
+ * puramente numéricos pra `number` (ex.: `?month=2026` chega como o número
+ * `2026`, não a string "2026") — por isso aceita os dois tipos aqui, não só
+ * string.
+ */
+function normalizePeriodSearch(value: unknown): string {
+  if (typeof value === "string" && (/^\d{4}-\d{2}$/.test(value) || /^\d{4}$/.test(value))) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1000 && value <= 9999) {
+    return String(value);
+  }
+  return currentMonth();
+}
+
 export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Gerente Fina" }] }),
 
-  // C3: mês persistido na URL
+  // C3/Missão 17: período persistido na URL — mês ou ano inteiro
   validateSearch: (raw): DashSearch => ({
-    month:
-      typeof raw.month === "string" && /^\d{4}-\d{2}$/.test(raw.month) ? raw.month : currentMonth(),
+    month: normalizePeriodSearch(raw.month),
   }),
 
   loader: async ({ context, location }) => {
     const raw = location.search as DashSearch;
-    const month = /^\d{4}-\d{2}$/.test(raw?.month ?? "") ? raw.month : currentMonth();
+    const monthSearch = normalizePeriodSearch(raw?.month);
+    const period = periodFromSearch(monthSearch);
     await Promise.all([
-      context.queryClient.ensureQueryData(summaryQuery(month)),
-      context.queryClient.ensureQueryData(cashBasisQuery(month)),
+      context.queryClient.ensureQueryData(
+        summaryQuery(period.mode === "year" ? currentMonth() : period.month),
+      ),
+      context.queryClient.ensureQueryData(cashBasisQuery(period)),
       context.queryClient.ensureQueryData(invoicesQuery()),
-      context.queryClient.ensureQueryData(budgetsQuery(month)),
+      context.queryClient.ensureQueryData(budgetsQuery()),
       context.queryClient.ensureQueryData(dreHistoryQuery()),
-      context.queryClient.ensureQueryData(breakdownQuery(month)),
+      context.queryClient.ensureQueryData(breakdownQuery(period)),
       context.queryClient.ensureQueryData(scheduledQuery()),
     ]);
   },
@@ -164,16 +210,19 @@ const BRL = (value: string | number | null | undefined) =>
 // Componente principal
 // ---------------------------------------------------------------------------
 function DashboardPage() {
-  const { month } = Route.useSearch();
+  const { month: monthSearch } = Route.useSearch();
+  const period = periodFromSearch(monthSearch);
   const navigate = useNavigate({ from: "/dashboard" });
   const queryClient = useQueryClient();
 
-  const { data: summary } = useSuspenseQuery(summaryQuery(month));
-  const { data: cashBasis } = useSuspenseQuery(cashBasisQuery(month));
+  const { data: summary } = useSuspenseQuery(
+    summaryQuery(period.mode === "year" ? currentMonth() : period.month),
+  );
+  const { data: cashBasis } = useSuspenseQuery(cashBasisQuery(period));
   const { data: invoices } = useSuspenseQuery(invoicesQuery());
-  const { data: budgets } = useSuspenseQuery(budgetsQuery(month));
+  const { data: budgets } = useSuspenseQuery(budgetsQuery());
   const { data: dreHistory } = useSuspenseQuery(dreHistoryQuery());
-  const { data: breakdown } = useSuspenseQuery(breakdownQuery(month));
+  const { data: breakdown } = useSuspenseQuery(breakdownQuery(period));
   const { data: scheduledItems } = useSuspenseQuery(scheduledQuery());
 
   // Materializa recorrências vencidas (salário, contas fixas...) uma vez por
@@ -199,7 +248,7 @@ function DashboardPage() {
 
   const topBudgets = budgets.slice(0, 5);
   const isNegative = (v: string) => toCents(v) < 0n;
-  const isCurrent = month === currentMonth();
+  const isCurrentMonth = period.mode === "month" && period.month === currentMonth();
 
   // Widget "Contas a Vencer" (Missão 7, Parte 3) — próximos 30 dias,
   // incluindo atrasados. Sem ação de confirmar aqui — isso fica só em
@@ -215,16 +264,12 @@ function DashboardPage() {
     .sort((a, b) => a.next_run_on.localeCompare(b.next_run_on))
     .slice(0, 5);
 
-  function goMonth(delta: number) {
-    navigate({ search: { month: addMonth(month, delta) } });
-  }
-
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
-        <LocationWeatherBar />
+        <HeaderClockBar />
 
-        {/* Header + seletor de mês */}
+        {/* Header + seletor de período (Missão 17: mês OU ano inteiro) */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Visão Geral</h1>
@@ -233,37 +278,12 @@ function DashboardPage() {
             </p>
           </div>
 
-          {/* C3 — Navegador de mês */}
-          <div className="flex items-center gap-1 self-start sm:self-auto rounded-xl border border-white/10 bg-zinc-900/60 p-1">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-8 rounded-lg"
-              onClick={() => goMonth(-1)}
-              title="Mês anterior"
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-
-            <div className="flex items-center gap-1.5 px-2 min-w-[140px] justify-center">
-              <CalendarDays className="size-3.5 text-primary shrink-0" />
-              <span className="text-sm font-medium capitalize whitespace-nowrap">
-                {monthLabel(month)}
-              </span>
-            </div>
-
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-8 rounded-lg"
-              onClick={() => goMonth(1)}
-              disabled={isCurrent}
-              title="Próximo mês"
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-
-            {!isCurrent && (
+          <div className="flex items-center gap-1.5 self-start sm:self-auto">
+            <PeriodPicker
+              value={period}
+              onChange={(next) => navigate({ search: { month: periodToSearch(next) } })}
+            />
+            {!isCurrentMonth && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -357,7 +377,9 @@ function DashboardPage() {
                   <Wallet className="size-4" />
                 )}
               </div>
-              <h2 className="text-sm font-semibold text-foreground/80">Saldo do Mês</h2>
+              <h2 className="text-sm font-semibold text-foreground/80">
+                {period.mode === "year" ? "Saldo do Ano" : "Saldo do Mês"}
+              </h2>
             </div>
             <p
               className={`font-mono text-2xl font-bold tracking-tight ${
@@ -422,9 +444,9 @@ function DashboardPage() {
           </p>
         </GlassCard>
         <p className="text-[11px] text-foreground/30">
-          * Saldo do Mês não inclui parcelas de cartão (só conta quando a fatura é paga) nem
-          parcelas de empréstimos, financiamentos ou consórcios — sem vínculo confiável com
-          lançamentos no schema atual.
+          * {period.mode === "year" ? "Saldo do Ano" : "Saldo do Mês"} não inclui parcelas de
+          cartão (só conta quando a fatura é paga) nem parcelas de empréstimos, financiamentos ou
+          consórcios — sem vínculo confiável com lançamentos no schema atual.
         </p>
 
         {/* Gráficos: barras (histórico) + donut (mês atual) */}
@@ -447,16 +469,19 @@ function DashboardPage() {
             <CashflowChart data={dreHistory} height={220} />
           </GlassCard>
 
-          {/* Donut — despesas por categoria do mês selecionado */}
+          {/* Donut — despesas por categoria do período selecionado (mês ou ano inteiro) */}
           <GlassCard className="border border-white/10 p-5 sm:p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <PieChartIcon className="size-4 text-primary shrink-0" />
                 <h2 className="text-sm font-semibold text-foreground/80">
-                  Despesas por categoria — {monthLabel(month)}
+                  Despesas por categoria — {periodLabel(period)}
                 </h2>
               </div>
-              <Link to="/transactions" search={{ month, page: 1 }}>
+              <Link
+                to="/transactions"
+                search={{ month: period.mode === "year" ? currentMonth() : period.month, page: 1 }}
+              >
                 <Button variant="ghost" size="sm" className="text-xs text-primary gap-1 px-2">
                   Detalhar <ArrowRight className="size-3" />
                 </Button>
@@ -474,7 +499,7 @@ function DashboardPage() {
             <div>
               <div className="flex items-center justify-between border-b border-white/5 pb-3 mb-4">
                 <h2 className="text-sm font-semibold text-foreground/80">
-                  Orçamentos — {monthLabel(month)}
+                  Orçamentos — {formatMonthLabel(currentMonth())}
                 </h2>
                 <span className="text-xs font-medium text-primary">Top {topBudgets.length}</span>
               </div>

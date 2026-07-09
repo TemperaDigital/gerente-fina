@@ -7,8 +7,16 @@ interface AccountsWidgetProps {
 }
 
 export function AccountsWidget({ accounts }: AccountsWidgetProps) {
-  // Filtra cartões de crédito para manter apenas contas e dinheiro
-  const bankAccounts = accounts.filter((a) => a?.type !== "credit_card");
+  // "Disponibilidade" é sobre dinheiro disponível, não dívida de cartão —
+  // allow-list explícito (bank/cash) em vez de deny-list, pra não deixar
+  // passar um tipo novo por engano no futuro. Bug anterior: o filtro lia
+  // `a?.type` (campo que não existe no DTO — o campo real é
+  // `account_type`, ver AccountBalanceDTO em dashboard.functions.ts), então
+  // o filtro nunca excluía nada e cartões de crédito apareciam aqui
+  // rotulados incorretamente.
+  const bankAccounts = accounts.filter(
+    (a) => a?.account_type === "bank" || a?.account_type === "cash",
+  );
 
   if (bankAccounts.length === 0) {
     return (
@@ -33,7 +41,7 @@ export function AccountsWidget({ accounts }: AccountsWidgetProps) {
         {bankAccounts.map((account) => {
           // MAPEAMENTO BLINDADO: Resolve chaves dinamicamente independente do formato da API
           const name = account?.name || account?.account_name || "Conta Sem Nome";
-          const type = account?.type || "bank";
+          const type = account?.account_type;
           
           // Converte o saldo de forma segura para centavos para fazer a lógica matemática
           let balanceCents = 0;
@@ -87,7 +95,7 @@ export function AccountsWidget({ accounts }: AccountsWidgetProps) {
                   <div>
                     <div className="font-semibold text-foreground">{name}</div>
                     <div className="text-[10px] uppercase tracking-wider text-foreground/50">
-                      {type === "bank" ? "Conta Corrente" : "Dinheiro em Espécie"}
+                      {type === "bank" ? "Conta Corrente" : "Dinheiro"}
                     </div>
                   </div>
                 </div>

@@ -22,6 +22,7 @@ import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppCreditCardsRouteImport } from './routes/_app.credit-cards'
 import { Route as AppChatRouteImport } from './routes/_app.chat'
 import { Route as AppCategoriesRouteImport } from './routes/_app.categories'
+import { Route as AppCalculadoraRouteImport } from './routes/_app.calculadora'
 import { Route as AppBudgetsRouteImport } from './routes/_app.budgets'
 import { Route as AppAgendamentosRouteImport } from './routes/_app.agendamentos'
 import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
@@ -93,6 +94,11 @@ const AppCategoriesRoute = AppCategoriesRouteImport.update({
   path: '/categories',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCalculadoraRoute = AppCalculadoraRouteImport.update({
+  id: '/calculadora',
+  path: '/calculadora',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBudgetsRoute = AppBudgetsRouteImport.update({
   id: '/budgets',
   path: '/budgets',
@@ -131,6 +137,7 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AppAccountsRoute
   '/agendamentos': typeof AppAgendamentosRoute
   '/budgets': typeof AppBudgetsRoute
+  '/calculadora': typeof AppCalculadoraRoute
   '/categories': typeof AppCategoriesRoute
   '/chat': typeof AppChatRoute
   '/credit-cards': typeof AppCreditCardsRoute
@@ -151,6 +158,7 @@ export interface FileRoutesByTo {
   '/accounts': typeof AppAccountsRoute
   '/agendamentos': typeof AppAgendamentosRoute
   '/budgets': typeof AppBudgetsRoute
+  '/calculadora': typeof AppCalculadoraRoute
   '/categories': typeof AppCategoriesRoute
   '/chat': typeof AppChatRoute
   '/credit-cards': typeof AppCreditCardsRoute
@@ -173,6 +181,7 @@ export interface FileRoutesById {
   '/_app/accounts': typeof AppAccountsRoute
   '/_app/agendamentos': typeof AppAgendamentosRoute
   '/_app/budgets': typeof AppBudgetsRoute
+  '/_app/calculadora': typeof AppCalculadoraRoute
   '/_app/categories': typeof AppCategoriesRoute
   '/_app/chat': typeof AppChatRoute
   '/_app/credit-cards': typeof AppCreditCardsRoute
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/agendamentos'
     | '/budgets'
+    | '/calculadora'
     | '/categories'
     | '/chat'
     | '/credit-cards'
@@ -215,6 +225,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/agendamentos'
     | '/budgets'
+    | '/calculadora'
     | '/categories'
     | '/chat'
     | '/credit-cards'
@@ -236,6 +247,7 @@ export interface FileRouteTypes {
     | '/_app/accounts'
     | '/_app/agendamentos'
     | '/_app/budgets'
+    | '/_app/calculadora'
     | '/_app/categories'
     | '/_app/chat'
     | '/_app/credit-cards'
@@ -350,6 +362,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCategoriesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/calculadora': {
+      id: '/_app/calculadora'
+      path: '/calculadora'
+      fullPath: '/calculadora'
+      preLoaderRoute: typeof AppCalculadoraRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/budgets': {
       id: '/_app/budgets'
       path: '/budgets'
@@ -399,6 +418,7 @@ interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRoute
   AppAgendamentosRoute: typeof AppAgendamentosRoute
   AppBudgetsRoute: typeof AppBudgetsRoute
+  AppCalculadoraRoute: typeof AppCalculadoraRoute
   AppCategoriesRoute: typeof AppCategoriesRoute
   AppChatRoute: typeof AppChatRoute
   AppCreditCardsRoute: typeof AppCreditCardsRoute
@@ -417,6 +437,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAccountsRoute: AppAccountsRoute,
   AppAgendamentosRoute: AppAgendamentosRoute,
   AppBudgetsRoute: AppBudgetsRoute,
+  AppCalculadoraRoute: AppCalculadoraRoute,
   AppCategoriesRoute: AppCategoriesRoute,
   AppChatRoute: AppChatRoute,
   AppCreditCardsRoute: AppCreditCardsRoute,

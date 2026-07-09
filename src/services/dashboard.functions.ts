@@ -43,11 +43,13 @@ export interface DashboardSummaryDTO {
 
 const DashboardInput = z
   .object({
-    /** Mês de referência no formato `YYYY-MM`. Default: mês corrente. */
+    /** Mês de referência no formato `YYYY-MM`. Default: mês corrente. Ignorado se `year` vier preenchido. */
     month: z
       .string()
       .regex(/^\d{4}-\d{2}$/, "month deve ser YYYY-MM")
       .optional(),
+    /** Missão 17 — modo "ano inteiro": quando presente, agrega jan-dez do ano inteiro em vez de um mês. */
+    year: z.number().int().min(1900).max(3000).optional(),
   })
   .optional();
 
@@ -57,6 +59,26 @@ function resolveReferenceMonth(month: string | undefined): string {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0");
   return `${y}-${m}-01`;
+}
+
+/**
+ * Missão 17 — resolve o intervalo [start, end] tanto pra um mês quanto pra
+ * um ano inteiro (jan 1 – dez 31), a partir do mesmo input compartilhado
+ * `{ month?, year? }`. `year` tem prioridade sobre `month` quando ambos
+ * vierem (não deveria acontecer — o picker do Dashboard só manda um dos
+ * dois por vez).
+ */
+function resolvePeriodBounds(input: {
+  month?: string;
+  year?: number;
+}): { start: string; end: string; referenceMonth: string } {
+  if (typeof input.year === "number") {
+    const y = input.year;
+    return { start: `${y}-01-01`, end: `${y}-12-31`, referenceMonth: `${y}-01-01` };
+  }
+  const referenceMonth = resolveReferenceMonth(input.month);
+  const { start, end } = monthBounds(referenceMonth);
+  return { start, end, referenceMonth };
 }
 
 // Aritmética monetária centralizada em src/lib/finance/money.ts
@@ -180,8 +202,7 @@ export const getCashBasisSummary = createServerFn({ method: "GET" })
     const { resolveActiveUserId } = await import("@/lib/supabase/resolve-user");
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
-    const referenceMonth = resolveReferenceMonth(data?.month);
-    const { start, end } = monthBounds(referenceMonth);
+    const { start, end, referenceMonth } = resolvePeriodBounds(data ?? {});
 
     // ---- Receitas / Custo Fixo / Custo Variável / Fatura paga --------------
     const { data: txRows, error: txErr } = await sb
@@ -266,6 +287,9 @@ export const getCashBasisSummary = createServerFn({ method: "GET" })
       caveats: [
         "Não inclui parcelas de empréstimos, financiamentos ou consórcios (loans): o schema atual não vincula loans a transactions, então não é possível determinar com confiança o vencimento de cada parcela neste período.",
         'Parcelas de cartão (installment_purchases) não entram nesta conta em nenhuma hipótese — seu impacto na conta corrente só acontece quando a fatura é paga, já capturado em "Fatura de Cartões (paga)".',
+        ...(typeof data?.year === "number"
+          ? ["Modo ano inteiro: os valores somam janeiro a dezembro do ano selecionado."]
+          : []),
       ],
     };
   });
@@ -426,12 +450,16 @@ export interface CategoryBreakdownDTO {
 
 export const getCategoryBreakdown = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
-    const raw = input as { month?: string; kind?: "income" | "expense" } | undefined;
+    const raw = input as
+      | { month?: string; year?: number; kind?: "income" | "expense" }
+      | undefined;
+    const year = typeof raw?.year === "number" ? raw.year : undefined;
     return {
       month:
         typeof raw?.month === "string" && /^\d{4}-\d{2}$/.test(raw.month)
           ? raw.month
           : new Date().toISOString().slice(0, 7),
+      year,
       kind: raw?.kind === "income" ? ("income" as const) : ("expense" as const),
     };
   })
@@ -441,18 +469,41 @@ export const getCategoryBreakdown = createServerFn({ method: "GET" })
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
 
-    const referenceMonth = `${data.month}-01`;
-
-    const { data: rows, error } = await sb
+    let query = sb
       .from("monthly_dre_by_category")
       .select("category_id, category_name, total_amount, transactions_count")
       .eq("user_id", userId)
-      .eq("reference_month", referenceMonth)
-      .eq("kind", data.kind)
-      .order("total_amount", { ascending: false });
+      .eq("kind", data.kind);
 
+    // Missão 17 — modo "ano inteiro": monthly_dre_by_category tem 1 linha por
+    // (categoria, mês) — em vez de `.eq` num único reference_month, pega o
+    // ano inteiro (jan-dez) e agrega por categoria abaixo.
+    query =
+      typeof data.year === "number"
+        ? query.gte("reference_month", `${data.year}-01-01`).lte("reference_month", `${data.year}-12-01`)
+        : query.eq("reference_month", `${data.month}-01`);
+
+    const { data: rawRows, error } = await query.order("total_amount", { ascending: false });
     if (error) throw new Error(error.message);
-    if (!rows?.length) return [];
+    if (!rawRows?.length) return [];
+
+    const rows =
+      typeof data.year === "number"
+        ? Array.from(
+            rawRows
+              .reduce((acc, r) => {
+                const prev = acc.get(r.category_id);
+                if (prev) {
+                  prev.total_amount = String(Number(prev.total_amount) + Number(r.total_amount));
+                  prev.transactions_count += r.transactions_count;
+                } else {
+                  acc.set(r.category_id, { ...r });
+                }
+                return acc;
+              }, new Map<string, (typeof rawRows)[number]>())
+              .values(),
+          ).sort((a, b) => Number(b.total_amount) - Number(a.total_amount))
+        : rawRows;
 
     // Enriquece com icon/color das categorias (uma query em lote)
     const catIds = rows.map((r) => r.category_id);
