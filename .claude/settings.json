@@ -10,7 +10,9 @@
       "Read(//tmp/claude-1001/**)",
       "Bash(curl -s -o /tmp/claude-1001/processos_page.html -w \"%{http_code}\\\\n\" http://localhost:8080/processos/00000000-0000-0000-0000-000000000000)",
       "Bash(pkill -f \"vite dev\")",
-      "Bash(env)"
+      "Bash(env)",
+      "Bash(grep -n \"supabase\\\\.\\\\|getTransactionById\\\\|updateTransactionEntry\\\\|useLoaderData\\\\|params\\\\.\" src/routes/_app.transactions.edit.\\\\$id.tsx | head -20)",
+      "Read(//home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/**)"
     ]
   }
 }
