@@ -5,6 +5,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
+import {
+  listBankConnections,
+  createBankConnection,
+  disconnectBankConnection,
+} from "@/services/open-finance.functions";
 import { useState } from "react";
 import { Link2, RefreshCw, ShieldCheck, Plus, Unlink, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -14,34 +19,20 @@ import { GlassCard } from "@/components/dashboard/primitives";
 import { AppShell } from "@/components/app-shell";
 
 // ---------------------------------------------------------------------------
-// Tipagem das Conexões Bancárias Ativas
-// ---------------------------------------------------------------------------
-interface BankConnection {
-  id: string;
-  provider_item_id: string;
-  institution_name: string;
-  status: "OUTDATED" | "UPDATED" | "LOGIN_ERROR";
-  last_synced_at: string;
-}
-
-// ---------------------------------------------------------------------------
 // TanStack Query — Lista de conexões de Open Finance do usuário
+//
+// Missão 30 (auditoria de isolamento entre usuários): antes, esta query e as
+// mutations abaixo falavam direto com `bank_connections` usando o client
+// anon key do navegador — a única proteção era RLS, e a tabela nem sequer
+// existia no banco (nunca foi criada). Agora passa por server functions
+// (service_role + checagem explícita de user_id), mesmo padrão do resto do
+// app; RLS (migration 0018) fica como defesa em profundidade, não como
+// única linha de proteção.
 // ---------------------------------------------------------------------------
 const connectionsQueryOptions = () =>
   queryOptions({
     queryKey: ["open-finance", "connections"],
-    queryFn: async (): Promise<BankConnection[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
-
-      const { data, error } = await supabase
-        .from("bank_connections")
-        .select("id, provider_item_id, institution_name, status, last_synced_at")
-        .eq("user_id", user.id);
-
-      if (error) throw error;
-      return (data as unknown as BankConnection[]) || [];
-    },
+    queryFn: () => listBankConnections(),
   });
 
 export const Route = createFileRoute("/_app/open-finance")({
@@ -78,8 +69,7 @@ function OpenFinancePage() {
   // 2. MUTATION: Desconectar Banco
   const disconnectMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("bank_connections").delete().eq("id", id);
-      if (error) throw error;
+      await disconnectBankConnection({ data: { id } });
     },
     onSuccess: () => {
       toast.success("Conexão bancária removida com sucesso.");
@@ -104,15 +94,15 @@ function OpenFinancePage() {
           connectToken: accessToken,
           onSuccess: async (itemData: { item: { id: string, connector: { name: string } } }) => {
             // Salva a nova referência de conexão no banco
-            const { data: { user } } = await supabase.auth.getUser();
-            await supabase.from("bank_connections").insert({
-              user_id: user?.id,
-              provider_item_id: itemData.item.id,
-              institution_name: itemData.item.connector.name,
-              status: "UPDATED",
-              last_synced_at: new Date().toISOString(),
+            await createBankConnection({
+              data: {
+                provider_item_id: itemData.item.id,
+                institution_name: itemData.item.connector.name,
+                status: "UPDATED",
+                last_synced_at: new Date().toISOString(),
+              },
             });
-            
+
             toast.success(`${itemData.item.connector.name} conectado com sucesso!`);
             queryClient.invalidateQueries({ queryKey: ["open-finance"] });
           },
@@ -125,13 +115,13 @@ function OpenFinancePage() {
       } else {
         // Fallback robusto para simulação em ambiente de desenvolvimento local
         console.warn("Script do agregador não carregado. Executando injeção simulada (Seed Active).");
-        const { data: { user } } = await supabase.auth.getUser();
-        await supabase.from("bank_connections").insert({
-          user_id: user?.id,
-          provider_item_id: `mock_${crypto.randomUUID()}`,
-          institution_name: "Banco Itaú S.A.",
-          status: "UPDATED",
-          last_synced_at: new Date().toISOString(),
+        await createBankConnection({
+          data: {
+            provider_item_id: `mock_${crypto.randomUUID()}`,
+            institution_name: "Banco Itaú S.A.",
+            status: "UPDATED",
+            last_synced_at: new Date().toISOString(),
+          },
         });
         toast.success("Banco Itaú conectado com sucesso (Ambiente de Testes)!");
         queryClient.invalidateQueries({ queryKey: ["open-finance"] });
@@ -231,7 +221,12 @@ function OpenFinancePage() {
                     </div>
 
                     <div className="mt-6 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-foreground/40">
-                      <span>Sync: {new Date(conn.last_synced_at).toLocaleDateString("pt-BR")}</span>
+                      <span>
+                        Sync:{" "}
+                        {conn.last_synced_at
+                          ? new Date(conn.last_synced_at).toLocaleDateString("pt-BR")
+                          : "—"}
+                      </span>
                       <Button
                         size="sm"
                         variant="ghost"

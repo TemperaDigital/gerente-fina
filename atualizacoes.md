@@ -975,3 +975,77 @@ substituído pela Missão 7), candidato a remoção futura. A migration 0017
 como as anteriores.
 
 **Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 30. Auditoria de isolamento entre usuários (continuação da Missão 29) + correção de /open-finance
+
+**Origem:** pedido explícito do usuário para auditar com rigor extra a
+correção da Missão 29 antes de liberar para produção — dados financeiros
+reais de múltiplos usuários, mesmo padrão de cuidado de `pay_credit_card_invoice`/
+`dedup_hash`.
+
+**Varredura completa** (todo `src/services/*.functions.ts` +
+`src/lib/supabase/*.functions.ts`, 2 agentes em paralelo + leitura própria
+de `transactions.functions.ts` e `backup.functions.ts` na íntegra):
+confirmado que todos os 15 arquivos filtram corretamente por `user_id`,
+diretamente ou via id pré-validado. `recurrences.functions.ts` segue morto
+(zero imports). Achados que ficaram registrados para decisão do usuário
+(ainda **não corrigidos** neste commit):
+
+1. **RPCs `security definer` sem checagem de `auth.uid()`**
+   (`pay_credit_card_invoice`, `convert_transaction_entry`,
+   `delete_installment_purchase`, `upsert_budget`, `refresh_invoice_outstanding`)
+   — todas com `GRANT EXECUTE ... TO authenticated`, chamáveis direto pela
+   REST API do Supabase por qualquer usuário autenticado, contornando 100%
+   das checagens de dono que só existem na camada TypeScript. Fix proposto:
+   `REVOKE EXECUTE ... FROM authenticated` (o app só chama via
+   `service_role`, que não depende desse grant).
+2. **`restoreBackup` não valida `transfer_id`/`paid_invoice_id`** — só
+   `account_id`/`category_id` são checados antes do upsert; um backup
+   adulterado pode corromper o saldo devedor de fatura de outro usuário via
+   `paid_invoice_id`.
+3. **`enrichTransactionRows`** (`transactions.functions.ts`) busca a perna
+   irmã de transferência sem `.eq("user_id", userId)` — inconsistente com
+   `getTransactionById`, que faz a mesma busca corretamente escopada.
+
+**Corrigido nesta sessão — `/open-finance`:** único ponto do app que falava
+com o Supabase direto do navegador (client anon key) em vez de passar por
+server function + `service_role`. Investigação revelou que `bank_connections`
+**nunca existiu no banco** (confirmado via SQL Editor: `information_schema.columns`
+e `pg_policies` retornam 0 linhas) — a tabela foi referenciada no código sem
+nunca ter sido criada por nenhuma migration deste projeto. Corrigido com:
+- Migration nova `docs/migrations/0018_bank_connections.sql` — cria a
+  tabela do zero com RLS + policies escopadas por `user_id` (mesmo padrão
+  de `budgets`, migration 0006).
+- `src/services/open-finance.functions.ts` (novo) — `listBankConnections`,
+  `createBankConnection`, `disconnectBankConnection` via `createServerFn` +
+  `service_role` + checagem explícita de `user_id`.
+- `src/routes/_app.open-finance.tsx` — refatorado para usar as server
+  functions acima; `disconnectMutation` não depende mais só de RLS.
+- Fora do escopo desta correção: `supabase.functions.invoke("open-finance-sync"/"open-finance-token")`
+  continuam client-side (Edge Functions não versionadas neste repo, não
+  auditáveis por aqui).
+
+**Teste adicionado:** `src/lib/finance/active-account.server.test.ts` —
+testa `accountBelongsToUser` (guardião reaproveitado por quase todo write
+path sensível) contra um Supabase client fake que filtra de verdade um
+dataset com contas de dois usuários.
+
+**Arquivos criados:**
+- `docs/migrations/0018_bank_connections.sql`
+- `src/services/open-finance.functions.ts`
+- `src/lib/finance/active-account.server.test.ts`
+
+**Arquivos alterados:**
+- `src/routes/_app.open-finance.tsx`
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 81/81 · eslint sem
+erros novos (arquivo já tinha débito de formatação prettier pré-existente).
+
+**Pendências para decisão do usuário:** migration 0018 precisa ser aplicada
+manualmente no Supabase antes do deploy (mesmo fluxo das anteriores); os 3
+achados da varredura (RPCs REVOKE, restoreBackup, enrichTransactionRows)
+ainda não foram corrigidos, aguardando confirmação.
+
+**Status:** aguardando confirmação do usuário para commit/push.
