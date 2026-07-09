@@ -1141,3 +1141,68 @@ antes, não foi introduzido por este fix).
 - `src/components/dashboard/accounts-widget.tsx`
 
 **Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 33. Missão 17: Seletor de período inteligente (mês ou ano inteiro) no Dashboard
+
+**Pedido:** substituir o navegador de mês (setas anterior/próximo) por um
+seletor mais rico — calendário/popover com ano+mês livre, mais um modo
+"ano inteiro" que agrega o ano todo.
+
+**Decisão de reaproveitamento (pedida explicitamente na missão):**
+`src/components/ui/calendar.tsx` é um wrapper do `react-day-picker` pra
+seleção de **dia** individual, com tema claro (`bg-background`/`bg-card`)
+— não serve pra seleção de mês/ano sem customização pesada da grade e do
+tema (o Dashboard usa visual dark-glass, `bg-zinc-900`/`backdrop-blur`).
+Já existia `GooglePeriodPicker` em `primitives.tsx` (usado em
+`/transactions`) — popover com navegação de ano + grade de 12 meses,
+exatamente o formato certo e já no visual certo. Em vez de duplicar do
+zero, criei um `PeriodPicker` novo no mesmo arquivo que generaliza esse
+padrão pra também representar "ano inteiro" (com um botão extra no
+popover) — `GooglePeriodPicker` ficou intocado (só mês) pra não arriscar
+regressão em `/transactions`.
+
+**Estado na URL:** o parâmetro `?month=` continua sendo o único usado
+(evita duplicar param e quebrar `/accounts` e `/credit-cards`, que já
+linkam pra `/dashboard` com `search={{month}}`) — agora aceita tanto
+`YYYY-MM` (mês) quanto `YYYY` (ano inteiro), distinguido por regex.
+Achado no caminho: o parser de search padrão do TanStack Router coage
+valor puramente numérico (`?month=2026`) pra `number`, não `string` — sem
+tratar isso, o modo ano não validava. `normalizePeriodSearch` aceita os
+dois tipos.
+
+**Quais widgets agregam por ano vs. continuam fixos (decisão documentada
+no topo de `dashboard.tsx`):**
+- **Agregam o ano inteiro:** KPIs (Receitas/Despesas/Resultado líquido) e
+  "Saldo do Mês" → "Saldo do Ano" (`getCashBasisSummary` com `{year}` em
+  vez de `{month}`, soma jan-dez); donut de categorias (`getCategoryBreakdown`
+  com `{year}`, soma as 12 linhas mensais da view `monthly_dre_by_category`
+  por categoria).
+- **Continuam fixos, não agregam:** `CashflowChart` continua mostrando os
+  últimos 6 meses sempre (histórico de tendência, não um recorte do
+  período selecionado — já era assim antes da missão). Widget de
+  Orçamentos é mensal por natureza (um teto de gasto não tem sentido
+  comparado contra 12x de gasto) — passou a mostrar sempre o **mês
+  corrente real**, independente do período selecionado no Dashboard
+  (também corrige, de bônus, um mismatch pré-existente: o cabeçalho já
+  dizia "Orçamentos — {mês selecionado}" mas os dados vinham sempre do mês
+  real, porque `listBudgets` nunca recebia o `month` — só o rótulo estava
+  errado, agora está consistente). AccountsWidget, Faturas Abertas e
+  Contas a Vencer já eram widgets de estado atual (saldo/fatura/agendamento
+  reais), não dependiam do período selecionado antes nem depois.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 81/81 · eslint sem
+erros novos (só prettier pré-existente + 1 warning de fast-refresh do
+mesmo padrão já presente no arquivo). Testado via `curl`: `/dashboard`,
+`/dashboard?month=2026-07` e `/dashboard?month=2026` resolvem 200 sem erro
+de SSR — **não foi possível testar os cliques reais no popover** (sem
+`chromium-cli` neste ambiente + tela exige login); recomendo teste manual
+antes do deploy.
+
+**Arquivos alterados:**
+- `src/routes/_app.dashboard.tsx`
+- `src/components/dashboard/primitives.tsx`
+- `src/services/dashboard.functions.ts`
+
+**Status:** aguardando confirmação do usuário para commit/push.

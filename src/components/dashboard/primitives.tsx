@@ -177,6 +177,154 @@ export function GooglePeriodPicker({
 }
 
 // ---------------------------------------------------------------------------
+// PeriodPicker — seletor de mês OU ano inteiro (Missão 17, Dashboard)
+//
+// Reaproveita o mesmo padrão visual/interação do GooglePeriodPicker acima
+// (popover + navegação de ano + grade de 12 meses) — não duplica do zero,
+// só generaliza o value/onChange pra também representar "ano inteiro" e
+// acrescenta o botão correspondente. GooglePeriodPicker continua intocado
+// (usado em /transactions, só mês) pra não arriscar regressão lá.
+// ---------------------------------------------------------------------------
+export type DashboardPeriod = { mode: "month"; month: string } | { mode: "year"; year: number };
+
+export function periodLabel(period: DashboardPeriod): string {
+  return period.mode === "year" ? `Ano de ${period.year}` : formatMonthLabel(period.month);
+}
+
+function periodYear(period: DashboardPeriod): number {
+  return period.mode === "year" ? period.year : Number(period.month.split("-")[0]);
+}
+
+export function PeriodPicker({
+  value,
+  onChange,
+}: {
+  value: DashboardPeriod;
+  onChange: (next: DashboardPeriod) => void;
+}) {
+  const year = periodYear(value);
+  const months = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, i) => ({
+        idx: i,
+        label: MONTHS_PT[i].slice(0, 3),
+        value: `${year}-${String(i + 1).padStart(2, "0")}`,
+      })),
+    [year],
+  );
+
+  function step(delta: number) {
+    if (value.mode === "year") {
+      onChange({ mode: "year", year: value.year + delta });
+    } else {
+      onChange({ mode: "month", month: addMonths(value.month, delta) });
+    }
+  }
+
+  function stepYear(delta: number) {
+    if (value.mode === "year") {
+      onChange({ mode: "year", year: value.year + delta });
+    } else {
+      onChange({ mode: "month", month: `${year + delta}-${value.month.split("-")[1]}` });
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] p-1 backdrop-blur-xl">
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-8 rounded-full text-foreground/70 hover:bg-white/10 hover:text-foreground"
+        onClick={() => step(-1)}
+        aria-label={value.mode === "year" ? "Ano anterior" : "Mês anterior"}
+      >
+        <ChevronLeft className="size-4" />
+      </Button>
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            className="h-8 gap-2 rounded-full px-3 text-sm font-medium text-foreground hover:bg-white/10"
+          >
+            <CalendarDays className="size-4 opacity-70" />
+            {periodLabel(value)}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="center"
+          className="w-72 rounded-2xl border-white/10 bg-zinc-900/95 p-3 text-foreground backdrop-blur-xl pointer-events-auto"
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 rounded-full"
+              onClick={() => stepYear(-1)}
+              aria-label="Ano anterior"
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <div className="text-sm font-semibold tracking-wide">{year}</div>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 rounded-full"
+              onClick={() => stepYear(1)}
+              aria-label="Próximo ano"
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+
+          <button
+            onClick={() => onChange({ mode: "year", year })}
+            className={cn(
+              "mb-2 h-9 w-full rounded-xl text-sm font-medium transition-colors",
+              value.mode === "year"
+                ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30"
+                : "border border-white/10 text-foreground/80 hover:bg-white/10",
+            )}
+          >
+            Ano inteiro
+          </button>
+
+          <div className="grid grid-cols-3 gap-1.5">
+            {months.map((m) => {
+              const active = value.mode === "month" && m.value === value.month;
+              return (
+                <button
+                  key={m.value}
+                  onClick={() => onChange({ mode: "month", month: m.value })}
+                  className={cn(
+                    "h-10 rounded-xl text-sm font-medium transition-colors",
+                    active
+                      ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30"
+                      : "text-foreground/80 hover:bg-white/10",
+                  )}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-8 rounded-full text-foreground/70 hover:bg-white/10 hover:text-foreground"
+        onClick={() => step(1)}
+        aria-label={value.mode === "year" ? "Próximo ano" : "Próximo mês"}
+      >
+        <ChevronRight className="size-4" />
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // KpiCard
 // ---------------------------------------------------------------------------
 export function KpiCard({
