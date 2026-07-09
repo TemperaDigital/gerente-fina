@@ -1108,3 +1108,36 @@ ambiente e a tela exige login); recomendo teste manual antes do deploy.
 Supabase antes do deploy.
 
 **Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 32. Fix: widget "Minhas Contas & Disponibilidade" misturava cartão com conta corrente
+
+**Bug confirmado pelo usuário:** o widget do Dashboard exibia contas
+`credit_card` (ex: "ICREDITO", "INTERCARD") junto com contas bancárias
+reais, rotulando tudo incorretamente — comparado com `/accounts`, que
+mostra corretamente só as contas bank/cash.
+
+**Causa raiz:** `AccountsWidget` (`accounts-widget.tsx`) lia a propriedade
+`account?.type`, mas o DTO real devolvido por `getDashboardSummary`
+(`AccountBalanceDTO`) usa o campo `account_type`, não `type`. Como `type`
+era sempre `undefined`, o filtro `a?.type !== "credit_card"` nunca excluía
+nada (`undefined !== "credit_card"` é sempre `true`) — cartões passavam
+direto — e a lógica de rótulo (`type === "bank" ? ... : ...`) sempre caía
+no branch "else", já que `undefined !== "bank"`.
+
+**Correção:**
+- Filtro trocado de deny-list (`!== "credit_card"`) para allow-list
+  explícito: `account_type === "bank" || account_type === "cash"` — não
+  deixa passar um tipo novo por engano no futuro.
+- Ícone e rótulo agora leem `account?.account_type` (campo correto);
+  rótulo por tipo real: "Conta Corrente" (bank) / "Dinheiro" (cash).
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 81/81 · eslint sem
+erros novos (o `no-explicit-any` da prop `accounts: any[]` já existia
+antes, não foi introduzido por este fix).
+
+**Arquivos alterados:**
+- `src/components/dashboard/accounts-widget.tsx`
+
+**Status:** aguardando confirmação do usuário para commit/push.
