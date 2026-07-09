@@ -120,16 +120,23 @@ type TxRow = {
 async function enrichTransactionRows(
   sb: import("@supabase/supabase-js").SupabaseClient,
   baseRows: TxRow[],
+  userId: string,
 ): Promise<TransactionListItemDTO[]> {
   const transferIds = Array.from(
     new Set(baseRows.filter((r) => r.transfer_id).map((r) => r.transfer_id!)),
   );
   const counterpartByTransfer = new Map<string, Map<string, string>>();
   if (transferIds.length > 0) {
+    // Blindagem (Missão 30): sem `.eq("user_id", userId)` aqui, uma colisão
+    // de transfer_id com outro usuário (ex: via um backup restaurado antes
+    // da checagem em backup.functions.ts) vazaria o nome da conta alheia
+    // nesta listagem — mesmo padrão de escopo já usado em getTransactionById
+    // (linha ~1123-1128) pra essa exata busca de contraparte.
     const { data: legs } = await sb
       .from("transactions")
       .select("id, transfer_id, account_id, accounts:account_id ( name )")
-      .in("transfer_id", transferIds);
+      .in("transfer_id", transferIds)
+      .eq("user_id", userId);
     for (const l of (legs ?? []) as unknown as Array<{
       id: string;
       transfer_id: string;
@@ -263,7 +270,7 @@ export const getTransactionsList = createServerFn({ method: "GET" })
     const { data: rows, count, error } = await query;
     if (error) throw new Error(error.message);
 
-    const items = await enrichTransactionRows(sb, (rows ?? []) as unknown as TxRow[]);
+    const items = await enrichTransactionRows(sb, (rows ?? []) as unknown as TxRow[], userId);
 
     return {
       items,
@@ -369,7 +376,7 @@ export const getTransactionsForExport = createServerFn({ method: "GET" })
     const { data: rows, error } = await query;
     if (error) throw new Error(error.message);
 
-    return enrichTransactionRows(sb, (rows ?? []) as unknown as TxRow[]);
+    return enrichTransactionRows(sb, (rows ?? []) as unknown as TxRow[], userId);
   });
 
 // ---------------------------------------------------------------------------

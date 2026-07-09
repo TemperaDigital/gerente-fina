@@ -975,3 +975,136 @@ substituído pela Missão 7), candidato a remoção futura. A migration 0017
 como as anteriores.
 
 **Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 30. Auditoria de isolamento entre usuários (continuação da Missão 29) + correção de /open-finance
+
+**Origem:** pedido explícito do usuário para auditar com rigor extra a
+correção da Missão 29 antes de liberar para produção — dados financeiros
+reais de múltiplos usuários, mesmo padrão de cuidado de `pay_credit_card_invoice`/
+`dedup_hash`.
+
+**Varredura completa** (todo `src/services/*.functions.ts` +
+`src/lib/supabase/*.functions.ts`, 2 agentes em paralelo + leitura própria
+de `transactions.functions.ts` e `backup.functions.ts` na íntegra):
+confirmado que todos os 15 arquivos filtram corretamente por `user_id`,
+diretamente ou via id pré-validado. `recurrences.functions.ts` segue morto
+(zero imports). Achados encontrados e **corrigidos nesta mesma missão**:
+
+1. **RPCs `security definer` sem checagem de `auth.uid()`**
+   (`pay_credit_card_invoice`, `convert_transaction_entry`,
+   `delete_installment_purchase`, `upsert_budget`, `refresh_invoice_outstanding`)
+   — todas com `GRANT EXECUTE ... TO authenticated`, chamáveis direto pela
+   REST API do Supabase por qualquer usuário autenticado, contornando 100%
+   das checagens de dono que só existem na camada TypeScript. **Corrigido:**
+   `docs/migrations/0019_revoke_authenticated_from_security_definer_rpcs.sql`
+   revoga `EXECUTE` de `authenticated` nas 5 funções — o app só chama via
+   `service_role` (`getSupabaseAdmin()`), que não depende desse grant.
+2. **`restoreBackup` não validava `transfer_id`/`paid_invoice_id`** — só
+   `account_id`/`category_id` eram checados antes do upsert; um backup
+   adulterado podia corromper o saldo devedor de fatura de outro usuário via
+   `paid_invoice_id`, ou colidir com uma transferência real de outro usuário
+   via `transfer_id`. **Corrigido** em `backup.functions.ts`: nova função
+   `assertRestorableTransferIds` (transfer_id não é FK pra outra tabela, é
+   checado contra `transactions.user_id` diretamente) + `assertRestorableIds`
+   estendida para aceitar `credit_card_invoices` como tabela.
+3. **`enrichTransactionRows`** (`transactions.functions.ts`) buscava a perna
+   irmã de transferência sem `.eq("user_id", userId)` — inconsistente com
+   `getTransactionById`, que faz a mesma busca corretamente escopada.
+   **Corrigido:** função passou a receber `userId` e escopar a query, nos 2
+   call sites (`getTransactionsList` e `getTransactionsForExport`).
+
+**Corrigido nesta sessão — `/open-finance`:** único ponto do app que falava
+com o Supabase direto do navegador (client anon key) em vez de passar por
+server function + `service_role`. Investigação revelou que `bank_connections`
+**nunca existiu no banco** (confirmado via SQL Editor: `information_schema.columns`
+e `pg_policies` retornam 0 linhas) — a tabela foi referenciada no código sem
+nunca ter sido criada por nenhuma migration deste projeto. Corrigido com:
+- Migration nova `docs/migrations/0018_bank_connections.sql` — cria a
+  tabela do zero com RLS + policies escopadas por `user_id` (mesmo padrão
+  de `budgets`, migration 0006).
+- `src/services/open-finance.functions.ts` (novo) — `listBankConnections`,
+  `createBankConnection`, `disconnectBankConnection` via `createServerFn` +
+  `service_role` + checagem explícita de `user_id`.
+- `src/routes/_app.open-finance.tsx` — refatorado para usar as server
+  functions acima; `disconnectMutation` não depende mais só de RLS.
+- Fora do escopo desta correção: `supabase.functions.invoke("open-finance-sync"/"open-finance-token")`
+  continuam client-side (Edge Functions não versionadas neste repo, não
+  auditáveis por aqui).
+
+**Teste adicionado:** `src/lib/finance/active-account.server.test.ts` —
+testa `accountBelongsToUser` (guardião reaproveitado por quase todo write
+path sensível) contra um Supabase client fake que filtra de verdade um
+dataset com contas de dois usuários.
+
+**Arquivos criados:**
+- `docs/migrations/0018_bank_connections.sql`
+- `docs/migrations/0019_revoke_authenticated_from_security_definer_rpcs.sql`
+- `src/services/open-finance.functions.ts`
+- `src/lib/finance/active-account.server.test.ts`
+
+**Arquivos alterados:**
+- `src/routes/_app.open-finance.tsx`
+- `src/services/backup.functions.ts`
+- `src/services/transactions.functions.ts`
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 81/81 · eslint sem
+erros novos (arquivos já tinham débito de formatação prettier pré-existente).
+
+**Pendências para decisão do usuário:** migration 0018 já foi aplicada pelo
+usuário direto no Supabase. Migration 0019 (REVOKE das RPCs) ainda **não**
+foi aplicada — precisa rodar manualmente no SQL Editor antes do deploy,
+mesmo fluxo das anteriores.
+
+**Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 31. /open-finance — cadastro manual de instituições (sem credenciais Pluggy/Belvo ainda)
+
+**Origem:** ao investigar a Missão 30, ficou claro que `/open-finance` nunca
+funcionou de verdade: o SDK do Pluggy nunca é carregado no app (nenhum
+script incluído em lugar nenhum), e a Edge Function `open-finance-token`
+não existe neste repo — clicar em "Conectar Nova Conta" sempre falhava
+silenciosamente antes mesmo de chegar no fallback mockado. Usuário confirmou
+que não tem credenciais reais do Pluggy/Belvo ainda e pediu uma tela honesta
+sobre o estado atual, inspirada no layout do concorrente Meu Dinheiro
+(`app.meudinheiroweb.com.br`), adaptada ao visual do projeto.
+
+**Solução:** cadastro **manual** de instituição (só o nome) em vez de
+fingir sincronização automática. Toda conexão criada tem
+`status: "MANUAL"` — `OUTDATED`/`UPDATED`/`LOGIN_ERROR` ficam reservados
+pra quando uma integração real existir.
+
+- Migration `docs/migrations/0020_bank_connections_manual_status.sql` —
+  estende o CHECK de `status` pra aceitar `'MANUAL'` e muda o default.
+- `src/services/open-finance.functions.ts` — `createBankConnection`
+  simplificado pra `{ institution_name }`; `provider_item_id` e `status`
+  gerados no servidor (não mais aceitos do cliente).
+- `src/routes/_app.open-finance.tsx` — reescrita: removido todo o código
+  Pluggy/Edge Function (SDK widget, `syncMutation`, chamada a
+  `open-finance-token`); novo fluxo é um `Dialog` simples com campo de nome
+  + banner explicando que a sincronização automática ainda não existe;
+  cards mostram badge "Cadastro manual" em vez de status de sync falso.
+- `src/components/app-shell.tsx` — rota estava órfã (sem link em nenhum
+  menu); adicionado item "Open Finance" na navegação, ao lado de "Contas".
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 81/81 · eslint sem
+erros novos (só débito de prettier pré-existente nos arquivos tocados).
+Rota testada via `curl` (200, título correto, sem erro de SSR) — **não foi
+possível testar os cliques reais no navegador** (sem `chromium-cli` neste
+ambiente e a tela exige login); recomendo teste manual antes do deploy.
+
+**Arquivos criados:**
+- `docs/migrations/0020_bank_connections_manual_status.sql`
+
+**Arquivos alterados:**
+- `src/services/open-finance.functions.ts`
+- `src/routes/_app.open-finance.tsx`
+- `src/components/app-shell.tsx`
+
+**Pendências:** migration 0020 precisa ser aplicada manualmente no
+Supabase antes do deploy.
+
+**Status:** aguardando confirmação do usuário para commit/push.
