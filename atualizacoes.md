@@ -1206,3 +1206,77 @@ antes do deploy.
 - `src/services/dashboard.functions.ts`
 
 **Status:** aguardando confirmação do usuário para commit/push.
+
+---
+
+## 34. Cabeçalho de clima/relógio digital em 5 telas + calculadora financeira global (HP12C)
+
+**Pedido:** aplicar um novo visual de cabeçalho (fornecido como referência
+`DashboardHeader.jsx`: cartão com gradiente, clima e relógio digital) no
+lugar do `LocationWeatherBar` atual, replicado em Dashboard, Chat IA,
+Configurações, Lançamentos e Parcelas & Dívidas — mais uma calculadora
+financeira acessível de qualquer tela.
+
+**Cabeçalho (`HeaderClockBar`):** novo componente
+(`src/components/dashboard/header-clock-bar.tsx`) que funde a lógica de
+dados já existente em `LocationWeatherBar` (geolocalização do navegador +
+BigDataCloud + Open-Meteo, cache 20min em sessionStorage, falha silenciosa
+em qualquer etapa) com a apresentação nova: cartão com gradiente radial que
+muda de cor por condição climática, ícone dia/noite, e relógio "digital"
+(mono, tabular-nums, brilho sutil via text-shadow, dois-pontos piscando) —
+sem depender de fonte externa nova (nenhuma fonte Google Fonts estava
+configurada no projeto; optei por não introduzir essa dependência sem
+combinar antes). `location-weather-bar.tsx` foi removido (virou código
+morto depois da troca, sem nenhum outro import).
+
+Inserido nas 5 telas. Chat IA precisou de ajuste de layout (era um
+`flex h-[calc(100vh-4rem)]` de altura fixa) — virou `flex-col`, com o
+cabeçalho como bloco fixo no topo e a área de conversa (sidebar + chat) num
+`flex-1 min-h-0` que preenche o resto da altura, pra não quebrar o scroll
+interno da janela de mensagens.
+
+**Calculadora financeira (`FinancialCalculator`):**
+- Motor puro e testado em `src/lib/finance/hp12c.ts`: TVM completo (N, i,
+  PV, PMT, FV) na convenção HP12C real (dinheiro que entra é positivo, que
+  sai é negativo; modo "END"/fim de período — "BEGIN" fica fora de escopo
+  por ora). `solveFV`/`solvePV`/`solvePMT`/`solveN` por fórmula fechada;
+  `solveI` numérico (Newton-Raphson com derivada por diferença central,
+  com fallback pra bisseção se não convergir) — não existe fórmula fechada
+  pra taxa. Mais uma calculadora básica de 4 operações (reducer puro,
+  mesmo padrão testável). 13 testes novos em `hp12c.test.ts`, incluindo
+  round-trip de PMT→N→i contra um financiamento de referência (1000 a
+  2%/mês em 12 parcelas ⇒ PMT ≈ -94,56 — bate com tabela de amortização
+  padrão).
+- UI em `src/components/calculator/financial-calculator.tsx`: abas
+  "Básica" (teclado numérico) e "Financeira (HP12C)" (5 campos N/i/PV/PMT/
+  FV, cada um com botão "Resolver" que calcula a partir dos outros 4).
+- Acesso: botão flutuante fixo (canto inferior direito, `AppShell`) abre a
+  calculadora num Dialog **de qualquer tela** — satisfaz o pedido "clica em
+  que tela estiver e aparece uma calculadora" sem precisar navegar. Mais
+  uma rota dedicada `/calculadora` (também no menu de navegação) pra quem
+  preferir tela cheia.
+
+**Verificação:** `npx tsc --noEmit` limpo · `npm test` 94/94 (13 novos) ·
+eslint sem erros novos (só prettier pré-existente). Testado via `curl`:
+`/dashboard`, `/calculadora`, `/chat`, `/settings`, `/transactions`,
+`/installments` resolvem sem erro de SSR — **não foi possível testar
+cliques reais** (sem `chromium-cli` neste ambiente + login necessário);
+recomendo teste manual antes do deploy, em especial os cálculos da aba
+financeira e o layout do Chat.
+
+**Arquivos criados:**
+- `src/components/dashboard/header-clock-bar.tsx`
+- `src/components/calculator/financial-calculator.tsx`
+- `src/lib/finance/hp12c.ts` + `hp12c.test.ts`
+- `src/routes/_app.calculadora.tsx`
+
+**Arquivos alterados:**
+- `src/routes/_app.dashboard.tsx`, `_app.chat.tsx`, `_app.settings.tsx`,
+  `_app.transactions.index.tsx`, `_app.installments.tsx`
+- `src/components/app-shell.tsx`
+
+**Arquivos removidos:**
+- `src/components/dashboard/location-weather-bar.tsx` (substituído por
+  `header-clock-bar.tsx`, sem mais nenhum import)
+
+**Status:** aguardando confirmação do usuário para commit/push.

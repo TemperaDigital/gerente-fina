@@ -18,9 +18,12 @@ import {
   FileUp,
   CalendarClock,
   Link2,
+  Calculator,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FinancialCalculator } from "@/components/calculator/financial-calculator";
 
 function currentMonthParam(): string {
   const d = new Date();
@@ -45,6 +48,7 @@ const NAV = [
   { to: "/agendamentos", label: "Agendamentos", icon: CalendarClock },
   { to: "/budgets", label: "Orçamentos", icon: Target },
   { to: "/forecast", label: "Previsão", icon: LineChart },
+  { to: "/calculadora", label: "Calculadora", icon: Calculator },
   { to: "/chat", label: "Chat IA", icon: MessageSquare },
   { to: "/settings", label: "Configurações", icon: SettingsIcon },
 ] as const;
@@ -52,6 +56,7 @@ const NAV = [
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [openMobile, setOpenMobile] = useState(false);
+  const [calcOpen, setCalcOpen] = useState(false);
 
   return (
     <div className="relative min-h-screen bg-zinc-950 text-foreground">
@@ -141,6 +146,25 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <main className="min-w-0 flex-1">{children}</main>
       </div>
+
+      {/* Calculadora — acessível de qualquer tela, sem precisar navegar */}
+      <button
+        onClick={() => setCalcOpen(true)}
+        aria-label="Abrir calculadora"
+        title="Calculadora"
+        className="fixed bottom-5 right-5 z-40 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/30 transition-transform hover:scale-105 hover:bg-primary/90"
+      >
+        <Calculator className="size-6" />
+      </button>
+
+      <Dialog open={calcOpen} onOpenChange={setCalcOpen}>
+        <DialogContent className="max-w-md border-white/10 bg-zinc-900/95 text-foreground backdrop-blur-xl">
+          <DialogHeader>
+            <DialogTitle>Calculadora</DialogTitle>
+          </DialogHeader>
+          <FinancialCalculator />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { Calendar, CreditCard, Wallet, Landmark, Trophy, Trash2 } from "lucide-r
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/app-shell";
+import { HeaderClockBar } from "@/components/dashboard/header-clock-bar";
 import { GlassCard } from "@/components/dashboard/primitives";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -192,6 +193,9 @@ function InstallmentsPage() {
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mb-6">
+          <HeaderClockBar />
+        </div>
         <header className="mb-6">
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
             Parcelamentos & Dívidas

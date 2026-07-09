@@ -44,7 +44,7 @@ import { CategoryDonut } from "@/components/dashboard/category-donut";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { AccountsWidget } from "@/components/dashboard/accounts-widget";
-import { LocationWeatherBar } from "@/components/dashboard/location-weather-bar";
+import { HeaderClockBar } from "@/components/dashboard/header-clock-bar";
 import {
   getDashboardSummary,
   getCashBasisSummary,
@@ -267,7 +267,7 @@ function DashboardPage() {
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
-        <LocationWeatherBar />
+        <HeaderClockBar />
 
         {/* Header + seletor de período (Missão 17: mês OU ano inteiro) */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
