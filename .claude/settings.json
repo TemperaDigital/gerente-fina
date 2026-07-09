@@ -9,7 +9,8 @@
       "Bash(timeout 30 bash -c 'until curl -sf http://localhost:3000 >/dev/null 2>&1 || curl -sf http://localhost:5173 >/dev/null 2>&1; do sleep 1; done')",
       "Read(//tmp/claude-1001/**)",
       "Bash(curl -s -o /tmp/claude-1001/processos_page.html -w \"%{http_code}\\\\n\" http://localhost:8080/processos/00000000-0000-0000-0000-000000000000)",
-      "Bash(pkill -f \"vite dev\")"
+      "Bash(pkill -f \"vite dev\")",
+      "Bash(env)"
     ]
   }
 }
