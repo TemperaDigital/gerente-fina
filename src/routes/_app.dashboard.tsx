@@ -15,7 +15,7 @@
  *     agrega por ano) — sempre mostra o mês corrente real, independente do
  *     período selecionado aqui.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
