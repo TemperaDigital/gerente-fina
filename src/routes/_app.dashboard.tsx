@@ -319,7 +319,19 @@ function DashboardPage() {
             <p className="mt-1 text-xs text-foreground/30">Regime de caixa — contas e dinheiro</p>
           </GlassCard>
 
-          <GlassCard className="border border-white/10 bg-zinc-900/40 p-5">
+          <GlassCard
+            className="border border-white/10 bg-zinc-900/40 p-5 cursor-pointer transition-colors hover:bg-zinc-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
+            role="button"
+            tabIndex={0}
+            aria-label={`Abrir detalhamento de Despesas do período ${periodLabel(period)}`}
+            onClick={() => setExpenseDialogOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setExpenseDialogOpen(true);
+              }
+            }}
+          >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-foreground/50 uppercase tracking-wide">
                 Despesas
@@ -331,7 +343,7 @@ function DashboardPage() {
             <p className="mt-3 font-mono text-2xl font-bold tracking-tight text-red-300">
               {BRL(cashBasis.expense_cash)}
             </p>
-            <p className="mt-1 text-xs text-foreground/30">Regime de caixa — inclui fatura paga</p>
+            <p className="mt-1 text-xs text-foreground/30">Toque para ver o detalhamento</p>
           </GlassCard>
 
           <GlassCard className="border border-white/10 bg-zinc-900/40 p-5">
