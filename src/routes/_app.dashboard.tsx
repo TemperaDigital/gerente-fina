@@ -215,6 +215,7 @@ function DashboardPage() {
   const period = periodFromSearch(monthSearch);
   const navigate = useNavigate({ from: "/dashboard" });
   const queryClient = useQueryClient();
+  const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
 
   const { data: summary } = useSuspenseQuery(
     summaryQuery(period.mode === "year" ? currentMonth() : period.month),
