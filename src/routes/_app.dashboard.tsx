@@ -672,6 +672,13 @@ function DashboardPage() {
           </GlassCard>
         )}
       </div>
+
+      <ExpenseBreakdownDialog
+        open={expenseDialogOpen}
+        onOpenChange={setExpenseDialogOpen}
+        period={period}
+        expectedTotal={cashBasis.expense_cash}
+      />
     </AppShell>
   );
 }
