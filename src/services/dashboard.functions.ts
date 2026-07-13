@@ -12,6 +12,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { addAmounts, toCents, fromCents } from "@/lib/finance/money";
 import { computeMonthlyBalance } from "@/lib/finance/cash-basis";
+import {
+  aggregateExpenseBreakdown,
+  type ExpenseBreakdownResult,
+  type ExpenseInput,
+} from "@/lib/finance/expense-breakdown";
 
 // -----------------------------------------------------------------------------
 // Tipos públicos (DTOs)
