@@ -45,6 +45,7 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { AccountsWidget } from "@/components/dashboard/accounts-widget";
 import { HeaderClockBar } from "@/components/dashboard/header-clock-bar";
+import { ExpenseBreakdownDialog } from "@/components/dashboard/expense-breakdown-dialog";
 import {
   getDashboardSummary,
   getCashBasisSummary,
