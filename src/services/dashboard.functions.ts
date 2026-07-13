@@ -529,3 +529,92 @@ export const getCategoryBreakdown = createServerFn({ method: "GET" })
       color: catMap.get(r.category_id)?.color ?? null,
     }));
   });
+
+// -----------------------------------------------------------------------------
+// getExpenseBreakdown — detalhamento do KPI "Despesas (caixa)" para o modal
+// clicável do card Despesas no Dashboard.
+//
+// Reaproveita EXATAMENTE os mesmos filtros de getCashBasisSummary (Missão 16):
+// só linhas do período em contas bank/cash, categoria nula tratada como
+// VARIÁVEL, apenas a perna débito de invoice_payment conta. O cálculo em si
+// vive na função pura `aggregateExpenseBreakdown` (testável sem Supabase),
+// garantindo por construção que:
+//   sum(invoice_payments) + sum(fixed) + sum(variable) === totals.total
+//   === expense_cash de getCashBasisSummary
+// -----------------------------------------------------------------------------
+
+export interface ExpenseBreakdownDTO extends ExpenseBreakdownResult {
+  reference_month: string; // YYYY-MM-01
+}
+
+export const getExpenseBreakdown = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => DashboardInput.parse(input))
+  .handler(async ({ data }): Promise<ExpenseBreakdownDTO> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { resolveActiveUserId } = await import("@/lib/supabase/resolve-user");
+    const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
+    const { start, end, referenceMonth } = resolvePeriodBounds(data ?? {});
+
+    const { data: txRows, error: txErr } = await sb
+      .from("transactions")
+      .select(
+        `kind, type, amount, paid_invoice_id,
+         accounts:account_id ( type ),
+         categories:category_id ( id, name, nature, icon, color ),
+         paid_invoice:paid_invoice_id ( account_id, accounts:account_id ( name ) )`,
+      )
+      .eq("user_id", userId)
+      .in("kind", ["expense", "invoice_payment"])
+      .gte("occurred_on", start)
+      .lte("occurred_on", end);
+
+    if (txErr) throw new Error(txErr.message);
+
+    const inputs: ExpenseInput[] = [];
+    for (const r of (txRows ?? []) as unknown as Array<{
+      kind: "expense" | "invoice_payment";
+      type: "debit" | "credit";
+      amount: string;
+      paid_invoice_id: string | null;
+      accounts?: { type?: AccountType } | null;
+      categories?: {
+        id?: string | null;
+        name?: string | null;
+        nature?: "FIXA" | "VARIÁVEL" | null;
+        icon?: string | null;
+        color?: string | null;
+      } | null;
+      paid_invoice?: {
+        account_id?: string | null;
+        accounts?: { name?: string | null } | null;
+      } | null;
+    }>) {
+      const account_type = r.accounts?.type ?? null;
+      if (r.kind === "expense") {
+        inputs.push({
+          kind: "expense",
+          amount: r.amount,
+          account_type,
+          category_id: r.categories?.id ?? null,
+          category_name: r.categories?.name ?? null,
+          category_nature: r.categories?.nature ?? null,
+          icon: r.categories?.icon ?? null,
+          color: r.categories?.color ?? null,
+        });
+      } else {
+        inputs.push({
+          kind: "invoice_payment",
+          type: r.type,
+          amount: r.amount,
+          account_type,
+          invoice_account_id: r.paid_invoice?.account_id ?? null,
+          invoice_account_name: r.paid_invoice?.accounts?.name ?? null,
+        });
+      }
+    }
+
+    const result = aggregateExpenseBreakdown(inputs);
+    return { reference_month: referenceMonth, ...result };
+  });
+
