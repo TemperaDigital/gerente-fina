@@ -172,3 +172,32 @@ export function aggregateExpenseBreakdown(
     variable: variableList,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Drill-down helper — dado o período do Dashboard e um item de uma das três
+// seções do modal, devolve o objeto `search` a ser passado ao <Link to="/transactions">
+// (ou `null` quando o destino não é navegável — modo anual, já que a tela de
+// Lançamentos só filtra por YYYY-MM). Centralizado aqui para poder ser testado
+// sem renderizar React.
+// ---------------------------------------------------------------------------
+export type BreakdownPeriod =
+  | { mode: "month"; month: string }
+  | { mode: "year"; year: number };
+
+export type BreakdownItemKind = "invoice_payment" | "fixed" | "variable";
+
+export type ExpenseDrilldownSearch =
+  | { month: string; account_id: string; kind: "invoice_payment" }
+  | { month: string; category_id: string; kind: "expense" }
+  | null;
+
+export function buildExpenseDrilldownSearch(
+  period: BreakdownPeriod,
+  item: { kind: BreakdownItemKind; id: string },
+): ExpenseDrilldownSearch {
+  if (period.mode !== "month") return null;
+  if (item.kind === "invoice_payment") {
+    return { month: period.month, account_id: item.id, kind: "invoice_payment" };
+  }
+  return { month: period.month, category_id: item.id, kind: "expense" };
+}
