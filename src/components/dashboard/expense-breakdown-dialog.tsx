@@ -234,6 +234,7 @@ function Section({
   subtotal,
   items,
   accent,
+  emptyIcon,
   emptyLabel,
   onNavigate,
 }: {
@@ -242,6 +243,7 @@ function Section({
   subtotal: string;
   items: SectionItem[];
   accent: string;
+  emptyIcon: React.ReactNode;
   emptyLabel: string;
   onNavigate: () => void;
 }) {
@@ -263,9 +265,10 @@ function Section({
       </div>
 
       {items.length === 0 ? (
-        <p className="rounded-md bg-white/[0.02] px-3 py-4 text-center text-xs text-foreground/40">
-          {emptyLabel}
-        </p>
+        <div className="flex flex-col items-center gap-2 rounded-md border border-white/5 bg-white/[0.02] px-3 py-6 text-center text-sm text-foreground/50">
+          {emptyIcon}
+          <span>{emptyLabel}</span>
+        </div>
       ) : (
         <ul className="space-y-1.5">
           {items.map((item) => {
