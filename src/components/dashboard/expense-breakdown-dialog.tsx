@@ -74,8 +74,8 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
     return toCents(data.totals.total) - toCents(expectedTotal);
   }, [data, expectedTotal]);
 
-  // Só monta drill-down de mês (a tela de Lançamentos filtra por YYYY-MM).
-  const drillMonth = period.mode === "month" ? period.month : null;
+  const buildSearch = (kind: BreakdownItemKind, id: string) =>
+    buildExpenseDrilldownSearch(period, { kind, id });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -110,12 +110,11 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
                 amount: i.amount,
                 icon: null,
                 color: "#a78bfa",
-                linkSearch: drillMonth
-                  ? { month: drillMonth, account_id: i.account_id, kind: "invoice_payment" as const }
-                  : null,
+                linkSearch: buildSearch("invoice_payment", i.account_id) as TxLinkSearch | null,
               }))}
               accent="from-violet-500/60 to-violet-500/10"
-              emptyLabel="Nenhum pagamento de fatura no período."
+              emptyIcon={<CreditCard className="size-8 opacity-30" aria-hidden />}
+              emptyLabel="Nenhum pagamento de fatura neste período."
               onNavigate={() => onOpenChange(false)}
             />
 
@@ -129,12 +128,11 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
                 amount: c.amount,
                 icon: c.icon,
                 color: c.color ?? "#f87171",
-                linkSearch: drillMonth
-                  ? { month: drillMonth, category_id: c.category_id, kind: "expense" as const }
-                  : null,
+                linkSearch: buildSearch("fixed", c.category_id) as TxLinkSearch | null,
               }))}
               accent="from-rose-500/60 to-rose-500/10"
-              emptyLabel="Nenhum custo fixo lançado no período."
+              emptyIcon={<PinIcon className="size-8 opacity-30" aria-hidden />}
+              emptyLabel="Nenhuma despesa fixa neste período."
               onNavigate={() => onOpenChange(false)}
             />
 
@@ -148,14 +146,14 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
                 amount: c.amount,
                 icon: c.icon,
                 color: c.color ?? "#fbbf24",
-                linkSearch: drillMonth
-                  ? { month: drillMonth, category_id: c.category_id, kind: "expense" as const }
-                  : null,
+                linkSearch: buildSearch("variable", c.category_id) as TxLinkSearch | null,
               }))}
               accent="from-amber-500/60 to-amber-500/10"
-              emptyLabel="Nenhum custo variável lançado no período."
+              emptyIcon={<Zap className="size-8 opacity-30" aria-hidden />}
+              emptyLabel="Nenhuma despesa variável neste período."
               onNavigate={() => onOpenChange(false)}
             />
+
 
             <div className="flex items-center justify-between border-t border-white/10 pt-4">
               <span className="text-xs uppercase tracking-wide text-foreground/50">
