@@ -37,6 +37,10 @@ import {
 } from "@/services/dashboard.functions";
 import { periodLabel, type DashboardPeriod } from "@/components/dashboard/primitives";
 import { toCents, fromCents, safePercent } from "@/lib/finance/money";
+import {
+  buildExpenseDrilldownSearch,
+  type BreakdownItemKind,
+} from "@/lib/finance/expense-breakdown";
 
 const BRL = (v: string) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
