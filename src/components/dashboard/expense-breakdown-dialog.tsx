@@ -9,13 +9,19 @@
  *   3. Custos variáveis (nature='VARIÁVEL' ou nula, mesma convenção do
  *      card "Saldo do Mês")
  *
+ * Cada item é um drill-down clicável — leva para /transactions já filtrado
+ * por mês + conta (fatura) ou mês + categoria + kind='expense' (fixa/var).
+ * Em modo anual, os itens não são clicáveis (a tela de Lançamentos filtra
+ * por mês, não por ano) — o usuário fecha o modal e navega manualmente.
+ *
  * Rodapé mostra Total e — se por alguma razão a soma dos três blocos
  * divergir do KPI "Despesas (caixa)" — exibe um aviso vermelho pequeno
  * com a diferença em centavos. Esse é o teste de sanidade visual.
  */
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CreditCard, PinIcon, Zap, X } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { AlertTriangle, ChevronRight, CreditCard, PinIcon, Zap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -64,6 +70,9 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
     return toCents(data.totals.total) - toCents(expectedTotal);
   }, [data, expectedTotal]);
 
+  // Só monta drill-down de mês (a tela de Lançamentos filtra por YYYY-MM).
+  const drillMonth = period.mode === "month" ? period.month : null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl border-white/10 bg-zinc-950/95 text-foreground backdrop-blur-xl">
@@ -77,14 +86,7 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
           </DialogDescription>
         </DialogHeader>
 
-        {isLoading && (
-          <div className="space-y-4 py-2">
-            <Skeleton className="h-4 w-40 bg-white/10" />
-            <Skeleton className="h-8 w-full bg-white/10" />
-            <Skeleton className="h-8 w-3/4 bg-white/10" />
-            <Skeleton className="h-8 w-1/2 bg-white/10" />
-          </div>
-        )}
+        {isLoading && <LoadingSections />}
 
         {isError && (
           <p className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
@@ -104,9 +106,13 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
                 amount: i.amount,
                 icon: null,
                 color: "#a78bfa",
+                linkSearch: drillMonth
+                  ? { month: drillMonth, account_id: i.account_id, kind: "invoice_payment" as const }
+                  : null,
               }))}
               accent="from-violet-500/60 to-violet-500/10"
               emptyLabel="Nenhum pagamento de fatura no período."
+              onNavigate={() => onOpenChange(false)}
             />
 
             <Section
@@ -119,9 +125,13 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
                 amount: c.amount,
                 icon: c.icon,
                 color: c.color ?? "#f87171",
+                linkSearch: drillMonth
+                  ? { month: drillMonth, category_id: c.category_id, kind: "expense" as const }
+                  : null,
               }))}
               accent="from-rose-500/60 to-rose-500/10"
               emptyLabel="Nenhum custo fixo lançado no período."
+              onNavigate={() => onOpenChange(false)}
             />
 
             <Section
@@ -134,9 +144,13 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
                 amount: c.amount,
                 icon: c.icon,
                 color: c.color ?? "#fbbf24",
+                linkSearch: drillMonth
+                  ? { month: drillMonth, category_id: c.category_id, kind: "expense" as const }
+                  : null,
               }))}
               accent="from-amber-500/60 to-amber-500/10"
               emptyLabel="Nenhum custo variável lançado no período."
+              onNavigate={() => onOpenChange(false)}
             />
 
             <div className="flex items-center justify-between border-t border-white/10 pt-4">
@@ -165,20 +179,33 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
             )}
           </div>
         )}
-
-        {/* Botão de fechar acessível — o Dialog do shadcn já dá Esc, o X visível
-            fica no canto padrão do DialogContent. Mantido só como fallback
-            garantido em teclado. */}
-        <button
-          type="button"
-          onClick={() => onOpenChange(false)}
-          aria-label="Fechar detalhamento"
-          className="sr-only"
-        >
-          <X className="size-4" />
-        </button>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Loading state — três seções esqueléticas para dar a mesma silhueta do
+// conteúdo real, evitando "flash de vazio" enquanto a query resolve.
+// ---------------------------------------------------------------------------
+function LoadingSections() {
+  return (
+    <div className="space-y-5" aria-busy="true" aria-live="polite">
+      {[0, 1, 2].map((s) => (
+        <div key={s} className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-3 w-32 bg-white/10" />
+            <Skeleton className="h-4 w-20 bg-white/10" />
+          </div>
+          <div className="space-y-1.5">
+            <Skeleton className="h-9 w-full rounded-lg bg-white/5" />
+            <Skeleton className="h-9 w-4/5 rounded-lg bg-white/5" />
+            <Skeleton className="h-9 w-2/3 rounded-lg bg-white/5" />
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">Carregando detalhamento de despesas…</span>
+    </div>
   );
 }
 
@@ -186,12 +213,17 @@ export function ExpenseBreakdownDialog({ open, onOpenChange, period, expectedTot
 // Bloco com barras horizontais — layout compartilhado pelas 3 seções.
 // ---------------------------------------------------------------------------
 
+type TxLinkSearch =
+  | { month: string; account_id: string; kind: "invoice_payment" }
+  | { month: string; category_id: string; kind: "expense" };
+
 interface SectionItem {
   key: string;
   name: string;
   amount: string;
   icon: string | null;
   color: string;
+  linkSearch: TxLinkSearch | null;
 }
 
 function Section({
@@ -201,6 +233,7 @@ function Section({
   items,
   accent,
   emptyLabel,
+  onNavigate,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -208,6 +241,7 @@ function Section({
   items: SectionItem[];
   accent: string;
   emptyLabel: string;
+  onNavigate: () => void;
 }) {
   const maxAmount = items.reduce((acc, i) => {
     const cents = toCents(i.amount);
@@ -237,11 +271,9 @@ function Section({
               maxAmount === 0n
                 ? 0
                 : safePercent(item.amount, fromCents(maxAmount));
-            return (
-              <li
-                key={item.key}
-                className="relative overflow-hidden rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2"
-              >
+
+            const inner = (
+              <>
                 <div
                   aria-hidden
                   className={`absolute inset-y-0 left-0 bg-gradient-to-r ${accent}`}
@@ -260,10 +292,36 @@ function Section({
                     )}
                     <span className="truncate text-sm text-foreground/90">{item.name}</span>
                   </div>
-                  <span className="shrink-0 font-mono text-sm font-semibold text-foreground/90">
-                    {BRL(item.amount)}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="font-mono text-sm font-semibold text-foreground/90">
+                      {BRL(item.amount)}
+                    </span>
+                    {item.linkSearch && (
+                      <ChevronRight className="size-4 text-foreground/40" aria-hidden />
+                    )}
+                  </div>
                 </div>
+              </>
+            );
+
+            const baseClass =
+              "relative block overflow-hidden rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2";
+
+            return (
+              <li key={item.key}>
+                {item.linkSearch ? (
+                  <Link
+                    to="/transactions"
+                    search={item.linkSearch}
+                    onClick={onNavigate}
+                    aria-label={`Ver lançamentos de ${item.name} — ${BRL(item.amount)}`}
+                    className={`${baseClass} transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30`}
+                  >
+                    {inner}
+                  </Link>
+                ) : (
+                  <div className={baseClass}>{inner}</div>
+                )}
               </li>
             );
           })}
