@@ -31,7 +31,11 @@ export interface AccountBalanceDTO {
   balance: string; // numeric(14,2)
   transactions_count: number;
   last_movement_on: string | null;
+  /** Missão 19 — cheque especial (só faz sentido em bank/cash). */
+  overdraft_limit_cents: number | null;
+  overdraft_since: string | null;
 }
+
 
 export interface DashboardSummaryDTO {
   reference_month: string; // YYYY-MM-01
