@@ -101,7 +101,7 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
     const userId = await resolveActiveUserId();
     const referenceMonth = resolveReferenceMonth(data?.month);
 
-    const [balancesRes, dreRes] = await Promise.all([
+    const [balancesRes, dreRes, overdraftRes] = await Promise.all([
       sb
         .from("account_balances")
         .select(
@@ -115,16 +115,38 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
         .eq("user_id", userId)
         .eq("reference_month", referenceMonth)
         .maybeSingle(),
+      sb
+        .from("accounts")
+        .select("id, overdraft_limit_cents, overdraft_since")
+        .eq("user_id", userId)
+        .is("archived_at", null),
     ]);
 
     if (balancesRes.error) throw new Error(balancesRes.error.message);
     if (dreRes.error) throw new Error(dreRes.error.message);
+    if (overdraftRes.error) throw new Error(overdraftRes.error.message);
 
-    const accounts = (balancesRes.data ?? []) as AccountBalanceDTO[];
+    const overdraftMap = new Map<string, { limit: number | null; since: string | null }>(
+      ((overdraftRes.data ?? []) as Array<{
+        id: string;
+        overdraft_limit_cents: number | null;
+        overdraft_since: string | null;
+      }>).map((a) => [a.id, { limit: a.overdraft_limit_cents, since: a.overdraft_since }]),
+    );
+
+    const accounts: AccountBalanceDTO[] = ((balancesRes.data ?? []) as Array<
+      Omit<AccountBalanceDTO, "overdraft_limit_cents" | "overdraft_since">
+    >).map((a) => ({
+      ...a,
+      overdraft_limit_cents: overdraftMap.get(a.account_id)?.limit ?? null,
+      overdraft_since: overdraftMap.get(a.account_id)?.since ?? null,
+    }));
+
     const consolidated_balance = accounts.reduce(
       (acc, a) => addAmounts(acc, a.balance ?? "0.00"),
       "0.00",
     );
+
 
     const dre = dreRes.data ?? { income: "0.00", expense: "0.00", net_result: "0.00" };
 
