@@ -31,7 +31,11 @@ export interface AccountBalanceDTO {
   balance: string; // numeric(14,2)
   transactions_count: number;
   last_movement_on: string | null;
+  /** Missão 19 — cheque especial (só faz sentido em bank/cash). */
+  overdraft_limit_cents: number | null;
+  overdraft_since: string | null;
 }
+
 
 export interface DashboardSummaryDTO {
   reference_month: string; // YYYY-MM-01
@@ -97,7 +101,7 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
     const userId = await resolveActiveUserId();
     const referenceMonth = resolveReferenceMonth(data?.month);
 
-    const [balancesRes, dreRes] = await Promise.all([
+    const [balancesRes, dreRes, overdraftRes] = await Promise.all([
       sb
         .from("account_balances")
         .select(
@@ -111,16 +115,38 @@ export const getDashboardSummary = createServerFn({ method: "GET" })
         .eq("user_id", userId)
         .eq("reference_month", referenceMonth)
         .maybeSingle(),
+      sb
+        .from("accounts")
+        .select("id, overdraft_limit_cents, overdraft_since")
+        .eq("user_id", userId)
+        .is("archived_at", null),
     ]);
 
     if (balancesRes.error) throw new Error(balancesRes.error.message);
     if (dreRes.error) throw new Error(dreRes.error.message);
+    if (overdraftRes.error) throw new Error(overdraftRes.error.message);
 
-    const accounts = (balancesRes.data ?? []) as AccountBalanceDTO[];
+    const overdraftMap = new Map<string, { limit: number | null; since: string | null }>(
+      ((overdraftRes.data ?? []) as Array<{
+        id: string;
+        overdraft_limit_cents: number | null;
+        overdraft_since: string | null;
+      }>).map((a) => [a.id, { limit: a.overdraft_limit_cents, since: a.overdraft_since }]),
+    );
+
+    const accounts: AccountBalanceDTO[] = ((balancesRes.data ?? []) as Array<
+      Omit<AccountBalanceDTO, "overdraft_limit_cents" | "overdraft_since">
+    >).map((a) => ({
+      ...a,
+      overdraft_limit_cents: overdraftMap.get(a.account_id)?.limit ?? null,
+      overdraft_since: overdraftMap.get(a.account_id)?.since ?? null,
+    }));
+
     const consolidated_balance = accounts.reduce(
       (acc, a) => addAmounts(acc, a.balance ?? "0.00"),
       "0.00",
     );
+
 
     const dre = dreRes.data ?? { income: "0.00", expense: "0.00", net_result: "0.00" };
 
@@ -617,4 +643,155 @@ export const getExpenseBreakdown = createServerFn({ method: "GET" })
     const result = aggregateExpenseBreakdown(inputs);
     return { reference_month: referenceMonth, ...result };
   });
+
+// -----------------------------------------------------------------------------
+// getCreditCardsPanel — Missão 19: cards de cartões (bloco 2) + faturas
+// agrupadas por status (bloco 3) num único fetch coeso.
+// -----------------------------------------------------------------------------
+
+export type InvoiceBucket = "future" | "paid" | "overdue";
+
+export interface PanelInvoiceDTO {
+  invoice_id: string;
+  account_id: string;
+  reference_month: string; // YYYY-MM-01
+  closing_date: string;
+  due_date: string;
+  status: "open" | "closed" | "paid" | "overdue";
+  bucket: InvoiceBucket;
+  total_amount_cents: number;
+}
+
+export interface CreditCardPanelDTO {
+  account_id: string;
+  account_name: string;
+  closing_day: number | null;
+  due_day: number | null;
+  credit_limit_cents: number | null;
+  /** Soma dos totais de todas as faturas não pagas (open+closed+overdue). */
+  used_cents: number;
+  /** Total parcial da fatura corrente (status='open'), se houver. */
+  open_invoice_cents: number;
+  open_invoice_due_date: string | null;
+  invoices: PanelInvoiceDTO[];
+}
+
+export const getCreditCardsPanel = createServerFn({ method: "GET" }).handler(
+  async (): Promise<CreditCardPanelDTO[]> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { resolveActiveUserId } = await import("@/lib/supabase/resolve-user");
+    const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
+
+    const { data: cards, error: cErr } = await sb
+      .from("accounts")
+      .select("id, name, closing_day, due_day, credit_limit_cents")
+      .eq("user_id", userId)
+      .eq("type", "credit_card")
+      .is("archived_at", null)
+      .order("name", { ascending: true });
+    if (cErr) throw new Error(cErr.message);
+
+    const cardRows = (cards ?? []) as Array<{
+      id: string;
+      name: string;
+      closing_day: number | null;
+      due_day: number | null;
+      credit_limit_cents: number | null;
+    }>;
+    if (cardRows.length === 0) return [];
+
+    const cardIds = cardRows.map((c) => c.id);
+
+    // Traz um horizonte curto: todas as faturas não-pagas + últimas 6 pagas
+    // por cartão. Simplifica: pega tudo dos últimos 12 meses.
+    const horizonStart = new Date();
+    horizonStart.setUTCMonth(horizonStart.getUTCMonth() - 12);
+    const horizonIso = horizonStart.toISOString().slice(0, 10);
+
+    const { data: invs, error: iErr } = await sb
+      .from("credit_card_invoices")
+      .select("id, account_id, reference_month, closing_date, due_date, status")
+      .in("account_id", cardIds)
+      .eq("user_id", userId)
+      .gte("reference_month", horizonIso)
+      .order("due_date", { ascending: true });
+    if (iErr) throw new Error(iErr.message);
+
+    const invRows = (invs ?? []) as Array<{
+      id: string;
+      account_id: string;
+      reference_month: string;
+      closing_date: string;
+      due_date: string;
+      status: "open" | "closed" | "paid" | "overdue";
+    }>;
+
+    // Totais reais por fatura (expense - payment credit) em centavos
+    const totals = new Map<string, number>();
+    if (invRows.length > 0) {
+      const invIds = invRows.map((i) => i.id);
+      const { data: exp } = await sb
+        .from("transactions")
+        .select("invoice_id, amount")
+        .in("invoice_id", invIds)
+        .eq("user_id", userId)
+        .eq("kind", "expense");
+      for (const r of (exp ?? []) as Array<{ invoice_id: string; amount: string }>) {
+        const cents = Number(toCents(r.amount));
+        totals.set(r.invoice_id, (totals.get(r.invoice_id) ?? 0) + cents);
+      }
+      const { data: pay } = await sb
+        .from("transactions")
+        .select("paid_invoice_id, amount")
+        .in("paid_invoice_id", invIds)
+        .eq("user_id", userId)
+        .eq("kind", "invoice_payment")
+        .eq("type", "credit");
+      for (const r of (pay ?? []) as Array<{ paid_invoice_id: string; amount: string }>) {
+        const cents = Number(toCents(r.amount));
+        totals.set(r.paid_invoice_id, (totals.get(r.paid_invoice_id) ?? 0) - cents);
+      }
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const classified: PanelInvoiceDTO[] = invRows.map((r) => {
+      const raw = totals.get(r.id) ?? 0;
+      const total_amount_cents = Math.max(0, raw);
+      let bucket: InvoiceBucket;
+      if (r.status === "paid") bucket = "paid";
+      else if (r.due_date < today || r.status === "overdue") bucket = "overdue";
+      else bucket = "future";
+      return {
+        invoice_id: r.id,
+        account_id: r.account_id,
+        reference_month: r.reference_month,
+        closing_date: r.closing_date,
+        due_date: r.due_date,
+        status: r.status,
+        bucket,
+        total_amount_cents,
+      };
+    });
+
+    return cardRows.map((c) => {
+      const list = classified.filter((i) => i.account_id === c.id);
+      const used_cents = list
+        .filter((i) => i.bucket !== "paid")
+        .reduce((s, i) => s + i.total_amount_cents, 0);
+      const openInv = list.find((i) => i.status === "open");
+      return {
+        account_id: c.id,
+        account_name: c.name,
+        closing_day: c.closing_day,
+        due_day: c.due_day,
+        credit_limit_cents: c.credit_limit_cents,
+        used_cents,
+        open_invoice_cents: openInv?.total_amount_cents ?? 0,
+        open_invoice_due_date: openInv?.due_date ?? null,
+        invoices: list,
+      };
+    });
+  },
+);
 
