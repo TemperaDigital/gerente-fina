@@ -225,7 +225,7 @@ function DashboardPage() {
     summaryQuery(period.mode === "year" ? currentMonth() : period.month),
   );
   const { data: cashBasis } = useSuspenseQuery(cashBasisQuery(period));
-  const { data: invoices } = useSuspenseQuery(invoicesQuery());
+  const { data: creditCards } = useSuspenseQuery(creditCardsPanelQuery());
   const { data: budgets } = useSuspenseQuery(budgetsQuery());
   const { data: dreHistory } = useSuspenseQuery(dreHistoryQuery());
   const { data: breakdown } = useSuspenseQuery(breakdownQuery(period));
