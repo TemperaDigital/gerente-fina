@@ -509,114 +509,70 @@ function DashboardPage() {
           </GlassCard>
         </div>
 
-        {/* Contas + Orçamentos */}
-        <div className="grid gap-6 md:grid-cols-2">
-          <AccountsWidget accounts={summary?.accounts ?? []} />
+        {/* Missão 19 — Bloco 1: Contas & disponibilidade (bank/cash) */}
+        <AccountsWidget accounts={summary?.accounts ?? []} />
 
-          <GlassCard className="flex flex-col justify-between border border-white/10 p-5 sm:p-6">
-            <div>
-              <div className="flex items-center justify-between border-b border-white/5 pb-3 mb-4">
-                <h2 className="text-sm font-semibold text-foreground/80">
-                  Orçamentos — {formatMonthLabel(currentMonth())}
-                </h2>
-                <span className="text-xs font-medium text-primary">Top {topBudgets.length}</span>
-              </div>
+        {/* Missão 19 — Bloco 2: Cartões de Crédito com barra de limite */}
+        <CreditCardsLimitsWidget cards={creditCards} />
 
-              <div className="space-y-4">
-                {topBudgets.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-foreground/30">
-                    Nenhum teto definido. Configure em Orçamentos.
-                  </p>
-                ) : (
-                  topBudgets.map((b) => {
-                    const pct = safePercent(b.spent, b.amount);
-                    const tone =
-                      pct >= 100
-                        ? "text-red-400"
-                        : pct >= 80
-                          ? "text-amber-400"
-                          : "text-emerald-400";
-                    return (
-                      <div key={b.id} className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-medium text-foreground/70 truncate max-w-[60%]">
-                            {b.category_name ?? "Geral"}
-                          </span>
-                          <span className={`font-mono ${tone} shrink-0`}>
-                            {BRL(b.spent)} / {BRL(b.amount)}
-                          </span>
-                        </div>
-                        <Progress value={Math.min(pct, 100)} className="h-1.5" />
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="mt-5 border-t border-white/5 pt-4">
-              <Link to="/budgets">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-between text-xs text-primary hover:bg-primary/5"
-                >
-                  Ver todos os orçamentos <ArrowRight className="size-3" />
-                </Button>
-              </Link>
-            </div>
-          </GlassCard>
-        </div>
-
-        {/* Widget de faturas abertas (M3) */}
-        {invoices.length > 0 && (
-          <GlassCard className="border border-white/10 p-5 sm:p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-foreground/80 flex items-center gap-2">
-                <CreditCard className="size-4 text-violet-400" />
-                Faturas Abertas
+        {/* Orçamentos (mensal) */}
+        <GlassCard className="flex flex-col justify-between border border-white/10 p-5 sm:p-6">
+          <div>
+            <div className="flex items-center justify-between border-b border-white/5 pb-3 mb-4">
+              <h2 className="text-sm font-semibold text-foreground/80">
+                Orçamentos — {formatMonthLabel(currentMonth())}
               </h2>
-              <Link to="/credit-cards">
-                <Button variant="ghost" size="sm" className="text-xs text-primary gap-1 px-2">
-                  Gerenciar <ArrowRight className="size-3" />
-                </Button>
-              </Link>
+              <span className="text-xs font-medium text-primary">Top {topBudgets.length}</span>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {invoices.map((inv) => (
-                <div
-                  key={inv.invoice_id}
-                  className={`rounded-xl border p-4 space-y-1 ${
-                    inv.past_closing
-                      ? "border-amber-500/30 bg-amber-500/5"
-                      : "border-white/10 bg-white/[0.02]"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-foreground/90 truncate">
-                      {inv.account_name}
-                    </span>
-                    {inv.past_closing && (
-                      <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                        Fechou
-                      </span>
-                    )}
-                  </div>
-                  <p className="font-mono text-lg font-bold text-foreground/90">
-                    {BRL(inv.total_amount)}
-                  </p>
-                  <p className="text-[11px] text-foreground/40">
-                    Vence{" "}
-                    {new Date(inv.due_date + "T12:00:00").toLocaleDateString("pt-BR", {
-                      day: "2-digit",
-                      month: "short",
-                    })}
-                  </p>
-                </div>
-              ))}
+
+            <div className="space-y-4">
+              {topBudgets.length === 0 ? (
+                <p className="py-6 text-center text-sm text-foreground/30">
+                  Nenhum teto definido. Configure em Orçamentos.
+                </p>
+              ) : (
+                topBudgets.map((b) => {
+                  const pct = safePercent(b.spent, b.amount);
+                  const tone =
+                    pct >= 100
+                      ? "text-red-400"
+                      : pct >= 80
+                        ? "text-amber-400"
+                        : "text-emerald-400";
+                  return (
+                    <div key={b.id} className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-foreground/70 truncate max-w-[60%]">
+                          {b.category_name ?? "Geral"}
+                        </span>
+                        <span className={`font-mono ${tone} shrink-0`}>
+                          {BRL(b.spent)} / {BRL(b.amount)}
+                        </span>
+                      </div>
+                      <Progress value={Math.min(pct, 100)} className="h-1.5" />
+                    </div>
+                  );
+                })
+              )}
             </div>
-          </GlassCard>
-        )}
+          </div>
+
+          <div className="mt-5 border-t border-white/5 pt-4">
+            <Link to="/budgets">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-between text-xs text-primary hover:bg-primary/5"
+              >
+                Ver todos os orçamentos <ArrowRight className="size-3" />
+              </Button>
+            </Link>
+          </div>
+        </GlassCard>
+
+        {/* Missão 19 — Bloco 3: Faturas agrupadas por cartão (Futuras · Vencidas · Pagas) */}
+        <InvoicesGroupedWidget cards={creditCards} />
+
 
         {/* Widget "Contas a Vencer" (Missão 7) — próximos 30 dias + atrasados */}
         {dueSoon.length > 0 && (
