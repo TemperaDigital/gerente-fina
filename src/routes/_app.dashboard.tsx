@@ -44,15 +44,18 @@ import { CategoryDonut } from "@/components/dashboard/category-donut";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { AccountsWidget } from "@/components/dashboard/accounts-widget";
+import { CreditCardsLimitsWidget } from "@/components/dashboard/credit-cards-limits-widget";
+import { InvoicesGroupedWidget } from "@/components/dashboard/invoices-grouped-widget";
 import { HeaderClockBar } from "@/components/dashboard/header-clock-bar";
 import { ExpenseBreakdownDialog } from "@/components/dashboard/expense-breakdown-dialog";
 import {
   getDashboardSummary,
   getCashBasisSummary,
-  getOpenCreditCardInvoices,
+  getCreditCardsPanel,
   getMonthlyDreHistory,
   getCategoryBreakdown,
 } from "@/services/dashboard.functions";
+
 import { listBudgets } from "@/services/budgets.functions";
 import { materializeDueRecurrences } from "@/services/recurrence-materializer.functions";
 import { listScheduledItems } from "@/services/scheduled-items.functions";
