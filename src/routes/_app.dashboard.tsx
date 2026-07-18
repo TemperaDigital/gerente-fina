@@ -182,7 +182,7 @@ export const Route = createFileRoute("/_app/dashboard")({
         summaryQuery(period.mode === "year" ? currentMonth() : period.month),
       ),
       context.queryClient.ensureQueryData(cashBasisQuery(period)),
-      context.queryClient.ensureQueryData(invoicesQuery()),
+      context.queryClient.ensureQueryData(creditCardsPanelQuery()),
       context.queryClient.ensureQueryData(budgetsQuery()),
       context.queryClient.ensureQueryData(dreHistoryQuery()),
       context.queryClient.ensureQueryData(breakdownQuery(period)),
