@@ -102,11 +102,12 @@ const cashBasisQuery = (period: DashboardPeriod) =>
       }),
   });
 
-const invoicesQuery = () =>
+const creditCardsPanelQuery = () =>
   queryOptions({
-    queryKey: ["dashboard", "invoices"],
-    queryFn: () => getOpenCreditCardInvoices(),
+    queryKey: ["dashboard", "credit-cards-panel"],
+    queryFn: () => getCreditCardsPanel(),
   });
+
 
 // Orçamentos são mensais por natureza (um teto não agrega por ano) — sempre
 // mostra o mês corrente REAL, independente do período selecionado no
