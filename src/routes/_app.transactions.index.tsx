@@ -178,7 +178,17 @@ function TransactionsPage() {
   const bulkDiscardMut = useMutation({
     mutationFn: (ids: string[]) => bulkDiscardTransactions({ data: { ids } }),
     onSuccess: async (res) => {
-      toast.success(`${res.deleted_count} lançamento(s) excluído(s).`);
+      if (res.failed.length === 0) {
+        toast.success(`${res.deleted_count} lançamento(s) excluído(s).`);
+      } else if (res.deleted_count === 0) {
+        toast.error(
+          `Nenhum lançamento excluído — ${res.failed.length} falha(s). Ex.: ${res.failed[0].error}`,
+        );
+      } else {
+        toast.warning(
+          `${res.deleted_count} excluído(s), ${res.failed.length} falha(s). Ex.: ${res.failed[0].error}`,
+        );
+      }
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
     },
     onError: (e: Error) => toast.error(`Falha ao excluir em lote: ${e.message}`),
