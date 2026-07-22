@@ -948,28 +948,52 @@ export const discardTransaction = createServerFn({ method: "POST" })
 
 // ---------------------------------------------------------------------------
 // bulkDiscardTransactions — exclusão em lote a partir da seleção múltipla na
-// tela de Lançamentos. Um único DELETE ... WHERE id IN (...) em vez de N
-// chamadas separadas. Parcelas de installment_purchases porventura incluídas
-// no lote simplesmente voltam a "não paga" (installment_items.transaction_id
-// é ON DELETE SET NULL) — mesmo comportamento já estabelecido para a
-// exclusão individual (Missão 12), sem checagem de impacto por item aqui
-// (a tela avisa isso de forma genérica na confirmação, sem bloquear o lote).
+// tela de Lançamentos. Missão 13: processa uma linha por vez para que uma
+// falha isolada (ex.: linha já removida por outro fluxo, RLS negando um id
+// específico) NÃO aborte o restante do lote. Retorna a contagem de sucessos
+// e a lista de ids que falharam com a razão, para a UI reportar ao usuário.
+//
+// Parcelas de installment_purchases porventura incluídas no lote simplesmente
+// voltam a "não paga" (installment_items.transaction_id é ON DELETE SET NULL)
+// — mesmo comportamento seguro estabelecido para exclusão individual na
+// Missão 12; a tela avisa isso de forma genérica na confirmação.
 // ---------------------------------------------------------------------------
+export interface BulkDiscardResultDTO {
+  deleted_count: number;
+  failed: Array<{ id: string; error: string }>;
+}
+
 export const bulkDiscardTransactions = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z.object({ ids: z.array(z.string().uuid()).min(1).max(500) }).parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<BulkDiscardResultDTO> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const sb = getSupabaseAdmin();
     const userId = await resolveActiveUserId();
-    const { error, count } = await sb
-      .from("transactions")
-      .delete({ count: "exact" })
-      .in("id", data.ids)
-      .eq("user_id", userId);
-    if (error) throw new Error(error.message);
-    return { deleted_count: count ?? 0 };
+
+    let deleted_count = 0;
+    const failed: Array<{ id: string; error: string }> = [];
+
+    for (const id of data.ids) {
+      const { error, data: rows } = await sb
+        .from("transactions")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", userId)
+        .select("id");
+      if (error) {
+        failed.push({ id, error: error.message });
+        continue;
+      }
+      if (!rows || rows.length === 0) {
+        failed.push({ id, error: "Lançamento não encontrado ou não pertence ao usuário." });
+        continue;
+      }
+      deleted_count += 1;
+    }
+
+    return { deleted_count, failed };
   });
 
 // ---------------------------------------------------------------------------
