@@ -58,7 +58,7 @@ a fonte de verdade para "o que falta fazer".
 ## 2. Mapa Canônico de Rotas e Componentes (Malha do Aplicativo)
 
 O ecossistema do Gerente FINA é composto por **17 rotas** (não 15 — a malha
-cresceu desde a versão anterior deste documento; qualquer contagem antiga
+cresceu desde versões anteriores deste documento; qualquer contagem antiga
 está desatualizada). Qualquer modificação ou nova funcionalidade deve
 respeitar esta malha:
 
@@ -99,10 +99,14 @@ respeitar esta malha:
   Modal inteligente de classificação (IA detecta se é conta ou cartão). Se
   cartão, exibe campos de fechamento/vencimento. Tabela de mapeamento
   destaca transações duplicadas em vermelho com botão "Ignorar Duplicatas".
-  **Pendência de infraestrutura conhecida (missão GF-001):** o processamento
-  hoje é síncrono dentro da server function — risco real de timeout em
-  Cloudflare Workers para arquivos grandes. Meta: responder HTTP 202 e
-  processar em background com status `syncing` consultável.
+  **Processamento assíncrono via chunking (GF-001, concluída):** o cliente
+  dispara a classificação por IA em lotes sequenciais de até 40 linhas
+  (`prepareImportClassification` + `classifyImportBatch`), com barra de
+  progresso visível e cartão de erro por lote com retry — evita timeout em
+  Cloudflare Workers para arquivos grandes. Linhas resolvidas por regra de
+  "tempero" ou regra aprendida NUNCA entram no lote de IA (bug real já
+  corrigido: um patch de IA sobrescrevendo essas categorias por cima seria
+  silencioso e errado).
 - `/open-finance` (Conexão Bancária): Hub de gerenciamento com grade de
   logotipos das instituições financeiras. **Hoje é cadastro/simulação
   manual do nome da instituição — não há integração real com a Pluggy
@@ -202,5 +206,39 @@ respeitar esta malha:
     relacionado (draw.io/jgraph) misturado por engano; o destino correto é
     um repositório dedicado (`TemperaDigital/fluxograma`). Se precisar
     consultá-la, tratar como somente leitura.
-13. O trabalho é feito direto na branch `main` — não há branch de
+13. **O trabalho é feito direto na branch `main`** — não há branch de
     features intermediária no fluxo atual.
+14. **Nenhuma missão é considerada concluída sem verificação real** — build
+    limpo e testes verdes são necessários, mas não substituem cobertura de
+    teste da lógica nova quando ela existir, nem validação funcional quando
+    aplicável. "Passou no que já existia" não é o mesmo que "o que foi
+    construído agora funciona".
+
+---
+
+## 4. Uso Operacional Direto via Claude / Claude Code
+
+O usuário é o único usuário real deste sistema (app monousuário, conforme
+Seção 1) e também é quem opera Claude/Claude Code com acesso direto ao banco
+via conector Supabase. Isso é diferente de "ativar MCP" (aviso no topo deste
+documento — MCP nesse outro sentido significaria expor o app a agentes
+externos de terceiros via OAuth por usuário); isto aqui é o próprio dono do
+sistema usando as ferramentas que já possui.
+
+Esse uso é bem-vindo para: subir um extrato e acompanhar o processamento na
+conta real, diagnosticar por que algo não bateu, corrigir um bug de código na
+hora, e sugerir melhorias com base no comportamento observado em produção.
+
+**Regra inegociável desse uso: mutação de dado financeiro real SEMPRE passa
+pelas RPCs/funções do próprio app — nunca por `UPDATE`/`INSERT`/`DELETE` cru
+direto numa tabela**, mesmo tendo acesso de sobra pra fazer diferente.
+Motivo: as RPCs (`pay_credit_card_invoice`, `convert_transaction_entry`,
+`delete_installment_purchase`, etc.) existem precisamente para garantir
+atomicidade, idempotência e os triggers de reconciliação (cláusula 6 da
+Seção 3). Escrever direto na tabela contorna tudo isso e pode deixar o
+sistema num estado inconsistente que nem o próprio app sabe reparar depois —
+o mesmo tipo de problema que a cláusula 6 já proíbe para o código da
+aplicação vale igualmente para qualquer operação manual feita "por fora".
+
+Consultas de leitura (`SELECT`) para diagnóstico não têm essa restrição —
+o cuidado é só sobre gravação.
