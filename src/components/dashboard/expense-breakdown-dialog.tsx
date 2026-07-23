@@ -216,8 +216,8 @@ function LoadingSections() {
 // ---------------------------------------------------------------------------
 
 type TxLinkSearch =
-  | { month: string; account_id: string; kind: "invoice_payment" }
-  | { month: string; category_id: string; kind: "expense" };
+  | { month: string; page: number; account_id: string; kind: "invoice_payment" }
+  | { month: string; page: number; category_id: string; kind: "expense" };
 
 interface SectionItem {
   key: string;

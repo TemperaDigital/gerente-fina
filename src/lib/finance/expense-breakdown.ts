@@ -187,8 +187,8 @@ export type BreakdownPeriod =
 export type BreakdownItemKind = "invoice_payment" | "fixed" | "variable";
 
 export type ExpenseDrilldownSearch =
-  | { month: string; account_id: string; kind: "invoice_payment" }
-  | { month: string; category_id: string; kind: "expense" }
+  | { month: string; page: number; account_id: string; kind: "invoice_payment" }
+  | { month: string; page: number; category_id: string; kind: "expense" }
   | null;
 
 export function buildExpenseDrilldownSearch(
@@ -197,7 +197,7 @@ export function buildExpenseDrilldownSearch(
 ): ExpenseDrilldownSearch {
   if (period.mode !== "month") return null;
   if (item.kind === "invoice_payment") {
-    return { month: period.month, account_id: item.id, kind: "invoice_payment" };
+    return { month: period.month, page: 1, account_id: item.id, kind: "invoice_payment" };
   }
-  return { month: period.month, category_id: item.id, kind: "expense" };
+  return { month: period.month, page: 1, category_id: item.id, kind: "expense" };
 }

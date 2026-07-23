@@ -12,6 +12,7 @@ describe("buildExpenseDrilldownSearch — destinos do drill-down do modal Despes
     });
     expect(s).toEqual({
       month: "2026-07",
+      page: 1,
       account_id: "acc-nubank",
       kind: "invoice_payment",
     });
@@ -21,6 +22,7 @@ describe("buildExpenseDrilldownSearch — destinos do drill-down do modal Despes
     const s = buildExpenseDrilldownSearch(month, { kind: "fixed", id: "cat-aluguel" });
     expect(s).toEqual({
       month: "2026-07",
+      page: 1,
       category_id: "cat-aluguel",
       kind: "expense",
     });
@@ -33,6 +35,7 @@ describe("buildExpenseDrilldownSearch — destinos do drill-down do modal Despes
     });
     expect(s).toEqual({
       month: "2026-07",
+      page: 1,
       category_id: "cat-mercado",
       kind: "expense",
     });

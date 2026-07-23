@@ -98,20 +98,8 @@ para rastreabilidade), e a partir de agora usamos um prefixo novo — **`GF-`**
   GF-002).
 - `src/services/recurrences.functions.ts` é código morto confirmado
   (zero imports).
-- **Bug de tipagem latente descoberto na sessão de 23/07/2026 (GF-002):**
-  `src/routeTree.gen.ts` commitado não inclui o bloco de augmentação
-  `declare module '@tanstack/react-start' { interface Register { ... } }`
-  que o `@tanstack/router-plugin` atual gera automaticamente ao rodar o
-  dev server. Sem essa augmentação, o registro de tipos do router fica
-  incompleto e MASCARA um erro real em
-  `src/components/dashboard/expense-breakdown-dialog.tsx:320` (`TxLinkSearch`
-  sem a propriedade `page` obrigatória num `search` de navegação). Ao
-  regenerar `routeTree.gen.ts` localmente, `tsc --noEmit` passa a falhar
-  nesse ponto. Revertido antes do commit da GF-002 pra não misturar um
-  problema não relacionado no diff — precisa de uma missão própria pra
-  regenerar `routeTree.gen.ts` e corrigir o `search` faltante em
-  `expense-breakdown-dialog.tsx` juntos (não dá pra fazer só um dos dois
-  sem quebrar `tsc --noEmit`, cláusula 3).
+- ~~Bug de tipagem latente descoberto na sessão de 23/07/2026 (GF-002)~~ —
+  **corrigido em GF-003** (ver missão abaixo).
 - Dependência de `LOVABLE_API_KEY` no chat/import ainda não investigada
   — contradiz o objetivo de reduzir dependência da plataforma Lovable.
 - `loans` (empréstimos/financiamentos/consórcios) sem vínculo com
@@ -237,7 +225,58 @@ sessão real dele.
 
 ---
 
-## Pendências conhecidas — fila para virar GF-003, GF-004...
+### GF-003 — Corrigir bug TxLinkSearch em expense-breakdown-dialog.tsx
+**Status:** ✅ Concluído (23/07/2026, Claude)
+
+**Contexto:** achado latente da GF-002 (ver seção "Achados ainda sem
+correção" acima) — `src/routeTree.gen.ts` commitado estava desatualizado
+e não incluía o bloco de augmentação
+`declare module '@tanstack/react-start' { interface Register { ... } }`
+que o `@tanstack/router-plugin` gera automaticamente. Isso mascarava um
+erro de tipo real em `expense-breakdown-dialog.tsx:320`.
+
+**O que foi feito:**
+- Rodado `npx vite build --mode development` para regenerar
+  `src/routeTree.gen.ts` localmente — confirmado que o bloco de
+  augmentação estava de fato faltando (diff de +10 linhas) e que, com ele
+  presente, `tsc --noEmit` passa a acusar exatamente o erro descrito:
+  `TxLinkSearch` sem a propriedade `page` obrigatória.
+- `src/lib/finance/expense-breakdown.ts`: `buildExpenseDrilldownSearch`
+  agora inclui `page: 1` nos dois ramos do `ExpenseDrilldownSearch`
+  (fatura de cartão e categoria fixa/variável) — consistente com todas as
+  outras navegações para `/transactions` no repo (`_app.dashboard.tsx`,
+  `_app.transactions.edit.$id.tsx`, `_app.transactions.new.tsx`), que
+  sempre resetam pra página 1 ao entrar com filtro novo.
+- `src/components/dashboard/expense-breakdown-dialog.tsx`: tipo local
+  `TxLinkSearch` atualizado para incluir `page: number`, batendo com o
+  tipo `ExpenseDrilldownSearch` centralizado.
+- `src/lib/finance/expense-drilldown.test.ts`: as 3 asserções existentes
+  atualizadas para esperar `page: 1` no objeto de busca retornado (mesmo
+  teste, cobrindo o cenário exato do bug).
+- `src/routeTree.gen.ts` regenerado **commitado junto** (não revertido
+  desta vez) — a própria análise da GF-002 já apontava que não dá pra
+  corrigir só um lado sem quebrar `tsc --noEmit` (cláusula 3): o bloco de
+  augmentação e o `search` corrigido precisam entrar juntos no mesmo
+  diff.
+
+**Verificação:** `tsc --noEmit` limpo (era o erro documentado antes da
+correção, confirmado reproduzido e depois eliminado). `npm run lint` sem
+problemas novos nos 3 arquivos alterados (só ruído pré-existente de CRLF
+repo-wide, mesmo already-known de GF-001/GF-002). `npm test`: 118/118
+passando. Validação E2E via Playwright (clique real no modal → navegação
+→ tela de Lançamentos) **não executada nesta sessão** — decisão explícita
+do usuário, mesmo precedente da GF-002: não existe conta de teste nem
+infraestrutura de login no repo, e o teste automatizado já cobre
+exatamente a lógica corrigida (o objeto `search` agora inclui `page: 1`).
+Fica pra quando a pendência "Testes E2E" (fila abaixo) for priorizada.
+
+**Guardrails observados:**
+- Diff isolado ao bug: nenhuma mudança fora do escopo (`git status` /
+  `git diff --stat` revisados antes de qualquer commit).
+
+---
+
+## Pendências conhecidas — fila para virar GF-004, GF-005...
 
 Ordem sugerida (ajustável a qualquer momento):
 
