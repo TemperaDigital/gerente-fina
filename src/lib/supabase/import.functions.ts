@@ -13,6 +13,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveActiveUserId } from "@/lib/supabase/resolve-user";
 import { hashTransaction } from "@/lib/finance/hash";
 import { normalizeAmount } from "@/lib/finance/money";
@@ -444,6 +445,24 @@ export const prepareImportClassification = createServerFn({ method: "POST" })
     const okAccount = await accountBelongsToUser(sb, userId, data.account_id);
     if (!okAccount) throw new Error("Conta não pertence ao usuário ou foi arquivada.");
 
+    return prepareImportClassificationImpl(sb, userId, data);
+  });
+
+/**
+ * Núcleo testável de prepareImportClassification. O wrapper acima resolve
+ * `sb`/`userId` e valida posse da conta via imports DINÂMICOS (obrigatório
+ * pro sufixo `.server.ts` — ver client.server.ts — não pode virar import
+ * estático sem vazar código server-only pro bundle do cliente); esta função
+ * recebe tudo já resolvido, então é testável direto, sem precisar do
+ * contexto de request do TanStack Start (AsyncLocalStorage), que não existe
+ * fora de um request real — confirmado: chamar uma server function
+ * exportada diretamente em teste lança "No Start context found".
+ */
+export async function prepareImportClassificationImpl(
+  sb: SupabaseClient,
+  userId: string,
+  data: z.infer<typeof SmartClassifyInput>,
+): Promise<{ rows: SmartImportRow[]; batches: ImportClassificationBatchItem[][] }> {
     // 1. Categorias existentes (para a IA e para validar as respostas dela)
     const { data: cats, error: catErr } = await sb
       .from("categories")
@@ -589,7 +608,19 @@ export const prepareImportClassification = createServerFn({ method: "POST" })
     //    classifyImportBatch, com barra de progresso e erro isolado por lote.
     const toClassify = rowsWithHash
       .map((r, index) => ({ r, index }))
-      .filter(({ r, index }) => !existingSet.has(r.dedup_hash) && !ruleMatches.has(index));
+      .filter(
+        ({ r, index }) =>
+          !existingSet.has(r.dedup_hash) &&
+          !ruleMatches.has(index) &&
+          // A linha resolvida pelo tempero NUNCA entra num lote de IA — sem
+          // isso, o índice acabava sendo classificado mesmo assim (herdado do
+          // antigo classifyAndCheckImport, onde era só desperdício de chamada
+          // porque o passo 4 sempre reafirmava o tempero por cima). No modelo
+          // em chunks isso vira um bug real: o cliente aplicaria o patch da
+          // IA por cima da categoria correta do tempero (ver GF-001, achado
+          // pelo teste de precedência tempero > regra > IA).
+          !(matchesTemperoRuleImport(r.description) && temperoCat),
+      );
     const needsAi = new Set(toClassify.map(({ index }) => index));
 
     const BATCH = 40;
@@ -662,7 +693,7 @@ export const prepareImportClassification = createServerFn({ method: "POST" })
     });
 
     return { rows, batches };
-  });
+}
 
 // ---------------------------------------------------------------------------
 // classifyImportBatch — GF-001: classifica UM lote (até 40 linhas) por vez.
@@ -708,6 +739,15 @@ export const classifyImportBatch = createServerFn({ method: "POST" })
     const okAccount = await accountBelongsToUser(sb, userId, data.account_id);
     if (!okAccount) throw new Error("Conta não pertence ao usuário ou foi arquivada.");
 
+    return classifyImportBatchImpl(sb, userId, data.batch);
+  });
+
+/** Núcleo testável de classifyImportBatch — ver comentário de prepareImportClassificationImpl. */
+export async function classifyImportBatchImpl(
+  sb: SupabaseClient,
+  userId: string,
+  batch: z.infer<typeof ImportClassifyBatchInput>["batch"],
+): Promise<ImportClassificationPatch[]> {
     const { data: cats, error: catErr } = await sb
       .from("categories")
       .select("id, name, kind")
@@ -722,7 +762,7 @@ export const classifyImportBatch = createServerFn({ method: "POST" })
     // exceção sobe intacta pro cliente, que mostra o erro preso a este lote
     // específico (não ao import inteiro) e permite tentar de novo só ele.
     const aiResults = await classifyBatchWithAI(
-      data.batch.map((b) => ({
+      batch.map((b) => ({
         index: b.index,
         description: b.description,
         amount: b.amount,
@@ -731,7 +771,7 @@ export const classifyImportBatch = createServerFn({ method: "POST" })
       categories,
     );
 
-    return data.batch.map((item): ImportClassificationPatch => {
+    return batch.map((item): ImportClassificationPatch => {
       let suggested_category_id: string | null = null;
       let suggested_new_category: string | null = null;
       let confidence: "high" | "medium" | "low" = "low";
@@ -772,7 +812,7 @@ export const classifyImportBatch = createServerFn({ method: "POST" })
         offer_convert_recurrence: offerConvertRecurrence,
       };
     });
-  });
+}
 
 // ---------------------------------------------------------------------------
 // commitSmartImport — cria categorias novas aprovadas e grava os lançamentos.
