@@ -2,7 +2,7 @@
  * AppShell — Layout master responsivo (mobile-first) com navegação global.
  * Visual: Dark Mode Premium / vidro fosco (ZimaOS).
  */
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   Wallet,
@@ -19,11 +19,24 @@ import {
   CalendarClock,
   Link2,
   Calculator,
+  LogOut,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/lib/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FinancialCalculator } from "@/components/calculator/financial-calculator";
+
+/** Dot pulsante verde — indica sessão ativa (padrão "online/live" comum, ainda não usado no app). */
+function LiveSessionDot() {
+  return (
+    <span className="relative flex size-2 shrink-0">
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+      <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+    </span>
+  );
+}
 
 function currentMonthParam(): string {
   const d = new Date();
@@ -55,8 +68,30 @@ const NAV = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const [openMobile, setOpenMobile] = useState(false);
   const [calcOpen, setCalcOpen] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  // Sessão já vive cacheada no client Supabase do browser (persistSession)
+  // — não precisa de nova query ao servidor. onAuthStateChange mantém o
+  // e-mail exibido em sincronia caso a sessão mude em outra aba/refresh.
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => {
+      setUserEmail(data.session?.user?.email ?? null);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserEmail(session?.user?.email ?? null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    toast.success("Você saiu com segurança.");
+    setOpenMobile(false);
+    navigate({ to: "/" });
+  }
 
   return (
     <div className="relative min-h-screen bg-zinc-950 text-foreground">
@@ -114,6 +149,22 @@ export function AppShell({ children }: { children: ReactNode }) {
               );
             })}
           </ul>
+
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/5 px-1 pt-2">
+            {userEmail && (
+              <span className="flex min-w-0 items-center gap-2 px-2 py-1 text-xs text-foreground/50">
+                <LiveSessionDot />
+                <span className="truncate" title={userEmail}>{userEmail}</span>
+              </span>
+            )}
+            <button
+              onClick={handleSignOut}
+              className="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm text-rose-400/80 hover:bg-rose-500/10 hover:text-rose-400"
+            >
+              <LogOut className="size-4 shrink-0" />
+              <span>Sair</span>
+            </button>
+          </div>
         </nav>
       )}
 
@@ -142,6 +193,25 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             );
           })}
+
+          <div className="mt-auto flex flex-col gap-1 border-t border-white/5 pt-3">
+            {userEmail && (
+              <div
+                className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-foreground/50"
+                title={userEmail}
+              >
+                <LiveSessionDot />
+                <span className="truncate">{userEmail}</span>
+              </div>
+            )}
+            <button
+              onClick={handleSignOut}
+              className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-rose-400/80 transition-colors hover:bg-rose-500/10 hover:text-rose-400"
+            >
+              <LogOut className="size-4 shrink-0" />
+              <span className="truncate">Sair</span>
+            </button>
+          </div>
         </aside>
 
         <main className="min-w-0 flex-1">{children}</main>

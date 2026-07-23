@@ -92,9 +92,26 @@ para rastreabilidade), e a partir de agora usamos um prefixo novo — **`GF-`**
   **Pausado por decisão do usuário** — o destino correto é um
   repositório próprio (`TemperaDigital/fluxograma`), não o Gerente Fina;
   retomar quando houver foco disponível.
-- `AGENTS.md`/PRD desatualizados: documentam 15 rotas, hoje são 17.
+- `PRD-GerenteFINA-IA.md` pode estar desatualizado quanto à malha de
+  rotas e às missões concluídas (não verificado nesta sessão) —
+  `AGENTS.md` já reflete as 17 rotas reais e o estado atual (GF-001,
+  GF-002).
 - `src/services/recurrences.functions.ts` é código morto confirmado
   (zero imports).
+- **Bug de tipagem latente descoberto na sessão de 23/07/2026 (GF-002):**
+  `src/routeTree.gen.ts` commitado não inclui o bloco de augmentação
+  `declare module '@tanstack/react-start' { interface Register { ... } }`
+  que o `@tanstack/router-plugin` atual gera automaticamente ao rodar o
+  dev server. Sem essa augmentação, o registro de tipos do router fica
+  incompleto e MASCARA um erro real em
+  `src/components/dashboard/expense-breakdown-dialog.tsx:320` (`TxLinkSearch`
+  sem a propriedade `page` obrigatória num `search` de navegação). Ao
+  regenerar `routeTree.gen.ts` localmente, `tsc --noEmit` passa a falhar
+  nesse ponto. Revertido antes do commit da GF-002 pra não misturar um
+  problema não relacionado no diff — precisa de uma missão própria pra
+  regenerar `routeTree.gen.ts` e corrigir o `search` faltante em
+  `expense-breakdown-dialog.tsx` juntos (não dá pra fazer só um dos dois
+  sem quebrar `tsc --noEmit`, cláusula 3).
 - Dependência de `LOVABLE_API_KEY` no chat/import ainda não investigada
   — contradiz o objetivo de reduzir dependência da plataforma Lovable.
 - `loans` (empréstimos/financiamentos/consórcios) sem vínculo com
@@ -173,18 +190,62 @@ definitivamente validado em uso real.
 - Dedup (hash SHA-256) e precedência `tempero > regra aprendida > IA`
   preservados exatamente — só a camada de disparo das chamadas de IA
   mudou, a lógica de decisão de categoria é a mesma.
-- Não houve commit/push — aguardando aprovação explícita do usuário.
+- Commitado em duas etapas (`5599d79` implementação, `44fd8cf`
+  cobertura de teste) e enviado para `origin/main` em 23/07/2026.
 
 ---
 
-## Pendências conhecidas — fila para virar GF-002, GF-003...
+### GF-002 — Sair da sessão + indicador de login na sidebar
+**Status:** ✅ Concluído (23/07/2026, Claude)
+
+**Contexto:** o menu lateral (`AppShell`) não tinha botão de logout nem
+nenhuma indicação visual de qual conta estava logada — a única forma de
+sair era a página `/settings`, sem visibilidade de sessão em nenhum
+outro lugar do app.
+
+**O que foi feito:**
+- `src/components/app-shell.tsx`: botão "Sair" logo abaixo de
+  "Configurações" (sidebar desktop, fixado no rodapé via `mt-auto`, e
+  drawer mobile) — reaproveita exatamente a lógica já existente e
+  testada de `/settings` (`supabase.auth.signOut()` + toast + redirect
+  pra `/`), nenhum fluxo novo inventado.
+- Indicador de sessão ativa: dot verde pulsante (`animate-ping`) + e-mail
+  do usuário logado, lido de `supabase.auth.getSession()` +
+  `supabase.auth.onAuthStateChange` — sessão já cacheada no client do
+  browser (`persistSession: true`), sem nova query ao servidor nem hook
+  novo de auth.
+- Playwright + Chromium instalados como devDependency (a pedido do
+  usuário, pra permitir verificação visual de mudanças de UI). Usado ad
+  hoc nesta missão (screenshot da tela de login, checagem de console
+  errors); não configurado como suíte E2E — isso fica pra quando a
+  pendência "Testes E2E" (fila abaixo) for priorizada.
+
+**Verificação:** `tsc --noEmit` limpo, lint sem problemas novos, 118/118
+testes (nenhum teste novo — mudança de UI sem lógica de negócio nova).
+Validação com Playwright: página de login carrega sem erros de console;
+navegação direta a `/dashboard` sem sessão confirma o guard de auth
+redirecionando corretamente pra `/`, sem nenhum erro relacionado ao
+`AppShell` (só um aviso de hydration mismatch pré-existente e não
+relacionado em `index.tsx`/`WelcomeComponent`, não corrigido — fora do
+escopo desta missão). **A sidebar autenticada não foi verificada via
+screenshot** — decisão explícita do usuário: mudança de risco baixo,
+lógica reaproveitada e já testada, não compensa criar conta de teste na
+produção nem compartilhar credenciais só pra esse check (guardar esse
+investimento pra quando a pendência "Testes E2E" for priorizada).
+Validação visual final da sidebar fica por conta do próprio usuário, na
+sessão real dele.
+
+---
+
+## Pendências conhecidas — fila para virar GF-003, GF-004...
 
 Ordem sugerida (ajustável a qualquer momento):
 
 1. Avisar a Lovable para remover "MCP/OAuth" do roadmap dela.
 2. Entrada de voz (Whisper) no `/chat`.
 3. Open Finance real via Pluggy (hoje só simulação manual).
-4. Atualizar `AGENTS.md`/PRD para refletir as 17 rotas reais.
+4. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
+   estado atual (`AGENTS.md` já corrigido).
 5. Investigar e resolver a dependência de `LOVABLE_API_KEY`.
 6. Vincular `loans` a `transactions`.
 7. Remover `src/services/recurrences.functions.ts` (código morto).
@@ -193,7 +254,9 @@ Ordem sugerida (ajustável a qualquer momento):
 9. Validação end-to-end do PDF import — inclui confirmar se
    `extractPdfStatement` (chamada única de IA, não chunked pela GF-001)
    precisa do mesmo tratamento se se confirmar timeout em PDFs grandes.
-10. Testes E2E (Playwright) para fluxos críticos.
+10. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
+    já instalados como devDependency (GF-002); falta configurar a suíte
+    de verdade (login real, fixtures, CI).
 11. Testar manualmente no browser o fluxo de import com a barra de
     progresso/chunking da GF-001 (implementado e com `tsc`/lint/testes
     limpos, mas sem validação visual em uso real ainda).
