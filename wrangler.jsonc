@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Só para satisfazer `wrangler types` localmente (gera tipos do binding
+  // AI) — o build real via nitro define seu próprio compatibility_date.
+  "compatibility_date": "2026-07-20",
+  // Binding usado por src/services/voice.functions.ts (transcrição de áudio
+  // do /chat via Workers AI — GF-004). Nitro mescla este arquivo com a
+  // config gerada automaticamente no build (main/assets/compatibility).
+  "ai": {
+    "binding": "AI"
+  }
+}

@@ -276,12 +276,104 @@ Fica pra quando a pendência "Testes E2E" (fila abaixo) for priorizada.
 
 ---
 
-## Pendências conhecidas — fila para virar GF-004, GF-005...
+### GF-004 — Entrada de voz (Whisper) no /chat
+**Status:** ⚠️ Implementado, **verificação end-to-end pendente** (23/07/2026, Claude)
+
+**Contexto original da missão:** roadmap presumia ZimaOS self-hosted rodando
+faster-whisper via Docker, com decisão de provedor já tomada. Duas
+divergências relevantes encontradas antes de codar (conforme guardrail —
+parei e perguntei ao usuário antes de prosseguir):
+
+1. **Código pré-existente quebrado:** o botão de microfone, gravação via
+   `MediaRecorder` e preenchimento do campo de texto já existiam em
+   `_app.chat.tsx`, mas chamavam uma Supabase Edge Function
+   `whisper-transcribe` **inexistente** (confirmado via MCP do Supabase:
+   zero edge functions deployadas no projeto `gerentefina`, sem
+   `supabase/functions/` no repo) — todo clique no microfone já falhava
+   silenciosamente com "Falha na transcrição".
+2. **ZimaOS ainda não tinha nenhum container rodando** — o usuário
+   confirmou que não há faster-whisper (nem nada) hospedado lá hoje.
+   Subir infraestrutura nova no ZimaOS está fora do meu alcance (exige
+   acesso direto à máquina).
+
+**Decisão revisada com o usuário:** abandonar ZimaOS (nada hospedado, viraria
+trabalho de infra fora deste repo) em favor de **Cloudflare Workers AI**
+(`@cf/openai/whisper`) — já no mesmo Cloudflare account que hospeda o app,
+sem Docker/subdomínio/VPN novos, custo baixíssimo por minuto de áudio
+(~$0.00045/min). Reaproveitada a UI de gravação já existente, só trocado o
+backend.
+
+**O que foi feito:**
+- `wrangler.jsonc` (novo, raiz do repo): binding `ai: { binding: "AI" }` —
+  Nitro mescla automaticamente no build (confirmado no
+  `.output/server/wrangler.json` gerado).
+- `wrangler` adicionado como devDependency (necessário para `wrangler types`
+  e para rodar `wrangler dev`/`preview` localmente no futuro).
+- `src/services/voice.functions.ts` (novo): server function
+  `transcribeVoiceMessage` — exige `resolveActiveUserId()` (chamada tem
+  custo real, não pode ficar aberta sem sessão), decodifica o áudio
+  base64, valida tamanho, chama `env.AI.run("@cf/openai/whisper", { audio:
+  [...bytes] })` via `cloudflare:workers`, devolve `{ text }`.
+  - **Modelo escolhido de propósito:** `@cf/openai/whisper` (não a variante
+    `-large-v3-turbo`, que aceitaria `language: "pt"` para forçar PT-BR). A
+    variante turbo tem um contrato de entrada (`audio: string | { body,
+    contentType }`) cujo formato exato de string não está documentado
+    publicamente pela Cloudflare, e não há como descobrir por tentativa
+    nesta sessão (sem login Cloudflare disponível, ambiente não-
+    interativo). O modelo base tem contrato 100% documentado e testado
+    (array de bytes) — trade-off aceito: sem `language` fixado, mas o
+    Whisper detecta idioma automaticamente e funciona bem para PT-BR na
+    prática. Documentado no próprio arquivo para reavaliação futura.
+- `src/lib/audio/voice-transcription.ts` (novo): lógica pura extraída para
+  ser testável sem o binding real — `base64ToBytes`, `validateAudioBytes`
+  (limite de 10MB, rede de segurança), `formatElapsedSeconds` (contador
+  mm:ss da UI), `MAX_RECORDING_SECONDS = 60`.
+- `src/routes/_app.chat.tsx`: troca da chamada `supabase.functions.invoke
+  ("whisper-transcribe")` por `transcribeVoiceMessage`; adicionado limite
+  de gravação de 60s com parada automática; indicador visual de gravação
+  (ponto pulsante + contador `0:00 / 1:00`, `aria-live="polite"`); erros de
+  microfone diferenciados (sem dispositivo vs. permissão negada vs. erro
+  genérico); cleanup de interval/stream ao desmontar o componente.
+- **Achado colateral corrigido:** incluir o `worker-configuration.d.ts`
+  completo (gerado por `wrangler types`) no `tsconfig.json` quebrava tipos
+  em arquivos não relacionados (`header-clock-bar.tsx`,
+  `chat.functions.ts`) — ele redefine globais (`Response`, `fetch`...) com
+  os tipos do runtime Cloudflare Workers, conflitando com os tipos DOM
+  usados pelo resto do app. Resolvido com uma declaração mínima e isolada
+  em `src/types/cloudflare-workers.d.ts` (só o necessário: `env.AI`), sem
+  tocar nos globais — `worker-configuration.d.ts` gitignored, não faz parte
+  do build.
+
+**Verificação:** `tsc --noEmit` limpo, `npm run lint` sem problemas novos
+(só ruído pré-existente de CRLF), `npm test` 127/127 (9 testes novos em
+`voice-transcription.test.ts`, cobrindo decode base64, limite de tamanho e
+formatação do contador). Build completo (`vite build`) confirmado gerando
+o binding `ai` corretamente no `wrangler.json` de saída.
+**Transcrição real via Workers AI NÃO foi testada ponta a ponta nesta
+sessão** — não há login Cloudflare disponível neste ambiente (sessão
+não-interativa, sem fluxo OAuth) e o binding Workers AI sempre acessa a
+conta Cloudflare real mesmo em dev local (não é mockável), então não há
+como validar sem deploy real. Fica como validação pendente: testar o
+botão de microfone no ambiente publicado (deploy gerenciado pela Lovable)
+e confirmar que a transcrição volta corretamente. **Não marcar esta missão
+como 100% concluída até essa validação acontecer.**
+
+**Guardrails observados:**
+- Parei e perguntei ao usuário antes de assumir qualquer decisão de infra
+  (provedor, rede, o que fazer com o código de UI pré-existente) —
+  guardrail explícito da própria missão.
+- Diff isolado ao escopo da missão (`git status`/`git diff --stat`
+  revisados antes do commit).
+
+---
+
+## Pendências conhecidas — fila para virar GF-005, GF-006...
 
 Ordem sugerida (ajustável a qualquer momento):
 
-1. Avisar a Lovable para remover "MCP/OAuth" do roadmap dela.
-2. Entrada de voz (Whisper) no `/chat`.
+1. **Validar a GF-004 ponta a ponta** — testar o microfone/transcrição no
+   ambiente publicado (sem isso, a missão não está de fato fechada).
+2. Avisar a Lovable para remover "MCP/OAuth" do roadmap dela.
 3. Open Finance real via Pluggy (hoje só simulação manual).
 4. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
    estado atual (`AGENTS.md` já corrigido).

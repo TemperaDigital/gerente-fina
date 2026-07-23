@@ -51,7 +51,8 @@ import {
   type ChatResponse,
   type ChatThreadDTO,
 } from "@/services/chat.functions";
-import { supabase } from "@/lib/supabase/client";
+import { transcribeVoiceMessage } from "@/services/voice.functions";
+import { MAX_RECORDING_SECONDS, formatElapsedSeconds } from "@/lib/audio/voice-transcription";
 import { cn } from "@/lib/utils";
 
 interface Message {
@@ -174,12 +175,14 @@ function ChatPage() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ChatThreadDTO | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
   const threadsQuery = useQuery({
@@ -191,6 +194,14 @@ function ChatPage() {
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Evita interval/microfone presos se o usuário sair da página gravando.
+  useEffect(() => {
+    return () => {
+      if (recordingIntervalRef.current !== null) clearInterval(recordingIntervalRef.current);
+      mediaRecorderRef.current?.stream?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
 
   // Histórico serializado para a server function (só role+content)
   const historyForApi = messages
@@ -299,7 +310,14 @@ function ChatPage() {
     }
   }
 
-  // Gravação de áudio → Whisper via Edge Function do Supabase
+  // Gravação de áudio → Whisper via Workers AI (server function transcribeVoiceMessage)
+  function clearRecordingTimer() {
+    if (recordingIntervalRef.current !== null) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+  }
+
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -313,40 +331,63 @@ function ChatPage() {
 
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        clearRecordingTimer();
         const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         await transcribeAudio(blob);
       };
 
       recorder.start();
       setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => {
+          const next = prev + 1;
+          if (next >= MAX_RECORDING_SECONDS) {
+            stopRecording();
+          }
+          return next;
+        });
+      }, 1000);
       toast.info("Microfone ativo... fale agora.");
-    } catch {
-      toast.error("Não foi possível acessar o microfone. Verifique as permissões.");
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : "";
+      if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        toast.error("Nenhum microfone encontrado neste dispositivo.");
+      } else if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        toast.error(
+          "Permissão de microfone negada. Habilite o acesso ao microfone e tente de novo.",
+        );
+      } else {
+        toast.error("Não foi possível acessar o microfone. Verifique as permissões.");
+      }
     }
   }
 
   function stopRecording() {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
-      setIsRecording(false);
     }
+    clearRecordingTimer();
+    setIsRecording(false);
+  }
+
+  function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string).split(",")[1] ?? "");
+      reader.onerror = () => reject(reader.error ?? new Error("Falha ao ler o áudio gravado."));
+      reader.readAsDataURL(blob);
+    });
   }
 
   async function transcribeAudio(blob: Blob) {
     toast.loading("Transcrevendo áudio...", { id: "whisper" });
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(blob);
-      reader.onloadend = async () => {
-        const base64 = (reader.result as string).split(",")[1];
-        const { data, error } = await supabase.functions.invoke("whisper-transcribe", {
-          body: { audio: base64 },
-        });
-        toast.dismiss("whisper");
-        if (error || !data?.text) throw error ?? new Error("Transcrição vazia.");
-        toast.success("Áudio transcrito!");
-        handleSend(data.text);
-      };
+      const audio_base64 = await blobToBase64(blob);
+      const result = await transcribeVoiceMessage({ data: { audio_base64 } });
+      toast.dismiss("whisper");
+      toast.success("Áudio transcrito!");
+      handleSend(result.text);
     } catch (err: unknown) {
       toast.dismiss("whisper");
       toast.error(
@@ -484,6 +525,22 @@ function ChatPage() {
                 className="w-full bg-transparent border-none text-sm text-foreground/90 placeholder-foreground/30 focus:outline-none focus:ring-0 disabled:opacity-50"
                 disabled={isRecording || isSending}
               />
+
+              {isRecording && (
+                <div
+                  className="mr-2 flex items-center gap-1.5 text-xs font-medium text-red-400"
+                  aria-live="polite"
+                >
+                  <span className="relative flex size-2">
+                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-400 opacity-75" />
+                    <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                  </span>
+                  <span className="font-mono tabular-nums">
+                    {formatElapsedSeconds(recordingSeconds)} /{" "}
+                    {formatElapsedSeconds(MAX_RECORDING_SECONDS)}
+                  </span>
+                </div>
+              )}
 
               {isRecording ? (
                 <Tooltip>
