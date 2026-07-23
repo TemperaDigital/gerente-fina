@@ -285,6 +285,11 @@ function matchesTemperoRuleImport(description: string): boolean {
   return n.includes("mariareniele") || n.includes("maria reniele") || n.includes("woshington");
 }
 
+/** Categoria com nome sugerindo assinatura/recorrência (ex: "Assinaturas Digitais"). */
+function looksLikeSubscriptionCategoryName(name: string | undefined | null): boolean {
+  return !!name && normalizePattern(name).includes("assinatura");
+}
+
 interface AiClassification {
   index: number;
   category_id?: string;
@@ -292,7 +297,16 @@ interface AiClassification {
   confidence?: "high" | "medium" | "low";
 }
 
-/** Classifica um lote de linhas via Lovable AI Gateway. Falha → sugestões nulas. */
+/**
+ * Classifica um lote de linhas via Lovable AI Gateway.
+ *
+ * Sem LOVABLE_API_KEY configurada: retorna vazio silenciosamente — fluxo
+ * manual é o comportamento esperado, não um erro. Qualquer OUTRA falha
+ * (rede, HTTP não-ok, resposta em formato inesperado) agora PROPAGA como
+ * exceção — GF-001 tornou cada lote uma chamada isolada disparada pelo
+ * cliente, e o cliente precisa distinguir "este lote falhou, tente de novo"
+ * de "sugestão vazia porque a IA não está configurada".
+ */
 async function classifyBatchWithAI(
   batch: Array<{ index: number; description: string; amount: string; kind: string }>,
   categories: Array<{ id: string; name: string; kind: string }>,
@@ -320,80 +334,108 @@ REGRAS:
     .map((r) => `${r.index}: [${r.kind}] R$ ${r.amount} — ${r.description}`)
     .join("\n");
 
-  try {
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userContent },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "classify_transactions",
-              description: "Retorna a classificação de todas as transações do lote.",
-              parameters: {
-                type: "object",
-                properties: {
-                  classifications: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        index: { type: "integer" },
-                        category_id: {
-                          type: "string",
-                          description: "UUID de categoria EXISTENTE, se alguma servir",
-                        },
-                        new_category: {
-                          type: "string",
-                          description: "Nome de categoria NOVA, apenas se nenhuma existente servir",
-                        },
-                        confidence: { type: "string", enum: ["high", "medium", "low"] },
+  const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "google/gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "classify_transactions",
+            description: "Retorna a classificação de todas as transações do lote.",
+            parameters: {
+              type: "object",
+              properties: {
+                classifications: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      index: { type: "integer" },
+                      category_id: {
+                        type: "string",
+                        description: "UUID de categoria EXISTENTE, se alguma servir",
                       },
-                      required: ["index"],
+                      new_category: {
+                        type: "string",
+                        description: "Nome de categoria NOVA, apenas se nenhuma existente servir",
+                      },
+                      confidence: { type: "string", enum: ["high", "medium", "low"] },
                     },
+                    required: ["index"],
                   },
                 },
-                required: ["classifications"],
               },
+              required: ["classifications"],
             },
           },
-        ],
-        tool_choice: { type: "function", function: { name: "classify_transactions" } },
-      }),
-    });
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "classify_transactions" } },
+    }),
+  });
 
-    if (!resp.ok) return result;
+  if (!resp.ok) {
+    throw new Error(`IA indisponível (HTTP ${resp.status}) ao classificar este lote.`);
+  }
 
-    const json = (await resp.json()) as {
-      choices?: Array<{
-        message?: { tool_calls?: Array<{ function?: { arguments?: string } }> };
-      }>;
-    };
-    const args = json.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
-    if (!args) return result;
+  const json = (await resp.json()) as {
+    choices?: Array<{
+      message?: { tool_calls?: Array<{ function?: { arguments?: string } }> };
+    }>;
+  };
+  const args = json.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+  if (!args) {
+    throw new Error("IA não retornou classificação para este lote.");
+  }
 
-    const parsed = JSON.parse(args) as { classifications?: AiClassification[] };
-    for (const c of parsed.classifications ?? []) {
-      if (typeof c.index === "number") result.set(c.index, c);
-    }
+  let parsed: { classifications?: AiClassification[] };
+  try {
+    parsed = JSON.parse(args) as { classifications?: AiClassification[] };
   } catch {
-    // IA indisponível: retorna vazio, fluxo segue manual
+    throw new Error("IA retornou uma resposta em formato inesperado para este lote.");
+  }
+  for (const c of parsed.classifications ?? []) {
+    if (typeof c.index === "number") result.set(c.index, c);
   }
   return result;
 }
 
-export const classifyAndCheckImport = createServerFn({ method: "POST" })
+/** Uma linha pronta para ser enviada a um lote de classifyImportBatch. */
+export interface ImportClassificationBatchItem {
+  index: number;
+  description: string;
+  amount: string;
+  kind: "income" | "expense";
+  /** Já true na preparação (heurística de repetição em meses anteriores) — preservado mesmo se a IA falhar. */
+  offer_convert_recurrence_baseline: boolean;
+  /** true quando já casou com uma recorrência existente — nunca oferece converter. */
+  has_recurrence_match: boolean;
+}
+
+/**
+ * prepareImportClassification — GF-001 (parte 1/2): faz todo o trabalho
+ * determinístico e barato (hash, dedup, regras aprendidas, vínculo
+ * estrutural de parcelamento/recorrência) e devolve os lotes que ainda
+ * precisam de IA para o cliente disparar um a um contra classifyImportBatch.
+ * Substitui o antigo classifyAndCheckImport monolítico, que rodava todos os
+ * lotes de IA em sequência DENTRO de uma única invocação — risco real de
+ * timeout do Worker em arquivos grandes (ver ATUALIZACOES-UNIFICADO.md, GF-001).
+ */
+export const prepareImportClassification = createServerFn({ method: "POST" })
   .inputValidator((i: unknown) => SmartClassifyInput.parse(i))
-  .handler(async ({ data }): Promise<SmartImportRow[]> => {
+  .handler(async ({
+    data,
+  }): Promise<{ rows: SmartImportRow[]; batches: ImportClassificationBatchItem[][] }> => {
     const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
     const { accountBelongsToUser } = await import("@/lib/finance/active-account.server");
     const sb = getSupabaseAdmin();
@@ -410,8 +452,6 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
       .is("archived_at", null);
     if (catErr) throw new Error(`Falha ao ler categorias: ${catErr.message}`);
     const categories = cats ?? [];
-    const validCatIds = new Set(categories.map((c) => c.id));
-    const catNamesLower = new Set(categories.map((c) => c.name.toLowerCase()));
     const temperoCat = categories.find((c) => c.name.toLowerCase().includes("mercearia"));
 
     // 2. Hash + dedup (mesma lógica do checkImportDuplicates)
@@ -542,35 +582,38 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
       if (hasPriorOccurrence) recurrenceConvertOffers.add(index);
     });
 
-    /** Categoria com nome sugerindo assinatura/recorrência (ex: "Assinaturas Digitais"). */
-    function looksLikeSubscriptionCategoryName(name: string | undefined | null): boolean {
-      return !!name && normalizePattern(name).includes("assinatura");
-    }
-
-    // 3. Classificação IA em lotes de 40 (só linhas NÃO duplicadas e NÃO
-    //    resolvidas por regra — economiza tokens)
-    const aiResults = new Map<number, AiClassification>();
+    // 3. Linhas que ainda precisam de classificação por IA (não duplicadas,
+    //    não resolvidas por regra) — GF-001: em vez de classificar tudo numa
+    //    única chamada de servidor (risco de timeout em arquivos grandes),
+    //    devolve os lotes prontos para o CLIENTE disparar um a um contra
+    //    classifyImportBatch, com barra de progresso e erro isolado por lote.
     const toClassify = rowsWithHash
       .map((r, index) => ({ r, index }))
       .filter(({ r, index }) => !existingSet.has(r.dedup_hash) && !ruleMatches.has(index));
+    const needsAi = new Set(toClassify.map(({ index }) => index));
 
     const BATCH = 40;
+    const batches: ImportClassificationBatchItem[][] = [];
     for (let i = 0; i < toClassify.length; i += BATCH) {
-      const slice = toClassify.slice(i, i + BATCH).map(({ r, index }) => ({
-        index,
-        description: r.description,
-        amount: normalizeAmount(r.amount_raw),
-        kind: r.kind,
-      }));
-      const batchResult = await classifyBatchWithAI(slice, categories);
-      for (const [k, v] of batchResult) aiResults.set(k, v);
+      batches.push(
+        toClassify.slice(i, i + BATCH).map(({ r, index }) => ({
+          index,
+          description: r.description,
+          amount: normalizeAmount(r.amount_raw),
+          kind: r.kind,
+          offer_convert_recurrence_baseline: recurrenceConvertOffers.has(index),
+          has_recurrence_match: recurrenceMatches.has(index),
+        })),
+      );
     }
 
-    // 4. Monta o resultado final validando as respostas da IA
-    return rowsWithHash.map((row, index) => {
+    // 4. Monta o resultado para TODA linha já resolvível sem IA (duplicata,
+    //    regra determinística/aprendida). Linhas que precisam de IA saem com
+    //    suggested_* nulos — o cliente patcheia via classifyImportBatch.
+    const rows: SmartImportRow[] = rowsWithHash.map((row, index) => {
       const isDup = existingSet.has(row.dedup_hash);
       let suggested_category_id: string | null = null;
-      let suggested_new_category: string | null = null;
+      const suggested_new_category: string | null = null;
       let confidence: "high" | "medium" | "low" = "low";
       let notes: string | null = null;
 
@@ -584,30 +627,12 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
         const match = ruleMatches.get(index)!;
         suggested_category_id = match.category_id;
         confidence = match.confidence;
-      } else if (!isDup) {
-        const ai = aiResults.get(index);
-        if (ai?.category_id && validCatIds.has(ai.category_id)) {
-          // Valida que a categoria sugerida tem o kind certo
-          const cat = categories.find((c) => c.id === ai.category_id);
-          if (cat?.kind === row.kind) {
-            suggested_category_id = ai.category_id;
-            confidence = ai.confidence ?? "medium";
-          }
-        }
-        if (!suggested_category_id && ai?.new_category) {
-          const cleaned = ai.new_category.trim().slice(0, 60);
-          // Não propõe nome que já existe (IA às vezes erra nisso)
-          if (cleaned && !catNamesLower.has(cleaned.toLowerCase())) {
-            suggested_new_category = cleaned;
-            confidence = ai.confidence ?? "medium";
-          }
-        }
       }
 
-      // Heurística "categoria assinaturas" — só dá pra checar agora que a
-      // categoria final (regra aprendida ou IA) já foi resolvida acima.
+      // Heurística "categoria assinaturas" — só dá pra resolver aqui quando a
+      // categoria final NÃO depende de IA (senão classifyImportBatch decide).
       let offerConvertRecurrence = !isDup && recurrenceConvertOffers.has(index);
-      if (!isDup && !offerConvertRecurrence && !recurrenceMatches.has(index)) {
+      if (!isDup && !offerConvertRecurrence && !recurrenceMatches.has(index) && !needsAi.has(index)) {
         const finalCatName = suggested_category_id
           ? categories.find((c) => c.id === suggested_category_id)?.name
           : suggested_new_category;
@@ -632,6 +657,118 @@ export const classifyAndCheckImport = createServerFn({ method: "POST" })
         matched_installment_purchase_description: installmentMatch?.description ?? null,
         offer_create_installment: !isDup && installmentCreateOffers.has(index),
         matched_recurrence_id: !isDup ? (recurrenceMatches.get(index) ?? null) : null,
+        offer_convert_recurrence: offerConvertRecurrence,
+      };
+    });
+
+    return { rows, batches };
+  });
+
+// ---------------------------------------------------------------------------
+// classifyImportBatch — GF-001: classifica UM lote (até 40 linhas) por vez.
+// Chamado repetidamente pelo cliente (loop sequencial com barra de progresso)
+// em vez de tudo numa chamada só — evita a server function ficar presa numa
+// sequência longa de chamadas de IA e permite mostrar erro por lote em vez de
+// derrubar a importação inteira quando um lote falha.
+// ---------------------------------------------------------------------------
+
+const ImportClassifyBatchInput = z.object({
+  account_id: z.string().uuid("Selecione uma conta válida."),
+  batch: z
+    .array(
+      z.object({
+        index: z.number().int().min(0),
+        description: z.string().min(1),
+        amount: z.string().min(1),
+        kind: z.enum(["income", "expense"]),
+        offer_convert_recurrence_baseline: z.boolean(),
+        has_recurrence_match: z.boolean(),
+      }),
+    )
+    .min(1)
+    .max(40, "Lote de classificação não pode exceder 40 linhas."),
+});
+
+export interface ImportClassificationPatch {
+  index: number;
+  suggested_category_id: string | null;
+  suggested_new_category: string | null;
+  confidence: "high" | "medium" | "low";
+  offer_convert_recurrence: boolean;
+}
+
+export const classifyImportBatch = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) => ImportClassifyBatchInput.parse(i))
+  .handler(async ({ data }): Promise<ImportClassificationPatch[]> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const { accountBelongsToUser } = await import("@/lib/finance/active-account.server");
+    const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
+
+    const okAccount = await accountBelongsToUser(sb, userId, data.account_id);
+    if (!okAccount) throw new Error("Conta não pertence ao usuário ou foi arquivada.");
+
+    const { data: cats, error: catErr } = await sb
+      .from("categories")
+      .select("id, name, kind")
+      .eq("user_id", userId)
+      .is("archived_at", null);
+    if (catErr) throw new Error(`Falha ao ler categorias: ${catErr.message}`);
+    const categories = cats ?? [];
+    const validCatIds = new Set(categories.map((c) => c.id));
+    const catNamesLower = new Set(categories.map((c) => c.name.toLowerCase()));
+
+    // Se falhar (rede, HTTP, formato), classifyBatchWithAI agora LANÇA — a
+    // exceção sobe intacta pro cliente, que mostra o erro preso a este lote
+    // específico (não ao import inteiro) e permite tentar de novo só ele.
+    const aiResults = await classifyBatchWithAI(
+      data.batch.map((b) => ({
+        index: b.index,
+        description: b.description,
+        amount: b.amount,
+        kind: b.kind,
+      })),
+      categories,
+    );
+
+    return data.batch.map((item): ImportClassificationPatch => {
+      let suggested_category_id: string | null = null;
+      let suggested_new_category: string | null = null;
+      let confidence: "high" | "medium" | "low" = "low";
+
+      const ai = aiResults.get(item.index);
+      if (ai?.category_id && validCatIds.has(ai.category_id)) {
+        // Valida que a categoria sugerida tem o kind certo
+        const cat = categories.find((c) => c.id === ai.category_id);
+        if (cat?.kind === item.kind) {
+          suggested_category_id = ai.category_id;
+          confidence = ai.confidence ?? "medium";
+        }
+      }
+      if (!suggested_category_id && ai?.new_category) {
+        const cleaned = ai.new_category.trim().slice(0, 60);
+        // Não propõe nome que já existe (IA às vezes erra nisso)
+        if (cleaned && !catNamesLower.has(cleaned.toLowerCase())) {
+          suggested_new_category = cleaned;
+          confidence = ai.confidence ?? "medium";
+        }
+      }
+
+      // Heurística "categoria assinaturas" resolvida agora que a categoria
+      // final (vinda da IA) já é conhecida — baseline já cobre os outros casos.
+      let offerConvertRecurrence = item.offer_convert_recurrence_baseline;
+      if (!offerConvertRecurrence && !item.has_recurrence_match) {
+        const finalCatName = suggested_category_id
+          ? categories.find((c) => c.id === suggested_category_id)?.name
+          : suggested_new_category;
+        if (looksLikeSubscriptionCategoryName(finalCatName)) offerConvertRecurrence = true;
+      }
+
+      return {
+        index: item.index,
+        suggested_category_id,
+        suggested_new_category,
+        confidence,
         offer_convert_recurrence: offerConvertRecurrence,
       };
     });

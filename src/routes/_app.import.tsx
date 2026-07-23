@@ -3,11 +3,18 @@
  *
  * Fluxo:
  *   1. Selecionar conta destino — BANCO/DINHEIRO (extrato) ou CARTÃO (fatura)
- *   2. Upload CSV → classifyAndCheckImport (hash + dedup + classificação IA)
- *   3. Pré-visualização EDITÁVEL: categoria sugerida por linha (corrigível),
+ *   2. Upload CSV → prepareImportClassification (hash + dedup + regras +
+ *      vínculo estrutural, tudo determinístico e barato)
+ *   3. Classificação por IA em CHUNKS: o cliente dispara classifyImportBatch
+ *      lote a lote (sequencial), com barra de progresso e erro isolado por
+ *      lote — GF-001, evita a server function ficar presa numa sequência
+ *      longa de chamadas de IA (risco de timeout em arquivos grandes). Um
+ *      lote com falha não derruba os demais; a linha fica só sem sugestão
+ *      da IA (usuário classifica manualmente ou clica "Tentar de novo").
+ *   4. Pré-visualização EDITÁVEL: categoria sugerida por linha (corrigível),
  *      badges de confiança, categorias novas propostas em destaque,
  *      descrição/tipo editáveis, incluir/excluir linha
- *   4. commitSmartImport → cria categorias novas aprovadas + grava lançamentos
+ *   5. commitSmartImport → cria categorias novas aprovadas + grava lançamentos
  *
  * MODO FATURA (conta tipo credit_card):
  *   - Semântica de sinais INVERTIDA: positivo = compra (despesa),
@@ -77,10 +84,12 @@ import {
 } from "@/components/ui/table";
 import { getAccountsLookup, getCategoriesLookup } from "@/services/lookups.functions";
 import {
-  classifyAndCheckImport,
+  prepareImportClassification,
+  classifyImportBatch,
   commitSmartImport,
   getDefaultImportAccount,
   type SmartImportRow,
+  type ImportClassificationBatchItem,
 } from "@/lib/supabase/import.functions";
 import { detectCsvSchema } from "@/lib/supabase/csv-schema.functions";
 import { extractPdfStatement } from "@/lib/supabase/pdf-statement.functions";
@@ -207,6 +216,15 @@ const CONFIDENCE_META = {
   low: { label: "Baixa", cls: "text-zinc-400 bg-zinc-500/10 border-zinc-500/20" },
 } as const;
 
+/** Progresso da classificação por IA em chunks — GF-001. */
+interface BatchProgressState {
+  batches: ImportClassificationBatchItem[][];
+  /** Lotes já finalizados (sucesso OU falha) — não conta retries. */
+  done: number;
+  /** batchIndex → mensagem de erro. Lote some daqui assim que um retry funciona. */
+  errors: Map<number, string>;
+}
+
 function ImportPage() {
   const queryClient = useQueryClient();
   const { data: accounts } = useSuspenseQuery(accountsQuery());
@@ -217,6 +235,12 @@ function ImportPage() {
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [isClassifying, setIsClassifying] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
+
+  // Progresso da classificação por IA em chunks (GF-001) + índices de lote
+  // em retry manual (só pra desabilitar o botão "Tentar de novo" daquele lote
+  // especificamente enquanto ele mesmo está em voo).
+  const [classifyProgress, setClassifyProgress] = useState<BatchProgressState | null>(null);
+  const [retryingBatches, setRetryingBatches] = useState<Set<number>>(new Set());
 
   // PDF protegido por senha: o arquivo pendente fica em memória local só para
   // permitir "Tentar novamente"; a SENHA nunca é persistida (nem banco, nem
@@ -292,6 +316,95 @@ function ImportPage() {
   }
 
   // ---------------------------------------------------------------------------
+  // Classificação por IA em chunks (GF-001): um lote por chamada de servidor,
+  // disparados em sequência pelo cliente. Falha num lote NUNCA aborta os
+  // demais — a linha fica sem sugestão da IA até classificação manual ou
+  // retry. Retorna `false` para o lote que falhou, `true` para o que deu certo.
+  // ---------------------------------------------------------------------------
+  async function runSingleBatch(
+    batches: ImportClassificationBatchItem[][],
+    batchIndex: number,
+    isRetry: boolean,
+  ): Promise<boolean> {
+    const batch = batches[batchIndex];
+    try {
+      const patches = await classifyImportBatch({ data: { account_id: accountId, batch } });
+      const patchByIndex = new Map(patches.map((p) => [p.index, p]));
+      setRows((prev) =>
+        prev.map((r, i) => {
+          const patch = patchByIndex.get(i);
+          if (!patch) return r;
+          return {
+            ...r,
+            suggested_category_id: patch.suggested_category_id,
+            suggested_new_category: patch.suggested_new_category,
+            confidence: patch.confidence,
+            offer_convert_recurrence: patch.offer_convert_recurrence,
+            category_choice: patch.suggested_category_id
+              ? `cat:${patch.suggested_category_id}`
+              : patch.suggested_new_category
+              ? `new:${patch.suggested_new_category}`
+              : r.category_choice,
+          };
+        }),
+      );
+      setClassifyProgress((prev) => {
+        if (!prev) return prev;
+        const errors = new Map(prev.errors);
+        errors.delete(batchIndex);
+        return { ...prev, done: isRetry ? prev.done : prev.done + 1, errors };
+      });
+      return true;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setClassifyProgress((prev) => {
+        if (!prev) return prev;
+        const errors = new Map(prev.errors);
+        errors.set(batchIndex, message);
+        return { ...prev, done: isRetry ? prev.done : prev.done + 1, errors };
+      });
+      toast.error(
+        `Lote ${batchIndex + 1} (${batch.length} linha${batch.length > 1 ? "s" : ""}): falha ao classificar com IA — ${message}`,
+      );
+      return false;
+    }
+  }
+
+  async function runClassificationBatches(batches: ImportClassificationBatchItem[][]) {
+    setClassifyProgress({ batches, done: 0, errors: new Map() });
+    let failedBatches = 0;
+    let failedRows = 0;
+    for (let i = 0; i < batches.length; i++) {
+      const ok = await runSingleBatch(batches, i, false);
+      if (!ok) {
+        failedBatches++;
+        failedRows += batches[i].length;
+      }
+    }
+    if (failedBatches > 0) {
+      toast.warning(
+        `Classificação por IA concluída com ${failedBatches} lote(s) com falha (~${failedRows} linha(s)) — categorize manualmente ou use "Tentar de novo" no lote.`,
+      );
+    } else {
+      toast.success("Classificação por IA concluída para todas as linhas.");
+    }
+  }
+
+  async function retryBatch(batchIndex: number) {
+    if (!classifyProgress) return;
+    setRetryingBatches((prev) => new Set(prev).add(batchIndex));
+    try {
+      await runSingleBatch(classifyProgress.batches, batchIndex, true);
+    } finally {
+      setRetryingBatches((prev) => {
+        const next = new Set(prev);
+        next.delete(batchIndex);
+        return next;
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Etapa final compartilhada por TODO formato de arquivo (CSV, PDF...):
   // separa pagamentos de fatura (seção própria) do restante (vai para a IA
   // classificar) e prepara os dois estados editáveis da pré-visualização.
@@ -327,14 +440,18 @@ function ImportPage() {
       return;
     }
 
-    toast.info(`Analisando ${parsed.length} linhas com IA...`, { id: "classify" });
-    const classified = await classifyAndCheckImport({
+    setClassifyProgress(null);
+    toast.info(`Preparando ${parsed.length} linha(s)...`, { id: "classify" });
+    const prepared = await prepareImportClassification({
       data: { account_id: accountId, rows: parsed },
     });
     toast.dismiss("classify");
 
-    // Converte para estado editável, pré-preenchendo com a sugestão da IA
-    const editable: EditableRow[] = classified.map((r, i) => ({
+    // Converte para estado editável — linhas já resolvidas (duplicata, regra
+    // determinística/aprendida) vêm com categoria pronta; linhas que ainda
+    // dependem da IA ficam pendentes até os chunks de classifyImportBatch
+    // completarem (ver runClassificationBatches abaixo).
+    const editable: EditableRow[] = prepared.rows.map((r, i) => ({
       ...r,
       include: !r.is_duplicate,
       category_choice: r.suggested_category_id
@@ -352,14 +469,20 @@ function ImportPage() {
     setRows(editable);
 
     const dups = editable.filter((r) => r.is_duplicate).length;
-    const classifiedCount = editable.filter((r) => !r.is_duplicate && r.category_choice).length;
-    const pending = editable.filter((r) => !r.is_duplicate && !r.category_choice).length;
+    const totalToClassify = prepared.batches.reduce((sum, b) => sum + b.length, 0);
 
-    toast.success(
-      `${classified.length} linhas: ${classifiedCount} classificadas pela IA` +
-        (pending > 0 ? `, ${pending} aguardando categoria manual` : "") +
-        (dups > 0 ? `, ${dups} duplicatas ignoradas` : "") + ".",
+    toast.info(
+      `${prepared.rows.length} linha(s) analisadas` +
+        (dups > 0 ? ` · ${dups} duplicata(s) ignorada(s)` : "") +
+        (totalToClassify > 0
+          ? ` · classificando ${totalToClassify} com IA em ${prepared.batches.length} lote(s)...`
+          : "") +
+        ".",
     );
+
+    if (prepared.batches.length > 0) {
+      await runClassificationBatches(prepared.batches);
+    }
   }
 
   function patchPaymentRow(key: string, patch: Partial<PaymentRow>) {
@@ -806,6 +929,8 @@ function ImportPage() {
       setPaymentRows([]);
       setCardInvoices([]);
       setBulkSourceAccountId("");
+      setClassifyProgress(null);
+      setRetryingBatches(new Set());
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -964,6 +1089,62 @@ function ImportPage() {
       {/* Etapa 3: Pré-visualização editável */}
       {(rows.length > 0 || paymentRows.length > 0) && (
         <div className="space-y-4">
+
+          {/* Progresso da classificação por IA em chunks (GF-001) — cada lote é
+              uma chamada isolada; erro num lote nunca trava os outros nem a
+              importação inteira, e pode ser reclassificado individualmente. */}
+          {classifyProgress && classifyProgress.batches.length > 0 && (
+            <GlassCard className="border border-white/10 p-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 text-xs text-foreground/70">
+                <span className="flex items-center gap-1.5 font-medium">
+                  {classifyProgress.done < classifyProgress.batches.length && (
+                    <RefreshCw className="size-3.5 animate-spin text-primary" />
+                  )}
+                  Classificando lançamentos com IA
+                </span>
+                <span className="font-mono">
+                  {classifyProgress.done}/{classifyProgress.batches.length} lote
+                  {classifyProgress.batches.length > 1 ? "s" : ""}
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-white/5 overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{
+                    width: `${(classifyProgress.done / classifyProgress.batches.length) * 100}%`,
+                  }}
+                />
+              </div>
+              {classifyProgress.errors.size > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  {Array.from(classifyProgress.errors.entries()).map(([batchIndex, message]) => (
+                    <div
+                      key={batchIndex}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-1.5 text-[11px] text-red-300"
+                    >
+                      <span>
+                        Lote {batchIndex + 1} ({classifyProgress.batches[batchIndex].length} linha
+                        {classifyProgress.batches[batchIndex].length > 1 ? "s" : ""}): {message}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={retryingBatches.has(batchIndex)}
+                        className="h-6 shrink-0 gap-1 rounded-full px-2 text-[10px]"
+                        onClick={() => retryBatch(batchIndex)}
+                      >
+                        {retryingBatches.has(batchIndex) && (
+                          <RefreshCw className="size-3 animate-spin" />
+                        )}
+                        Tentar de novo
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </GlassCard>
+          )}
 
           {/* Pagamento(s) de Fatura Detectado(s) — NUNCA vão na tabela normal:
               não são receita nem despesa, são liquidação (RPC pay_credit_card_invoice) */}
@@ -1128,6 +1309,8 @@ function ImportPage() {
                   setPaymentRows([]);
                   setCardInvoices([]);
                   setBulkSourceAccountId("");
+                  setClassifyProgress(null);
+                  setRetryingBatches(new Set());
                 }}
                 className="rounded-full"
               >
