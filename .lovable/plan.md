@@ -1,37 +1,87 @@
-## Diagnóstico do estado atual
+# Plano: Documento `construcao.md` — Histórico e Roadmap do Gerente FINA
 
-### ✅ Rotas — saudáveis
-`src/routeTree.gen.ts` contém as 18 entradas esperadas, incluindo `/agendamentos` (13 ocorrências no arquivo gerado: `AppAgendamentosRoute` + `AppAgendamentosRouteImport`, registradas em `FileRoutesByFullPath`, `FileRoutesByTo`, `FileRoutesById`, `FileRouteTypes.fullPaths/to/id`, `FileRoutesByPath`, `AppRouteChildren`). Todos os 17 arquivos `.tsx` em `src/routes/` estão mapeados 1:1.
+## Objetivo
+Criar um único arquivo `construcao.md` na raiz do projeto consolidando todo o histórico da construção do Gerente FINA pela Lovable, organizado por Missões numeradas, com solicitações do usuário, execuções realizadas e pendências.
 
-### ✅ Build de produção — passa
-`bun run build` conclui com sucesso (`✓ built in 1.47s`), Nitro gera `dist/server/wrangler.json`, `.wrangler/deploy/config.json` e `dist/client/_headers`. Deploy no Cloudflare Workers está apto.
+## Estrutura do documento
 
-### ❌ Typecheck (`tsgo --noEmit`) — 10 erros
-Violação da Cláusula Pétrea #2 do AGENTS.md ("100% limpa antes de commit"). Todos os erros são do mesmo tema: a rota `/dashboard` passou a exigir um parâmetro de busca (`search`) e vários call-sites de `<Link to="/dashboard">` / `navigate({ to: "/dashboard" })` / `redirect({ to: "/dashboard" })` não estão passando `search`.
+### 1. Cabeçalho e Constituição
+- Nome do projeto, stack (TanStack Start + Supabase + Tailwind/shadcn), princípios inegociáveis (Soberania Contábil, Expurgo de Neutros, RLS, Modo Escuro Premium, pt-BR).
 
-Arquivos e linhas afetados:
-- `src/components/app-shell.tsx:56, 105` — `<Link to="/dashboard">` sem `search`.
-- `src/routes/_app.accounts.tsx:161` — idem.
-- `src/routes/_app.credit-cards.tsx:154` — idem.
-- `src/routes/index.tsx:16, 39` — `redirect`/`navigate` para `/dashboard` sem `search`.
-- `src/routes/_app.dashboard.tsx:159` — `from: "/_app/dashboard"` deve ser `"/dashboard"`.
-- `src/routes/_app.dashboard.tsx:209, 259` — updater passando `{ month }` isolado (schema exige `search` completo).
-- `src/routes/_app.dashboard.tsx:369` — `<Link to="/transactions">` com `{ month }` mas faltando `page` (obrigatório).
+### 2. Infraestrutura Base (Fundação)
+- Supabase externo (org `mwtyioujdmbzlpldmriw`), deploy Cloudflare/Vercel, estrutura `src/lib/finance`, `src/lib/supabase`, `src/services`, `docs/migrations`.
 
-Nenhum erro toca lógica de negócio; são só assinaturas de navegação desatualizadas em relação ao search-schema atual das rotas `/dashboard` e `/transactions`.
+### 3. Migrations SQL executadas (numeradas 0001 → 0021)
+Lista tabelada com: número, arquivo, propósito, status.
+- 0001 Enums + accounts
+- 0002 categories + transactions (numeric 14,2; transfer_id de duas pernas)
+- 0002b Trigger dedup condicional
+- 0003 recurrences, invoices, installments, loans
+- 0004 Views balance + DRE (com expurgo)
+- 0005 Trigger de fatura de cartão
+- 0006 budgets
+- 0007 audit_log
+- 0008 invoice_payment dual leg
+- 0011 Pagamento de fatura atômico via RPC
+- 0012 categories.nature (FIXA/VARIÁVEL)
+- 0013 convert_transaction_entry
+- 0014 chat_threads + messages
+- 0015 delete_installment_purchase
+- 0016 recurrence_once
+- 0017 upsert_budget rpc
+- 0018 bank_connections
+- 0019/0021 revoke de security definer
+- 0020 bank_connections_manual_status
 
-## Plano (somente ajustes de tipagem/navegação, zero lógica)
+### 4. Missões executadas (numeradas cronologicamente)
+Para cada missão: **Solicitação do usuário** → **Sugestão/execução da Lovable** → **Arquivos afetados**.
 
-1. **Ler** os search-schemas de `_app.dashboard.tsx` e `_app.transactions.index.tsx` para descobrir o shape/default exato exigido (`month`, `page`, etc.).
-2. **`src/routes/index.tsx`** — adicionar `search: { month: <default>, ... }` no `redirect` e no `navigate` para `/dashboard`.
-3. **`src/components/app-shell.tsx`** (linhas 56 e 105) — passar `search={{ ... }}` no `<Link to="/dashboard">` ou usar `search={(prev) => prev}` se quisermos preservar o atual.
-4. **`src/routes/_app.accounts.tsx:161`** e **`_app.credit-cards.tsx:154`** — mesma correção do item 3.
-5. **`src/routes/_app.dashboard.tsx`**:
-   - linha 159: trocar `from: "/_app/dashboard"` por `from: "/dashboard"`.
-   - linhas 209 e 259: usar updater funcional `search: (prev) => ({ ...prev, month: novo })` para satisfazer o schema completo.
-   - linha 369: no `<Link to="/transactions">`, incluir `page: 1` junto de `month`.
-6. **Revalidar**: rodar `bunx tsgo --noEmit` (deve ficar 0 erros) e `bun run build` (deve continuar passando).
+- **Missão 1** — Setup inicial e primeira migration
+- **Missão 2** — Categorias e transações com regras contábeis rígidas
+- **Missão 3** — Recorrências, faturas, parcelamentos, empréstimos
+- **Missão 4** — Views de saldo e DRE com expurgo
+- **Missão 5** — Server Functions + Dashboard + /transactions + /transactions/new
+- **Missão 6** — Mesclar duplicados, undo, edição, gestão patrimonial, hub de settings, parcelamentos, orçamentos
+- **Missão 7** — Blindagem matemática (toCents/BigInt), consolidação de rotas, build CI
+- **Missão 8** — Chat IA real (Lovable AI Gateway), automação MariaReniele, importador CSV com dedup SHA-256
+- **Missão 9** — Unificação da conta ativa + preview responsivo do importador
+- **Missão 10** — Motor Preditivo em /forecast + Backup/Restore com Zod + Trilha de Auditoria
+- **Missão 11** — Virada de Produção: autenticação real via cookies SSR, proteção global via `_app.tsx`, onboarding modal, refactoring de rotas para prefixo `_app/`
+- **Missão 12** — Correção de exclusão de parcelas (evitar cards fantasma em /installments)
+- **Missão 13** — Motor de faturas dual-leg (0008): duas pernas de pagamento, categoria fixa "fatura de cartões", saldo real por agregação
+- **Missão 14** — Preservação do mês selecionado na navegação (`preserveMonth` no app-shell)
+- **Missão 15** — Modal de detalhamento de Despesas no Dashboard (3 seções: faturas, fixas, variáveis)
+- **Missão 16** — Drill-down do modal para /transactions + skeletons + acessibilidade
+- **Missão 17** — Testes de drill-down + estados vazios por seção
+- **Missão 18** — Reorganização Dashboard "Contas & Cartões" em 3 blocos (bancos, cartões com limite, faturas agrupadas)
+- **Missão 19** — Discussão sobre MCP / OAuth (pendente decisão do usuário)
+- **Missão 20** — Seleção e exclusão em massa em /transactions com falha parcial graciosa
 
-## Observações
-- Build/deploy não estão bloqueados hoje (Vite/Nitro ignoram erros de tipo), mas o gate de qualidade do projeto sim.
-- Nada em `services/*`, migrations, RLS, ou motores de invoice/parcelamento será tocado.
+### 5. Estado atual do sistema
+Malha de 15 rotas canônicas (do AGENTS.md), status de cada uma: implementada / stub / pendente.
+
+### 6. Pendências e melhorias identificadas
+- **MCP / OAuth**: decisão pendente entre OAuth por usuário vs público (Missão 19 sem resposta)
+- **/open-finance**: fluxo Pluggy real (hoje simulado/manual — migration 0020)
+- **/chat**: entrada de voz via MediaRecorder + Whisper (workspace-knowledge exige, status a confirmar)
+- **Import**: processamento assíncrono via Edge Functions com status `syncing` + HTTP 202 (workspace-knowledge)
+- **PDF Import**: script de teste existe (`docs/PDF_IMPORT_TEST_SCRIPT.md`) — validação manual pendente
+- **Regras de automação**: expandir além do case MariaReniele/mercearia
+- **Testes E2E**: cobertura atual só unitária (Vitest); Playwright ainda não configurado
+- **Onboarding**: FirstAccountModal existe, mas fluxo pós-signup completo (categorias default, tour) pode ser reforçado
+- **Backup restore**: progresso visual existe; validar restore em backups grandes
+- **Segurança**: revisar security-memory + rodar security scan
+- **SEO/head metadata**: verificar `head()` único por rota (título, description, og)
+- **Mobile**: workspace-knowledge exige Mobile-First rígido — auditar tabelas complexas ocultas em telas pequenas
+
+### 7. Convenções e cláusulas pétreas ativas
+Recap dos guardrails: colunas reais (`kind`, `occurred_on`, view `account_balances`), proibições (alerts nativos, saldos calculados persistidos, `counterparty_account_id`), padrão de tratamento do meio do mês.
+
+## Notas
+- Documento em pt-BR, formato Markdown, sem emojis desnecessários.
+- Sem código embutido além de nomes de arquivos e identificadores.
+- Baseado no histórico da conversa e nos arquivos visíveis em `docs/migrations/` e `src/routes/`.
+- Vou reler apenas rapidamente `AGENTS.md`, `atualizacoes.md` e listar `docs/migrations/` na fase de build para não inventar detalhes não confirmados.
+
+## Arquivo a criar
+- `construcao.md` (raiz do projeto)
