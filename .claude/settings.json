@@ -40,7 +40,8 @@
       "Bash(gh secret *)",
       "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\(process.env.E2E_TEST_EMAIL\\)\")",
       "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\(process.env.E2E_TEST_PASSWORD\\)\")",
-      "Bash(gh run *)"
+      "Bash(gh run *)",
+      "WebFetch(domain:docs.pluggy.ai)"
     ],
     "additionalDirectories": [
       "\\tmp"
