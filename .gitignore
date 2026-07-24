@@ -20,6 +20,11 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Secrets locais — nunca commitar (service_role, credenciais de teste E2E etc.)
+.env
+.env.*
+!.env.example
+
 # PDFs reais usados para testar a extração da Fase C (importador) — nunca commitar
 test-fixtures/
 
