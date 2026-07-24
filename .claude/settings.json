@@ -39,7 +39,8 @@
       "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\(process.env.GERENTEFINA_SERVICE_ROLE_KEY\\)\")",
       "Bash(gh secret *)",
       "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\(process.env.E2E_TEST_EMAIL\\)\")",
-      "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\(process.env.E2E_TEST_PASSWORD\\)\")"
+      "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\(process.env.E2E_TEST_PASSWORD\\)\")",
+      "Bash(gh run *)"
     ],
     "additionalDirectories": [
       "\\tmp"

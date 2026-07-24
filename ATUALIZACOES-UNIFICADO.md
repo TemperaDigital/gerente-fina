@@ -706,10 +706,9 @@ Reorganizada por tipo de trabalho restante, a pedido do usuário
 
 ### A) Precisam de teste de uso prático no app publicado (gerentefina.fguerra.ia.br)
 
-1. **Validar a GF-004 v2 ponta a ponta** — testar o microfone/transcrição
-   em `gerentefina.fguerra.ia.br/chat` autenticado. Confiança alta
-   (mecanismo já comprovado em produção pra outras features deste app),
-   mas nunca testado com áudio real de verdade.
+1. ~~**Validar a GF-004 v2 ponta a ponta**~~ — **confirmado pelo usuário em
+   24/07/2026**: testou o microfone em produção, voz transcrita
+   corretamente pro campo do chat. GF-004 v2 fechada de verdade.
 2. Testar manualmente no browser o fluxo de import com a barra de
    progresso/chunking da GF-001 (implementado e com `tsc`/lint/testes
    limpos, mas sem validação visual em uso real ainda) — inclui rodar o
