@@ -85,13 +85,16 @@ para rastreabilidade), e a partir de agora usamos um prefixo novo — **`GF-`**
   para server functions com tabela `bank_connections` versionada.
 
 ### Achados ainda sem correção
-- Branch `feature/embed-tarefas-integration` no repositório do Gerente
+- ~~Branch `feature/embed-tarefas-integration` no repositório do Gerente
   Fina: 94 de 96 commits são histórico contaminado de um projeto de
   terceiros (draw.io/jgraph) — não relacionado. Os 2 commits reais têm
-  uma vulnerabilidade de XSS/postMessage sem validação de origem.
-  **Pausado por decisão do usuário** — o destino correto é um
-  repositório próprio (`TemperaDigital/fluxograma`), não o Gerente Fina;
-  retomar quando houver foco disponível.
+  uma vulnerabilidade de XSS/postMessage sem validação de origem.~~ —
+  **resolvido em 24/07/2026**: branch remota deletada
+  (`git push origin --delete feature/embed-tarefas-integration`),
+  conteúdo conferido antes (96 commits, maioria "release" do
+  draw.io/jgraph, batendo com o achado original). Decisão do usuário:
+  **não criar** o repositório `fluxograma` — o projeto não deve existir,
+  nem aqui nem em separado.
 - `PRD-GerenteFINA-IA.md` pode estar desatualizado quanto à malha de
   rotas e às missões concluídas (não verificado nesta sessão) —
   `AGENTS.md` já reflete as 17 rotas reais e o estado atual (GF-001,
@@ -566,27 +569,24 @@ Ordem sugerida (ajustável a qualquer momento):
    está de fato fechada). Confiança alta — mecanismo já comprovado em
    produção pra outras features deste app — mas nunca testado com áudio
    real de verdade.
-2. Avisar a Lovable para remover "MCP/OAuth" do roadmap dela.
-3. Open Finance real via Pluggy (hoje só simulação manual).
-4. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
+2. Open Finance real via Pluggy (hoje só simulação manual).
+3. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
    estado atual (`AGENTS.md` já corrigido).
-5. Retomar a limpeza da branch `feature/embed-tarefas-integration` /
-   criação do repositório `fluxograma` (pausado, não esquecido).
-6. Validação end-to-end do PDF import — inclui confirmar se
+4. Validação end-to-end do PDF import — inclui confirmar se
    `extractPdfStatement` (chamada única de IA, não chunked pela GF-001)
    precisa do mesmo tratamento se se confirmar timeout em PDFs grandes.
-7. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
+5. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
    já instalados como devDependency (GF-002); falta configurar a suíte
    de verdade (login real, fixtures, CI).
-8. Testar manualmente no browser o fluxo de import com a barra de
+6. Testar manualmente no browser o fluxo de import com a barra de
    progresso/chunking da GF-001 (implementado e com `tsc`/lint/testes
    limpos, mas sem validação visual em uso real ainda).
-9. Restore de backup > 5MB (hoje carrega tudo em memória).
-10. Testar manualmente no browser o botão "Pagar parcela" de loans
-    (GF-005) — lógica já validada direto no banco, falta só o clique real.
-11. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
-    manual/fora do app, fora do escopo da GF-005.
-12. **Investigar e resolver a dependência de `LOVABLE_API_KEY`** —
+7. Restore de backup > 5MB (hoje carrega tudo em memória).
+8. Testar manualmente no browser o botão "Pagar parcela" de loans
+   (GF-005) — lógica já validada direto no banco, falta só o clique real.
+9. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
+   manual/fora do app, fora do escopo da GF-005.
+10. **Investigar e resolver a dependência de `LOVABLE_API_KEY`** —
     rebaixada explicitamente pelo usuário (24/07/2026) para o último item
     da fila, de propósito: é a tarefa mais delicada (mexe na independência
     da plataforma Lovable, usada hoje pelo chat, PDF import e transcrição
