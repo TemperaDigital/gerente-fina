@@ -570,23 +570,28 @@ Ordem sugerida (ajustável a qualquer momento):
 3. Open Finance real via Pluggy (hoje só simulação manual).
 4. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
    estado atual (`AGENTS.md` já corrigido).
-5. Investigar e resolver a dependência de `LOVABLE_API_KEY`.
-6. Retomar a limpeza da branch `feature/embed-tarefas-integration` /
+5. Retomar a limpeza da branch `feature/embed-tarefas-integration` /
    criação do repositório `fluxograma` (pausado, não esquecido).
-7. Validação end-to-end do PDF import — inclui confirmar se
+6. Validação end-to-end do PDF import — inclui confirmar se
    `extractPdfStatement` (chamada única de IA, não chunked pela GF-001)
    precisa do mesmo tratamento se se confirmar timeout em PDFs grandes.
-8. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
+7. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
    já instalados como devDependency (GF-002); falta configurar a suíte
    de verdade (login real, fixtures, CI).
-9. Testar manualmente no browser o fluxo de import com a barra de
+8. Testar manualmente no browser o fluxo de import com a barra de
    progresso/chunking da GF-001 (implementado e com `tsc`/lint/testes
    limpos, mas sem validação visual em uso real ainda).
-10. Restore de backup > 5MB (hoje carrega tudo em memória).
-11. Testar manualmente no browser o botão "Pagar parcela" de loans
+9. Restore de backup > 5MB (hoje carrega tudo em memória).
+10. Testar manualmente no browser o botão "Pagar parcela" de loans
     (GF-005) — lógica já validada direto no banco, falta só o clique real.
-12. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
+11. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
     manual/fora do app, fora do escopo da GF-005.
+12. **Investigar e resolver a dependência de `LOVABLE_API_KEY`** —
+    rebaixada explicitamente pelo usuário (24/07/2026) para o último item
+    da fila, de propósito: é a tarefa mais delicada (mexe na independência
+    da plataforma Lovable, usada hoje pelo chat, PDF import e transcrição
+    de voz) e só deve ser puxada depois de todo o resto acima estar
+    resolvido.
 
 ---
 
