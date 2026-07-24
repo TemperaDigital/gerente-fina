@@ -15,7 +15,8 @@
       "Read(//home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/**)",
       "Bash(git show *)",
       "Bash(rm src/routes/_app.installments.orig.tsx)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

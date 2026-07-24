@@ -487,4 +487,5 @@ Ordem sugerida (ajustável a qualquer momento):
 ---
 
 _Documento vivo — atualizar a cada missão concluída, sem renumerar as
-anteriores._
+anteriores. Última revisão: 24/07/2026 (estado após GF-005 — fila de
+pendências acima conferida e atual nesta data)._
