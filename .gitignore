@@ -25,6 +25,12 @@ dist-ssr
 .env.*
 !.env.example
 
+# Playwright — e2e/.auth/ guarda o storageState (sessão real da conta de teste)
+e2e/.auth/
+playwright-report/
+test-results/
+blob-report/
+
 # PDFs reais usados para testar a extração da Fase C (importador) — nunca commitar
 test-fixtures/
 

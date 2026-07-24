@@ -1,0 +1,42 @@
+name: E2E (Playwright)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Instalar Chromium (Playwright)
+        run: npx playwright install --with-deps chromium
+
+      - name: Gerar .env local para os testes
+        run: |
+          echo "GERENTEFINA_SERVICE_ROLE_KEY=${{ secrets.GERENTEFINA_SERVICE_ROLE_KEY }}" >> .env
+          echo "E2E_TEST_EMAIL=${{ secrets.E2E_TEST_EMAIL }}" >> .env
+          echo "E2E_TEST_PASSWORD=${{ secrets.E2E_TEST_PASSWORD }}" >> .env
+
+      - name: Rodar suíte E2E
+        run: npx playwright test
+
+      - name: Publicar relatório em caso de falha
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

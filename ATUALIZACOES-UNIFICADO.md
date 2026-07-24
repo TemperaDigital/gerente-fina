@@ -623,33 +623,113 @@ uso real com PDF muito grande.
 
 ---
 
-## Pendências conhecidas — fila para virar GF-007, GF-008...
+### GF-007 — Suíte de Testes E2E (Playwright) configurada de verdade
+**Status:** ✅ Concluído (24/07/2026, Claude)
 
-Ordem sugerida (ajustável a qualquer momento):
+**Contexto:** Playwright + Chromium já estavam instalados desde a GF-002,
+mas nunca configurados como suíte de verdade (só usado ad hoc pra
+screenshot). Faltava login real, fixtures e CI.
+
+**Decisões tomadas com o usuário antes de codar:**
+- Autenticação: conta de teste **dedicada** no Supabase Auth (não a conta
+  real do usuário) — isolada via RLS/`user_id`, sem risco de misturar
+  dados financeiros reais com dados de teste.
+- `GERENTEFINA_SERVICE_ROLE_KEY` fornecida pelo usuário para rodar o dev
+  server localmente com páginas autenticadas (toda server function usa o
+  client admin, não existe caminho autenticado mais fraco).
+
+**Achado de segurança corrigido antes de tudo:** `.gitignore` **não
+cobria `.env` nenhum** — corrigido antes de escrever qualquer secret em
+disco (commit isolado, em separado).
+
+**O que foi feito:**
+- `playwright.config.ts`: projeto `setup` (loga uma vez, salva
+  `storageState` em `e2e/.auth/user.json`, gitignored) + projeto `public`
+  (sem sessão) + projeto `authenticated` (reaproveita a sessão salva).
+  `webServer` sobe o `vite dev` automaticamente (`reuseExistingServer`
+  fora do CI). Usa `playwright/test` (subpath já embutido no pacote
+  `playwright` instalado, sem precisar adicionar `@playwright/test` como
+  dependência nova).
+- `e2e/auth.setup.ts` + `e2e/public.spec.ts` (login carrega sem erro de
+  console, guard de rota sem sessão redireciona, credencial errada mostra
+  erro claro) + `e2e/dashboard.spec.ts` + `e2e/transactions.spec.ts`.
+- `.github/workflows/e2e.yml`: roda a suíte em todo push/PR pra `main` —
+  `npm ci`, `playwright install --with-deps chromium`, gera `.env` a
+  partir de secrets do GitHub Actions, roda `playwright test`, publica o
+  relatório HTML como artefato se falhar.
+- 3 secrets do GitHub Actions configurados via `gh secret set`
+  (`GERENTEFINA_SERVICE_ROLE_KEY`, `E2E_TEST_EMAIL`, `E2E_TEST_PASSWORD`)
+  — confirmado com o usuário antes de tocar em secrets do repositório.
+- **Achado real durante a configuração:** a primeira tentativa de login
+  falhou com a conta de teste — não por bug de auth, mas porque a conta
+  nova (zero contas/categorias) disparava o modal de onboarding
+  ("Bem-vindo ao Gerente FINA"), bloqueando a tela. Resolvido seedando 1
+  conta bancária + 2 categorias (expense/income) direto no banco pra essa
+  conta de teste — agora ela se comporta como qualquer conta "normal"
+  pros testes de dashboard/lançamentos.
+
+**Verificação:** suíte rodada de verdade, contra o dev server local
+conectado ao Supabase de PRODUÇÃO (mesmo backend real, dados isolados
+pela conta de teste dedicada) — **6/6 testes passando** (login, guard de
+rota, credencial errada, dashboard com KPIs, Livro-Caixa carregando).
+Uma falha isolada e não-reproduzível apareceu numa primeira rodada em
+paralelo (provável cold-start do dev server compilando sob demanda);
+reexecutada isoladamente e na suíte completa, passou consistentemente —
+documentado aqui em vez de escondido. `tsc --noEmit` limpo (arquivos
+`e2e/**` e `playwright.config.ts` adicionados ao `include` do
+`tsconfig.json`), `npm run lint` sem problemas, `npm test` (vitest)
+inalterado — 140/140, `e2e/*.spec.ts` corretamente fora do escopo do
+vitest (`vitest.config.ts` já restringe a `src/**`). CI ainda não foi
+observado rodando de verdade no GitHub (só configurado nesta sessão) —
+próximo push/PR vai confirmar.
+
+**Guardrails observados:**
+- Corrigi o gap de segurança do `.gitignore` (`.env` não ignorado) antes
+  de escrever qualquer secret em disco, num commit isolado e anterior.
+- Perguntei ao usuário antes de decidir a estratégia de autenticação, antes
+  de pedir a service_role key, e antes de configurar secrets no GitHub —
+  três decisões reais, nenhuma assumida.
+- Investiguei a fundo um erro de CORS aparente antes de concluir causa
+  raiz (curl direto no endpoint do Supabase confirmou que o servidor
+  responde CORS correto — o erro real era o modal de onboarding bloqueando
+  a tela, não uma falha de rede).
+
+---
+
+## Pendências conhecidas — fila para virar GF-008, GF-009...
+
+Reorganizada por tipo de trabalho restante, a pedido do usuário
+(24/07/2026 — fim das tarefas do dia).
+
+### A) Precisam de teste de uso prático no app publicado (gerentefina.fguerra.ia.br)
 
 1. **Validar a GF-004 v2 ponta a ponta** — testar o microfone/transcrição
-   em `gerentefina.fguerra.ia.br/chat` autenticado (sem isso, a missão não
-   está de fato fechada). Confiança alta — mecanismo já comprovado em
-   produção pra outras features deste app — mas nunca testado com áudio
-   real de verdade.
-2. Open Finance real via Pluggy (hoje só simulação manual).
-3. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
-   estado atual (`AGENTS.md` já corrigido).
-4. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
-   já instalados como devDependency (GF-002); falta configurar a suíte
-   de verdade (login real, fixtures, CI).
-5. Testar manualmente no browser o fluxo de import com a barra de
+   em `gerentefina.fguerra.ia.br/chat` autenticado. Confiança alta
+   (mecanismo já comprovado em produção pra outras features deste app),
+   mas nunca testado com áudio real de verdade.
+2. Testar manualmente no browser o fluxo de import com a barra de
    progresso/chunking da GF-001 (implementado e com `tsc`/lint/testes
    limpos, mas sem validação visual em uso real ainda) — inclui rodar o
    roteiro real de PDF (`docs/PDF_IMPORT_TEST_SCRIPT.md`), já que a
    GF-006 só analisou o código (sem `LOVABLE_API_KEY` viva pra testar
    upload de PDF de verdade).
-6. Restore de backup > 5MB (hoje carrega tudo em memória).
-7. Testar manualmente no browser o botão "Pagar parcela" de loans
+3. Testar manualmente no browser o botão "Pagar parcela" de loans
    (GF-005) — lógica já validada direto no banco, falta só o clique real.
+4. Confirmar que o CI da GF-007 (`.github/workflows/e2e.yml`) roda
+   verde no próximo push/PR — configurado mas ainda não observado
+   executando de verdade no GitHub.
+
+### B) Alteração de código/estrutura
+
+5. Open Finance real via Pluggy (hoje só simulação manual).
+6. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
+   estado atual (`AGENTS.md` já corrigido).
+7. Restore de backup > 5MB (hoje carrega tudo em memória).
 8. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
    manual/fora do app, fora do escopo da GF-005.
-9. **Investigar e resolver a dependência de `LOVABLE_API_KEY`** —
+9. Ampliar a suíte E2E (GF-007) pra mais fluxos críticos conforme surgir
+   necessidade — hoje cobre só login/guard/dashboard/lançamentos.
+10. **Investigar e resolver a dependência de `LOVABLE_API_KEY`** —
     rebaixada explicitamente pelo usuário (24/07/2026) para o último item
     da fila, de propósito: é a tarefa mais delicada (mexe na independência
     da plataforma Lovable, usada hoje pelo chat, PDF import e transcrição
@@ -659,5 +739,11 @@ Ordem sugerida (ajustável a qualquer momento):
 ---
 
 _Documento vivo — atualizar a cada missão concluída, sem renumerar as
-anteriores. Última revisão: 24/07/2026 (estado após GF-006 — fila de
-pendências acima conferida e atual nesta data)._
+anteriores._
+
+**24/07/2026 — encerramento das tarefas do dia.** Missões concluídas
+nesta data: GF-004 v2 (troca de provedor de voz), GF-005 (loans ↔
+transactions + limpeza de código morto), GF-006 (validação do PDF import
++ testes), GF-007 (suíte E2E configurada). Fila de pendências reorganizada
+acima em (A) precisa de teste prático no app publicado e (B) alteração de
+código/estrutura — ambas conferidas e atuais nesta data.

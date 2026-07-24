@@ -25,7 +25,21 @@
       "Bash(bun --version)",
       "Bash(cd \"d:/Nuvem/guerradriver/Trabalho_local/GitHub/gerente-fina-git\" && git show HEAD:src/routes/_app.chat.tsx > /tmp/chat_orig2.tsx *)",
       "Bash(grep -n -A 8 \"^- \\\\`/chat\\\\`\" AGENTS.md)",
-      "Bash(rm src/lib/supabase/pdf-statement.orig.functions.ts)"
+      "Bash(rm src/lib/supabase/pdf-statement.orig.functions.ts)",
+      "Read(//c/Users/Eu/AppData/Local/ms-playwright/**)",
+      "Bash(node -e ' *)",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8080/ --max-time 10)",
+      "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\('OK', !!process.env.E2E_TEST_EMAIL, !!process.env.GERENTEFINA_SERVICE_ROLE_KEY\\)\")",
+      "Bash(taskkill //F //PID 53900)",
+      "mcp__claude_ai_Supabase__get_project",
+      "mcp__claude_ai_Supabase__search_docs",
+      "Bash(curl -sS -X OPTIONS https://paxfjesglnaxaolvpgup.supabase.co/auth/v1/token?grant_type=password -H 'Origin: http://localhost:8080' -H 'Access-Control-Request-Method: POST' -D - -o /dev/null --max-time 15)",
+      "Bash(curl -sS -X POST https://paxfjesglnaxaolvpgup.supabase.co/auth/v1/token?grant_type=password -H 'Origin: http://localhost:8080' -H 'Content-Type: application/json' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBheGZqZXNnbG5heGFvbHZwZ3VwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzNjE5NTMsImV4cCI6MjA5NzkzNzk1M30.K0KRPpjolKFAbdS3RsCoDQLr2VU3AEJA9NX-ADJeKnY' -d '{\"email\":\"nonexistent-test@example.com\",\"password\":\"wrong\"}' -D - -o /tmp/post_body.json --max-time 15)",
+      "Bash(gh auth *)",
+      "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\(process.env.GERENTEFINA_SERVICE_ROLE_KEY\\)\")",
+      "Bash(gh secret *)",
+      "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\(process.env.E2E_TEST_EMAIL\\)\")",
+      "Bash(node -e \"process.loadEnvFile\\('.env'\\); console.log\\(process.env.E2E_TEST_PASSWORD\\)\")"
     ],
     "additionalDirectories": [
       "\\tmp"
