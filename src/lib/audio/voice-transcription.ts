@@ -1,7 +1,7 @@
 /**
  * Lógica pura de gravação/transcrição de voz do /chat (Missão GF-004) —
- * extraída para ser testável sem precisar do binding Workers AI real nem
- * do MediaRecorder do navegador.
+ * extraída para ser testável sem precisar de rede real (Lovable AI Gateway)
+ * nem do MediaRecorder do navegador.
  */
 
 /** Bem acima do esperado para um áudio webm/opus de até 60s — só uma rede de segurança. */
@@ -9,6 +9,12 @@ export const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
 /** Limite de duração de gravação no navegador — MediaRecorder para sozinho ao atingir. */
 export const MAX_RECORDING_SECONDS = 60;
+
+/** Abaixo disso é ruído/microfone mudo — nem vale gastar crédito de IA tentando transcrever. */
+export const MIN_RECORDING_BYTES = 2 * 1024;
+
+/** MIME reais que o MediaRecorder produz entre navegadores (Safari não grava webm). */
+export type AudioMimeType = "audio/webm" | "audio/mp4" | "audio/wav" | "audio/mpeg";
 
 export function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);

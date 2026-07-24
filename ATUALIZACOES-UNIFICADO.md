@@ -277,8 +277,20 @@ Fica pra quando a pendência "Testes E2E" (fila abaixo) for priorizada.
 
 ---
 
-### GF-004 — Entrada de voz (Whisper) no /chat
-**Status:** ⚠️ Implementado, **verificação end-to-end pendente** (23/07/2026, Claude)
+### GF-004 v1 — Entrada de voz (Whisper) no /chat via Cloudflare Workers AI
+**Status:** ❌ Abandonada em 24/07/2026 — ver GF-004 v2 abaixo. Motivo: o
+Worker que serve `gerentefina.fguerra.ia.br` roda inteiramente na
+infraestrutura/conta Cloudflare gerenciada pela Lovable (confirmado via
+`Server: cloudflare` + `CF-RAY` no header HTTP, e via investigação de DNS
+que descartou qualquer conta Cloudflare pessoal do usuário como hospedeira
+real). A própria Lovable confirmou que não há garantia documentada de que
+um `wrangler.jsonc` do repo seja mesclado no Worker publicado, e que
+bindings especiais (Workers AI, R2, KV, D1) exigem provisionamento manual
+da equipe deles, sem UI hoje para isso. Ou seja: o binding `AI` desta v1
+nunca pôde ser confirmado como provisionado em produção, e não havia
+caminho confiável para provisioná-lo. Código removido por completo na v2
+(`wrangler.jsonc`, `src/types/cloudflare-workers.d.ts`, devDependency
+`wrangler`).
 
 **Contexto original da missão:** roadmap presumia ZimaOS self-hosted rodando
 faster-whisper via Docker, com decisão de provedor já tomada. Duas
@@ -363,6 +375,95 @@ como 100% concluída até essa validação acontecer.**
 - Parei e perguntei ao usuário antes de assumir qualquer decisão de infra
   (provedor, rede, o que fazer com o código de UI pré-existente) —
   guardrail explícito da própria missão.
+- Diff isolado ao escopo da missão (`git status`/`git diff --stat`
+  revisados antes do commit).
+
+---
+
+### GF-004 v2 — Entrada de voz via Lovable AI Gateway
+**Status:** ✅ Concluído (24/07/2026, Claude)
+
+**Contexto:** depois de commitar a v1 (binding Cloudflare Workers AI),
+pedi pra Lovable confirmar se o binding `AI` tinha sido provisionado no
+Worker publicado. Investigação conjunta (Claude + Lovable + Claude com
+acesso ao Cloudflare pessoal do usuário) descobriu que `gerentefina.
+fguerra.ia.br` roda inteiramente na infraestrutura da Lovable (header
+`Server: cloudflare` + `CF-RAY`, mas não é a conta Cloudflare do usuário —
+confirmado via DNS: nenhum dos 2 projetos da conta pessoal corresponde a
+esse domínio). A própria Lovable admitiu não ter garantia de que o
+`wrangler.jsonc` do repo é mesclado no Worker real, e que bindings
+especiais exigem provisionamento manual da equipe dela, sem UI hoje pra
+isso — ou seja, não havia caminho confiável pra fechar a v1. Perguntada
+pelo formato exato de transcrição via AI Gateway (não documentado
+publicamente, e o único precedente no repo — `pdf-statement.functions.ts`
+— manda texto já extraído, não áudio binário), a Lovable trouxe o
+formato oficial da plataforma (endpoint dedicado, campos do multipart,
+mapeamento de erros).
+
+**O que foi feito:**
+- `src/services/voice.functions.ts` **reescrito**: remove
+  `cloudflare:workers`/`env.AI`; monta `FormData` (`file` + `model:
+  "openai/gpt-4o-mini-transcribe"`) e chama `POST
+  https://ai.gateway.lovable.dev/v1/audio/transcriptions` com
+  `Authorization: Bearer $LOVABLE_API_KEY` (sem `Content-Type` manual —
+  runtime define o boundary sozinho) — mesmo mecanismo já comprovado
+  funcionando neste app pro chat de texto e import de PDF. Mapeamento de
+  erro por status (402 créditos esgotados, 429 rate limit, 400 propaga
+  mensagem do provider, 5xx genérico) espelha exatamente o padrão já
+  usado em `chat.functions.ts`. Continua exigindo `resolveActiveUserId()`
+  — cada chamada consome créditos reais, não pode ficar aberta a
+  anônimo. Schema Zod ganhou `audio_mime` (enum dos 4 formatos reais que
+  MediaRecorder produz) pra montar a extensão certa do arquivo.
+- `src/routes/_app.chat.tsx`: `MediaRecorder` agora detecta o mimeType
+  suportado via `MediaRecorder.isTypeSupported` (Chrome/Firefox → webm,
+  Safari → mp4) — corrige um bug latente da v1, que gravava sem
+  `mimeType` explícito e etiquetava o Blob como `audio/webm` fixo
+  (mentiria sobre o formato real no Safari). Guarda de blob < 2KB antes
+  de subir pro servidor (evita gastar crédito com gravação vazia/mic
+  mudo). **Correção de comportamento:** a v1 mandava a transcrição direto
+  pro `handleSend` (enviava sozinho); v2 concatena ao input existente
+  (nunca apaga o que o usuário já tinha digitado) e não envia
+  automaticamente — corrige uma divergência da própria missão original
+  (GF-004.md pedia exatamente isso) que passou despercebida na v1.
+- `src/lib/audio/voice-transcription.ts`: ganhou `MIN_RECORDING_BYTES`
+  (2KB) e o tipo `AudioMimeType` compartilhado entre cliente e server
+  function — `base64ToBytes`/`validateAudioBytes`/`MAX_AUDIO_BYTES`/
+  `MAX_RECORDING_SECONDS` continuam iguais (provider-agnósticos).
+- **Código morto removido:** `wrangler.jsonc` (só existia pro binding
+  `AI`, virou vazio de conteúdo relevante), `src/types/cloudflare-
+  workers.d.ts` (só tipava `env.AI`), devDependency `wrangler` do
+  `package.json`, referência a `worker-configuration.d.ts` no `.gitignore`
+  e no comentário do `tsconfig.json`, exclusões `wrangler`/`miniflare` no
+  `bunfig.toml` (adicionadas automaticamente pelo bot da Lovable pra
+  viabilizar a v1, sem mais função agora). `bun.lock` não foi editado à
+  mão (sem `bun` disponível nesta sessão para regenerar com segurança) —
+  fica pro próximo `bun install` da Lovable reconciliar.
+- `AGENTS.md` e `construcao.md` atualizados: microfone deixa de aparecer
+  como placeholder/pendência, marcado como implementado via AI Gateway.
+
+**Verificação:** `tsc --noEmit` limpo, `npm run lint` sem problemas novos
+(só ruído pré-existente de CRLF, mesmo baseline de antes — confirmado
+comparando contagem de erros contra a versão commitada), `npm test`
+127/127 (testes de `voice-transcription.ts` continuam válidos, sem teste
+de rede novo — handler fino, integração real exige chave viva).
+`vite build` limpo, confirmado que o `wrangler.json` gerado não tem mais
+o binding `ai`. **Transcrição real ponta a ponta não foi testada nesta
+sessão** — mesma limitação de sempre (sem como autenticar no ambiente
+publicado nem simular microfone real daqui), mas a confiança é muito
+maior que na v1: o mecanismo (`LOVABLE_API_KEY` + `ai.gateway.lovable.
+dev`) já está comprovadamente funcionando em produção para outras duas
+features deste mesmo app (chat de texto e import de PDF), ao contrário
+do binding Workers AI que nunca chegou a ser confirmado.
+
+**Guardrails observados:**
+- Não assumi o formato da chamada de transcrição sem confirmação — a
+  Lovable tem knowledge oficial da própria plataforma que eu não tinha
+  como adivinhar corretamente (endpoint dedicado, multipart, mapeamento
+  de erro).
+- Revisei o plano completo da Lovable antes de implementar (não apenas
+  aceitei): verifiquei a alegação de que a diretriz de concatenação
+  vinha do `AGENTS.md` (não vinha — está no `construcao.md`, atribuição
+  errada mas conteúdo real) antes de confiar nela.
 - Diff isolado ao escopo da missão (`git status`/`git diff --stat`
   revisados antes do commit).
 
@@ -460,8 +561,11 @@ real já foi validada direto no banco, o que resta é só clique de UI.
 
 Ordem sugerida (ajustável a qualquer momento):
 
-1. **Validar a GF-004 ponta a ponta** — testar o microfone/transcrição no
-   ambiente publicado (sem isso, a missão não está de fato fechada).
+1. **Validar a GF-004 v2 ponta a ponta** — testar o microfone/transcrição
+   em `gerentefina.fguerra.ia.br/chat` autenticado (sem isso, a missão não
+   está de fato fechada). Confiança alta — mecanismo já comprovado em
+   produção pra outras features deste app — mas nunca testado com áudio
+   real de verdade.
 2. Avisar a Lovable para remover "MCP/OAuth" do roadmap dela.
 3. Open Finance real via Pluggy (hoje só simulação manual).
 4. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
@@ -487,5 +591,5 @@ Ordem sugerida (ajustável a qualquer momento):
 ---
 
 _Documento vivo — atualizar a cada missão concluída, sem renumerar as
-anteriores. Última revisão: 24/07/2026 (estado após GF-005 — fila de
+anteriores. Última revisão: 24/07/2026 (estado após GF-004 v2 — fila de
 pendências acima conferida e atual nesta data)._

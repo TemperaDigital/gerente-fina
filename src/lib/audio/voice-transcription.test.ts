@@ -19,7 +19,7 @@ describe("base64ToBytes — decodifica áudio recebido do navegador", () => {
   });
 });
 
-describe("validateAudioBytes — checagens antes de chamar o Workers AI", () => {
+describe("validateAudioBytes — checagens antes de chamar o Lovable AI Gateway", () => {
   it("rejeita áudio vazio", () => {
     expect(validateAudioBytes(new Uint8Array(0))).toMatch(/vazio/i);
   });

@@ -1,10 +1,5 @@
 {
   "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "eslint.config.js"],
-  // worker-configuration.d.ts (gerado por `wrangler types`) NÃO entra aqui de
-  // propósito: ele redefine globais (Response, Request, fetch...) com os
-  // tipos do runtime Cloudflare Workers, que conflitam com os tipos DOM usados
-  // pelo resto do app (cliente React). O binding AI é declarado localmente e
-  // de forma mínima em src/types/cloudflare-workers.d.ts.
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",

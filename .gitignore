@@ -19,8 +19,6 @@ dist-ssr
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
-# Gerado por `wrangler types` — não usado no tsconfig (ver src/types/cloudflare-workers.d.ts)
-worker-configuration.d.ts
 
 # PDFs reais usados para testar a extração da Fase C (importador) — nunca commitar
 test-fixtures/

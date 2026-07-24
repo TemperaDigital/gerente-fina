@@ -16,7 +16,17 @@
       "Bash(git show *)",
       "Bash(rm src/routes/_app.installments.orig.tsx)",
       "Bash(git check-ignore *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git merge *)",
+      "WebFetch(domain:gerentefina.fguerra.ia.br)",
+      "Bash(curl -sSI https://gerentefina.fguerra.ia.br/ --max-time 15)",
+      "WebSearch",
+      "Bash(npm uninstall *)",
+      "Bash(bun --version)",
+      "Bash(cd \"d:/Nuvem/guerradriver/Trabalho_local/GitHub/gerente-fina-git\" && git show HEAD:src/routes/_app.chat.tsx > /tmp/chat_orig2.tsx *)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }

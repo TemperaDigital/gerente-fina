@@ -73,10 +73,13 @@ respeitar esta malha:
 ### 2.2 Core Inteligente e Conversacional
 - `/chat` (Chat com Gerente Fina): Interface estilo ChatGPT. Balões de chat
   distinguindo usuário e IA, campo inferior de texto e botão de microfone
-  (Whisper UI) para comandos e lançamentos de voz. **Tool calling real já
-  funcional e validado em uso** (criar lançamento, consultar por
-  período/categoria, relatórios); **captura de voz via Whisper ainda não
-  implementada** — o botão de microfone é placeholder visual.
+  para comandos e lançamentos de voz. **Tool calling real já funcional e
+  validado em uso** (criar lançamento, consultar por período/categoria,
+  relatórios); **captura de voz implementada (GF-004 v2)** via Lovable AI
+  Gateway (`openai/gpt-4o-mini-transcribe`, endpoint
+  `/v1/audio/transcriptions`) — texto transcrito é concatenado ao input
+  existente, nunca substitui o que o usuário já digitou, e não envia
+  sozinho (fica pra revisão antes de confirmar).
 
 ### 2.3 Núcleo Operacional de Lançamentos
 - `/transactions` (Lista de Lançamentos): Tabela consolidada com paginação e

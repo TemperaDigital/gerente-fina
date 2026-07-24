@@ -297,7 +297,7 @@ Todas com prefixo `_app/` exceto auth pública.
 | `/forgot-password`        | Implementada   | Recuperação por e-mail.                                                      |
 | `/reset-password`         | Implementada   | Fluxo pós-e-mail.                                                            |
 | `/dashboard`              | Implementada   | KPIs, modal de despesas, 3 blocos de contas/cartões, materialização auto.    |
-| `/chat`                   | Implementada   | Lovable AI Gateway + `record_transaction`; **voz (Whisper) pendente**.       |
+| `/chat`                   | Implementada   | Lovable AI Gateway + `record_transaction`; voz via AI Gateway (GF-004 v2).   |
 | `/transactions`           | Implementada   | Filtros na URL, seleção múltipla, review queue, importar/exportar CSV.       |
 | `/transactions/new`       | Implementada   | Pílulas + projeção de fatura + accordions.                                   |
 | `/transactions/edit/:id`  | Implementada   | Retificação atributiva pura.                                                 |
@@ -321,9 +321,13 @@ Todas com prefixo `_app/` exceto auth pública.
 1. **MCP / OAuth** — decisão pendente da Missão 21 (OAuth por usuário
    recomendado; público desaconselhado). Sem isso, não há integração de
    agente externa segura.
-2. **Entrada de voz no `/chat`** — o workspace-knowledge exige captura via
-   MediaRecorder + Whisper com concatenação (nunca limpar input prévio).
-   Ainda não implementada.
+2. ~~**Entrada de voz no `/chat`**~~ — **implementada (GF-004 v2)**: captura
+   via MediaRecorder + transcrição pelo Lovable AI Gateway
+   (`openai/gpt-4o-mini-transcribe`), com concatenação ao input existente
+   (nunca limpa o que já estava digitado), como exigido aqui. v1 (binding
+   Cloudflare Workers AI) foi abandonada — sem garantia de que o Worker
+   gerenciado pela Lovable recebe bindings especiais provisionados a
+   partir do repo.
 3. **Import assíncrono** — o workspace-knowledge exige responder HTTP 202
    e delegar carga para Edge Functions com status `syncing`. Hoje o
    processamento é síncrono e pode dar timeout em extratos grandes.

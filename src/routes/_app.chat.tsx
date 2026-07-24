@@ -52,7 +52,12 @@ import {
   type ChatThreadDTO,
 } from "@/services/chat.functions";
 import { transcribeVoiceMessage } from "@/services/voice.functions";
-import { MAX_RECORDING_SECONDS, formatElapsedSeconds } from "@/lib/audio/voice-transcription";
+import {
+  MAX_RECORDING_SECONDS,
+  MIN_RECORDING_BYTES,
+  formatElapsedSeconds,
+  type AudioMimeType,
+} from "@/lib/audio/voice-transcription";
 import { cn } from "@/lib/utils";
 
 interface Message {
@@ -182,6 +187,7 @@ function ChatPage() {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recordingMimeRef = useRef<AudioMimeType>("audio/webm");
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -318,10 +324,23 @@ function ChatPage() {
     }
   }
 
+  /** Chrome/Firefox gravam webm; Safari não suporta webm e grava mp4. */
+  function detectRecordingMimeType(): AudioMimeType {
+    const candidates: AudioMimeType[] = ["audio/webm", "audio/mp4", "audio/wav", "audio/mpeg"];
+    for (const type of candidates) {
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported?.(type)) {
+        return type;
+      }
+    }
+    return "audio/webm";
+  }
+
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const mimeType = detectRecordingMimeType();
+      recordingMimeRef.current = mimeType;
+      const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
@@ -332,7 +351,11 @@ function ChatPage() {
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         clearRecordingTimer();
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const blob = new Blob(audioChunksRef.current, { type: recordingMimeRef.current });
+        if (blob.size < MIN_RECORDING_BYTES) {
+          toast.error("Não capturei nada, tente falar mais perto do microfone.");
+          return;
+        }
         await transcribeAudio(blob);
       };
 
@@ -384,10 +407,15 @@ function ChatPage() {
     toast.loading("Transcrevendo áudio...", { id: "whisper" });
     try {
       const audio_base64 = await blobToBase64(blob);
-      const result = await transcribeVoiceMessage({ data: { audio_base64 } });
+      const result = await transcribeVoiceMessage({
+        data: { audio_base64, audio_mime: recordingMimeRef.current },
+      });
       toast.dismiss("whisper");
       toast.success("Áudio transcrito!");
-      handleSend(result.text);
+      // Concatena ao que já estava digitado — nunca substitui/apaga o input
+      // do usuário (construcao.md linha 324-325), e não envia sozinho: fica
+      // no campo pra revisão antes de confirmar.
+      setInput((prev) => (prev.trim() ? `${prev.trim()} ${result.text}` : result.text));
     } catch (err: unknown) {
       toast.dismiss("whisper");
       toast.error(
