@@ -679,9 +679,12 @@ documentado aqui em vez de escondido. `tsc --noEmit` limpo (arquivos
 `e2e/**` e `playwright.config.ts` adicionados ao `include` do
 `tsconfig.json`), `npm run lint` sem problemas, `npm test` (vitest)
 inalterado — 140/140, `e2e/*.spec.ts` corretamente fora do escopo do
-vitest (`vitest.config.ts` já restringe a `src/**`). CI ainda não foi
-observado rodando de verdade no GitHub (só configurado nesta sessão) —
-próximo push/PR vai confirmar.
+vitest (`vitest.config.ts` já restringe a `src/**`). **CI confirmado
+rodando de verdade no GitHub**: push deste commit disparou o workflow,
+que passou (`✓ success`, job `e2e` em 1m7s —
+https://github.com/TemperaDigital/gerente-fina/actions/runs/30089795475),
+lendo os 3 secrets configurados e rodando a suíte completa contra um
+`vite dev` limpo no runner.
 
 **Guardrails observados:**
 - Corrigi o gap de segurança do `.gitignore` (`.env` não ignorado) antes
@@ -715,21 +718,18 @@ Reorganizada por tipo de trabalho restante, a pedido do usuário
    upload de PDF de verdade).
 3. Testar manualmente no browser o botão "Pagar parcela" de loans
    (GF-005) — lógica já validada direto no banco, falta só o clique real.
-4. Confirmar que o CI da GF-007 (`.github/workflows/e2e.yml`) roda
-   verde no próximo push/PR — configurado mas ainda não observado
-   executando de verdade no GitHub.
 
 ### B) Alteração de código/estrutura
 
-5. Open Finance real via Pluggy (hoje só simulação manual).
-6. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
+4. Open Finance real via Pluggy (hoje só simulação manual).
+5. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
    estado atual (`AGENTS.md` já corrigido).
-7. Restore de backup > 5MB (hoje carrega tudo em memória).
-8. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
+6. Restore de backup > 5MB (hoje carrega tudo em memória).
+7. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
    manual/fora do app, fora do escopo da GF-005.
-9. Ampliar a suíte E2E (GF-007) pra mais fluxos críticos conforme surgir
+8. Ampliar a suíte E2E (GF-007) pra mais fluxos críticos conforme surgir
    necessidade — hoje cobre só login/guard/dashboard/lançamentos.
-10. **Investigar e resolver a dependência de `LOVABLE_API_KEY`** —
+9. **Investigar e resolver a dependência de `LOVABLE_API_KEY`** —
     rebaixada explicitamente pelo usuário (24/07/2026) para o último item
     da fila, de propósito: é a tarefa mais delicada (mexe na independência
     da plataforma Lovable, usada hoje pelo chat, PDF import e transcrição
