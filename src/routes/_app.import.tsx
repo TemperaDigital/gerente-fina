@@ -546,6 +546,12 @@ function ImportPage() {
       setPdfPendingFile(null);
       setPdfPasswordWrong(false);
 
+      if (result.truncated) {
+        toast.warning(
+          "Este PDF é muito longo — só o começo do documento foi enviado pra IA. " +
+            "Lançamentos das últimas páginas podem não ter sido capturados. Confira o total com atenção.",
+        );
+      }
       if (result.skipped_count && result.skipped_count > 0) {
         toast.info(
           `${result.skipped_count} lançamento(s) ignorado(s) por data/valor incompatível com o formato detectado.`,

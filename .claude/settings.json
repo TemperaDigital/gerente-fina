@@ -24,7 +24,8 @@
       "Bash(npm uninstall *)",
       "Bash(bun --version)",
       "Bash(cd \"d:/Nuvem/guerradriver/Trabalho_local/GitHub/gerente-fina-git\" && git show HEAD:src/routes/_app.chat.tsx > /tmp/chat_orig2.tsx *)",
-      "Bash(grep -n -A 8 \"^- \\\\`/chat\\\\`\" AGENTS.md)"
+      "Bash(grep -n -A 8 \"^- \\\\`/chat\\\\`\" AGENTS.md)",
+      "Bash(rm src/lib/supabase/pdf-statement.orig.functions.ts)"
     ],
     "additionalDirectories": [
       "\\tmp"

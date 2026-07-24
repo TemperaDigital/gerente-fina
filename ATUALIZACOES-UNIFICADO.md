@@ -560,7 +560,70 @@ real já foi validada direto no banco, o que resta é só clique de UI.
 
 ---
 
-## Pendências conhecidas — fila para virar GF-006, GF-007...
+### GF-006 — Validação do PDF import: risco de timeout + achado real (truncamento silencioso)
+**Status:** ✅ Concluído (24/07/2026, Claude)
+
+**Contexto:** pendência da GF-001 — confirmar se `extractPdfStatement`
+(única chamada de IA, não chunked como o CSV/OFX) precisa do mesmo
+tratamento de chunking.
+
+**Conclusão sobre chunking — NÃO precisa:** o código já tinha, desde
+antes desta sessão, as duas proteções que motivaram o redesenho do
+CSV/OFX na GF-001: (1) truncamento do texto em `MAX_CHARS = 18_000`
+antes de mandar pra IA (evita crescer sem limite com PDFs de muitas
+páginas), e (2) `AbortController` com timeout explícito de 30s na
+chamada `fetch`, com mensagem de erro específica
+("Tempo esgotado ao consultar a IA..."). O problema original da GF-001
+era 10 chamadas de IA SEQUENCIAIS sem timeout individual dentro de uma
+única invocação — aqui é uma chamada ÚNICA, já limitada em tamanho e
+tempo. Risco de timeout já era baixo, como a nota original da GF-001
+antecipava.
+
+**Achado real durante a investigação (corrigido):** o truncamento em
+18.000 caracteres acontecia **em silêncio** — nenhum sinal chegava ao
+cliente quando um PDF longo tinha o final do texto cortado antes de ir
+pra IA, ou seja, lançamentos de páginas finais podiam sumir sem nenhum
+aviso. Isso contraria o princípio já documentado do próprio projeto
+(`docs/PDF_IMPORT_TEST_SCRIPT.md`, Cenário D: "falhas devem ser claras,
+nunca silenciosas ou genéricas") — aqui nem é bem uma falha, é pior:
+um resultado parcial que parece completo.
+
+**O que foi feito:**
+- `src/lib/supabase/pdf-statement.functions.ts`: `PdfExtractResultDTO`
+  ganhou `truncated?: boolean`, setado quando o texto extraído excede
+  `MAX_CHARS`.
+- `src/routes/_app.import.tsx`: novo `toast.warning` quando
+  `result.truncated`, avisando que só o começo do PDF foi enviado pra IA
+  e que lançamentos das últimas páginas podem ter ficado de fora —
+  mesmo padrão já usado pra `skipped_count`.
+- `src/lib/finance/pdf-statement.test.ts` (novo — zero cobertura antes
+  desta sessão): 13 testes cobrindo `anchorTransactionYear`
+  (ancoragem de ano cruzando virada de ano-novo, validação de
+  mês/dia/data-âncora, ano bissexto) e `validatePdfExtraction`
+  (payload válido + normalização, e cada rejeição de campo inválido
+  com mensagem específica).
+
+**Verificação:** `tsc --noEmit` limpo, `npm run lint` sem problemas
+novos (confirmado comparando contra a versão commitada — mesma
+contagem de ruído pré-existente de CRLF/indentação em
+`_app.import.tsx`, 241 antes e depois), `npm test` 140/140 (13 testes
+novos). **Validação manual real com PDFs de verdade
+(`docs/PDF_IMPORT_TEST_SCRIPT.md`) não foi executada nesta sessão** —
+exige `LOVABLE_API_KEY` viva e upload real de arquivo, mesma limitação
+de sempre. A conclusão sobre chunking é uma análise de código (limites
+já existentes no timeout/truncamento), não um teste de carga real;
+fica como validação complementar se algum dia se confirmar timeout em
+uso real com PDF muito grande.
+
+**Guardrails observados:**
+- Não assumi que "precisa de chunking" nem que "não precisa" sem ler o
+  código primeiro — a resposta veio de analisar o que já existia.
+- Diff isolado ao achado real (truncamento silencioso) + testes; não
+  toquei no ruído pré-existente de `_app.import.tsx`.
+
+---
+
+## Pendências conhecidas — fila para virar GF-007, GF-008...
 
 Ordem sugerida (ajustável a qualquer momento):
 
@@ -572,21 +635,21 @@ Ordem sugerida (ajustável a qualquer momento):
 2. Open Finance real via Pluggy (hoje só simulação manual).
 3. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
    estado atual (`AGENTS.md` já corrigido).
-4. Validação end-to-end do PDF import — inclui confirmar se
-   `extractPdfStatement` (chamada única de IA, não chunked pela GF-001)
-   precisa do mesmo tratamento se se confirmar timeout em PDFs grandes.
-5. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
+4. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
    já instalados como devDependency (GF-002); falta configurar a suíte
    de verdade (login real, fixtures, CI).
-6. Testar manualmente no browser o fluxo de import com a barra de
+5. Testar manualmente no browser o fluxo de import com a barra de
    progresso/chunking da GF-001 (implementado e com `tsc`/lint/testes
-   limpos, mas sem validação visual em uso real ainda).
-7. Restore de backup > 5MB (hoje carrega tudo em memória).
-8. Testar manualmente no browser o botão "Pagar parcela" de loans
+   limpos, mas sem validação visual em uso real ainda) — inclui rodar o
+   roteiro real de PDF (`docs/PDF_IMPORT_TEST_SCRIPT.md`), já que a
+   GF-006 só analisou o código (sem `LOVABLE_API_KEY` viva pra testar
+   upload de PDF de verdade).
+6. Restore de backup > 5MB (hoje carrega tudo em memória).
+7. Testar manualmente no browser o botão "Pagar parcela" de loans
    (GF-005) — lógica já validada direto no banco, falta só o clique real.
-9. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
+8. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
    manual/fora do app, fora do escopo da GF-005.
-10. **Investigar e resolver a dependência de `LOVABLE_API_KEY`** —
+9. **Investigar e resolver a dependência de `LOVABLE_API_KEY`** —
     rebaixada explicitamente pelo usuário (24/07/2026) para o último item
     da fila, de propósito: é a tarefa mais delicada (mexe na independência
     da plataforma Lovable, usada hoje pelo chat, PDF import e transcrição
@@ -596,5 +659,5 @@ Ordem sugerida (ajustável a qualquer momento):
 ---
 
 _Documento vivo — atualizar a cada missão concluída, sem renumerar as
-anteriores. Última revisão: 24/07/2026 (estado após GF-004 v2 — fila de
+anteriores. Última revisão: 24/07/2026 (estado após GF-006 — fila de
 pendências acima conferida e atual nesta data)._

@@ -52,6 +52,8 @@ export interface PdfExtractResultDTO {
   statement_type?: PdfStatementType;
   /** Lançamentos descartados por data/valor incompatível com o formato detectado. */
   skipped_count?: number;
+  /** true quando o texto extraído passou de MAX_CHARS e foi cortado antes de ir pra IA — pode ter perdido lançamentos das últimas páginas. */
+  truncated?: boolean;
 }
 
 const SYSTEM_PROMPT = `Você lê o texto extraído de um extrato bancário ou fatura de cartão de
@@ -127,8 +129,11 @@ export const extractPdfStatement = createServerFn({ method: "POST" })
 
     // Protege o contexto da IA: extratos muito longos (muitos meses/páginas)
     // são cortados — melhor um resultado parcial do que estourar o limite.
+    // `truncated` avisa o cliente (nunca cortar em silêncio — lançamentos das
+    // últimas páginas podem ter ficado de fora).
     const MAX_CHARS = 18_000;
-    const textForAI = text.length > MAX_CHARS ? text.slice(0, MAX_CHARS) : text;
+    const truncated = text.length > MAX_CHARS;
+    const textForAI = truncated ? text.slice(0, MAX_CHARS) : text;
 
     // Timeout explícito: sem isso, uma trava no gateway prenderia a requisição
     // indefinidamente e o usuário só veria um erro genérico de rede no browser.
@@ -266,5 +271,6 @@ export const extractPdfStatement = createServerFn({ method: "POST" })
       rows,
       statement_type: extraction.statement_type,
       skipped_count: skippedCount,
+      truncated,
     };
   });
