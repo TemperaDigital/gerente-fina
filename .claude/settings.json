@@ -12,7 +12,10 @@
       "Bash(pkill -f \"vite dev\")",
       "Bash(env)",
       "Bash(grep -n \"supabase\\\\.\\\\|getTransactionById\\\\|updateTransactionEntry\\\\|useLoaderData\\\\|params\\\\.\" src/routes/_app.transactions.edit.\\\\$id.tsx | head -20)",
-      "Read(//home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/**)"
+      "Read(//home/td-fguerra/Documentos/GitHub/gerente-fina/src/routes/**)",
+      "Bash(git show *)",
+      "Bash(rm src/routes/_app.installments.orig.tsx)",
+      "Bash(git check-ignore *)"
     ]
   }
 }

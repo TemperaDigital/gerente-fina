@@ -2,16 +2,24 @@
  * Server Functions — Installments & Loans.
  * Lê compras parceladas com progresso e empréstimos/financiamentos/consórcios.
  *
+ * Vínculo loans <-> transactions (GF-005, migration 0022): `pay_loan_installment`
+ * é uma RPC atômica (mesmo padrão de `pay_credit_card_invoice`, migration 0011)
+ * que cria a transação de despesa E incrementa `installments_paid` (virando
+ * `paid_off` ao quitar) na mesma transação de banco, com idempotência via
+ * `_idempotency_key`. Cadastro de loan (criação) continua manual/fora do
+ * app — só o pagamento de parcela foi vinculado.
+ *
  * Exclusão (Missão 12): parcelamentos e loans usam mecanismos DIFERENTES,
  * porque a estrutura de dados subjacente é diferente:
  *  - installment_purchases tem transactions de fato vinculadas via
  *    installment_items.transaction_id — excluir o cabeçalho exige apagar
  *    essas transactions também, de forma atômica (RPC delete_installment_purchase,
  *    migration 0015 — mesma disciplina de pay_credit_card_invoice).
- *  - loans NÃO tem nenhuma coluna de vínculo com transactions (nem loan_id,
- *    nem recurrence_id) e não existe função de criação/pagamento para loans
- *    no app hoje (só listagem) — não há nada para arrastar junto, então
- *    excluir um loan é um DELETE simples de uma linha, sem RPC.
+ *  - loans agora PODE ter transactions vinculadas (transactions.loan_id,
+ *    migration 0022), mas via `on delete set null` (mesma semântica de
+ *    category_id) — excluir um loan não apaga o histórico real de dinheiro
+ *    que já saiu, só desvincula a tag. Por isso `deleteLoan` continua sendo
+ *    um DELETE simples de uma linha, sem RPC de arrasto.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -134,6 +142,78 @@ export const listLoans = createServerFn({ method: "GET" }).handler(async (): Pro
 });
 
 // ---------------------------------------------------------------------------
+// payLoanInstallment — registra o pagamento de UMA parcela de empréstimo:
+// cria a despesa vinculada (transactions.loan_id) e avança installments_paid
+// atomicamente via RPC `pay_loan_installment` (migration 0022). A RPC é
+// security definer sem GRANT para authenticated/anon/public (disciplina das
+// migrations 0019/0021) — por isso a posse do loan e da categoria são
+// validadas AQUI, na camada TypeScript, antes de chamar a função.
+// ---------------------------------------------------------------------------
+const PayLoanInstallmentInput = z.object({
+  loan_id: z.string().uuid(),
+  category_id: z.string().uuid(),
+  amount: z.string().regex(/^\d+(\.\d{1,2})?$/),
+  occurred_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  description: z.string().trim().min(1).max(240),
+  idempotency_key: z.string().uuid().optional(),
+});
+
+export interface PayLoanInstallmentResultDTO {
+  transaction_id: string;
+  installments_paid: number;
+  loan_status: LoanDTO["status"];
+  was_duplicate: boolean;
+}
+
+export const payLoanInstallment = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => PayLoanInstallmentInput.parse(input))
+  .handler(async ({ data }): Promise<PayLoanInstallmentResultDTO> => {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/client.server");
+    const sb = getSupabaseAdmin();
+    const userId = await resolveActiveUserId();
+
+    const { data: loan, error: loanErr } = await sb
+      .from("loans")
+      .select("id")
+      .eq("id", data.loan_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (loanErr) throw new Error(loanErr.message);
+    if (!loan) throw new Error("Empréstimo não encontrado ou não pertence ao usuário.");
+
+    const { data: category, error: catErr } = await sb
+      .from("categories")
+      .select("id")
+      .eq("id", data.category_id)
+      .eq("user_id", userId)
+      .eq("kind", "expense")
+      .maybeSingle();
+    if (catErr) throw new Error(catErr.message);
+    if (!category) {
+      throw new Error("Categoria inválida — precisa ser uma categoria de despesa do usuário.");
+    }
+
+    const { data: rpcResult, error } = await sb.rpc("pay_loan_installment", {
+      _loan_id: data.loan_id,
+      _category_id: data.category_id,
+      _amount: data.amount,
+      _occurred_on: data.occurred_on,
+      _description: data.description,
+      _notes: null,
+      _idempotency_key: data.idempotency_key ?? null,
+    });
+    if (error) throw new Error(error.message);
+    const result = rpcResult?.[0];
+    if (!result) throw new Error("Falha ao registrar pagamento.");
+    return {
+      transaction_id: result.transaction_id,
+      installments_paid: result.installments_paid,
+      loan_status: result.loan_status,
+      was_duplicate: result.was_duplicate,
+    };
+  });
+
+// ---------------------------------------------------------------------------
 // deleteInstallmentPurchase — exclusão TOTAL (Missão 12): apaga o cabeçalho
 // E qualquer transaction ainda vinculada, atomicamente via RPC (migration
 // 0015). installment_items é removido em cascata pelo próprio banco.
@@ -173,9 +253,10 @@ export const deleteInstallmentPurchase = createServerFn({ method: "POST" })
   });
 
 // ---------------------------------------------------------------------------
-// deleteLoan — DELETE simples: `loans` não tem nenhuma transaction vinculada
-// no schema atual (sem loan_id/recurrence_id em transactions, sem função de
-// pagamento), então não há nada para arrastar junto — não precisa de RPC.
+// deleteLoan — DELETE simples: `transactions.loan_id` é `on delete set null`
+// (migration 0022, mesma semântica de category_id) — apagar o loan não
+// apaga transactions já pagas vinculadas a ele, só desvincula a tag. Por
+// isso não precisa de RPC de arrasto como `delete_installment_purchase`.
 // ---------------------------------------------------------------------------
 export const deleteLoan = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => IdInput.parse(input))

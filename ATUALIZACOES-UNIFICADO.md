@@ -96,14 +96,15 @@ para rastreabilidade), e a partir de agora usamos um prefixo novo — **`GF-`**
   rotas e às missões concluídas (não verificado nesta sessão) —
   `AGENTS.md` já reflete as 17 rotas reais e o estado atual (GF-001,
   GF-002).
-- `src/services/recurrences.functions.ts` é código morto confirmado
-  (zero imports).
+- ~~`src/services/recurrences.functions.ts` é código morto confirmado~~ —
+  **removido em GF-005** (ver missão abaixo).
 - ~~Bug de tipagem latente descoberto na sessão de 23/07/2026 (GF-002)~~ —
   **corrigido em GF-003** (ver missão abaixo).
 - Dependência de `LOVABLE_API_KEY` no chat/import ainda não investigada
   — contradiz o objetivo de reduzir dependência da plataforma Lovable.
-- `loans` (empréstimos/financiamentos/consórcios) sem vínculo com
-  `transactions`.
+- ~~`loans` (empréstimos/financiamentos/consórcios) sem vínculo com
+  `transactions`~~ — **vinculado em GF-005** (pagamento de parcela; o
+  cadastro/criação de loan continua manual, fora de escopo).
 - Roadmap da Lovable lista "MCP/OAuth" como pendência de alta
   prioridade — **desatualizado**: o usuário já decidiu não configurar
   isso sem uma decisão de escopo deliberada. Remover do roadmap da
@@ -367,7 +368,95 @@ como 100% concluída até essa validação acontecer.**
 
 ---
 
-## Pendências conhecidas — fila para virar GF-005, GF-006...
+### GF-005 — Vincular loans a transactions + remover código morto
+**Status:** ✅ Concluído (23/07/2026, Claude)
+
+**Contexto:** duas pendências da fila, pedidas juntas. A segunda (remover
+`recurrences.functions.ts`) era trivial. A primeira ("vincular loans a
+transactions") acabou sendo bem maior do que o nome sugeria — descoberto
+antes de codar (parei e perguntei ao usuário, guardrail padrão): `loans`
+hoje só tem leitura e exclusão pela UI (`/installments`), nenhum cadastro
+nem forma de registrar pagamento — `installments_paid` era um contador
+manual solto, sem nenhuma transação real por trás, e `transactions` não
+tinha coluna `loan_id`. Usuário escolheu o escopo completo: schema +
+RPC de pagamento + botão na UI (não só a coluna, e não só documentar).
+
+**O que foi feito:**
+- `src/services/recurrences.functions.ts` **removido** — confirmado zero
+  imports no repo inteiro (`/agendamentos` usa `scheduled-items.functions.ts`
+  + `recurrence-materializer.functions.ts`, arquivos ativos e diferentes).
+  O arquivo morto ainda tinha um problema de segurança latente próprio
+  (`toggleRecurrenceActive`/`deleteRecurrence` sem filtro `user_id`) —
+  reforça que era mesmo código abandonado, não só não-usado.
+- **Migration 0022** (`transactions.loan_id`, nullable, `on delete set
+  null` — mesma semântica de `category_id`; check constraint exigindo
+  `kind='expense'` quando `loan_id` setado; índice de idempotência) +
+  RPC `pay_loan_installment` (mesmo padrão atômico de
+  `pay_credit_card_invoice`, migration 0011: trava a linha do loan,
+  insere a despesa e incrementa `installments_paid`/vira `paid_off` na
+  MESMA transação de banco, idempotência via `_idempotency_key`).
+  Segurança: `security definer` com `revoke execute` de
+  `public/anon/authenticated` **na mesma migration** (disciplina das
+  migrations 0019/0021 — não repetir o erro original), confirmado via
+  `information_schema.role_routine_grants` (só `service_role`/`postgres`).
+- **Migration 0023 (correção):** testei a RPC de verdade contra o banco
+  (não só tsc/lint) logo após aplicar a 0022 — a primeira chamada real
+  falhou com `column reference "installments_paid" is ambiguous"`
+  (colisão entre a coluna real de `loans` e a coluna de saída do
+  `RETURNS TABLE` de mesmo nome). Corrigido qualificando todas as
+  referências com alias (`l`/`t`) dentro do corpo da função. Mesmo
+  padrão do projeto de "achado numa migration, corrigido por uma nova"
+  (precedente: 0019 → 0021).
+- `src/services/installments.functions.ts`: `payLoanInstallment` — valida
+  posse do loan e da categoria (deve ser `kind='expense'` do próprio
+  usuário) na camada TypeScript ANTES de chamar a RPC (a função no banco
+  não recebe `user_id`, mesma disciplina de `deleteInstallmentPurchase`).
+  Comentário de `deleteLoan` atualizado (premissa antiga não é mais
+  verdadeira, mas o comportamento — DELETE simples — continua correto
+  graças ao `on delete set null`).
+- `src/routes/_app.installments.tsx`: botão "Pagar parcela" (ícone
+  `HandCoins`) em cada loan ativo com parcelas restantes — abre um
+  dialog com valor sugerido (`principal_amount / installments_count`,
+  editável), data (default hoje) e categoria de despesa; ao confirmar,
+  gera um `crypto.randomUUID()` como chave de idempotência e invalida
+  `installments`/`transactions`/`dashboard`. Toast diferencia "parcela
+  paga" de "empréstimo quitado".
+
+**Verificação (teste real contra o banco, não só tsc/lint — cláusula 14):**
+inseri um loan de teste (12x R$100, `installments_count=12`) e chamei a
+RPC diretamente via SQL: (1) pagamento normal cria a transação e avança
+`installments_paid`; (2) a MESMA `_idempotency_key` reenviada devolve a
+transação já existente sem duplicar (`was_duplicate=true`, contagem não
+avança); (3) ao chegar na 12ª parcela o loan vira `paid_off`
+automaticamente; (4) tentar pagar um loan `paid_off` é rejeitado com erro
+claro; (5) o check constraint bloqueia `loan_id` em transação que não seja
+`kind='expense'`. Todos os dados de teste foram removidos ao final (banco
+voltou ao estado anterior — 0 loans). `tsc --noEmit` limpo, `npm run lint`
+sem problemas novos, `npm test` 127/127 (sem testes novos — a lógica nova
+mora no banco, testada diretamente contra ele; não há lógica pura nova no
+TypeScript que justifique um teste unitário separado).
+
+**Fora do escopo (documentado, não esquecido):** cadastro de loan
+(criação) continua manual/fora do app — só o pagamento de parcela foi
+vinculado, como decidido com o usuário. Validação da UI (clicar o botão
+de verdade no browser) não foi feita nesta sessão — mesmo padrão de
+proporcionalidade já usado antes (GF-002/GF-003): a lógica de negócio
+real já foi validada direto no banco, o que resta é só clique de UI.
+
+**Guardrails observados:**
+- Parei e perguntei o escopo antes de tocar no banco (achado: tarefa
+  maior do que o nome sugeria).
+- Migration aplicada via MCP do Supabase (`apply_migration`), não SQL
+  solto — fica corretamente rastreada em
+  `supabase_migrations.schema_migrations`, evitando o problema de
+  tracking que already motivou uma consolidação inteira antes (ver seção
+  "Achados ainda sem correção" no topo deste documento).
+- Diff isolado ao escopo da missão (`git status`/`git diff --stat`
+  revisados antes do commit).
+
+---
+
+## Pendências conhecidas — fila para virar GF-006, GF-007...
 
 Ordem sugerida (ajustável a qualquer momento):
 
@@ -378,20 +467,22 @@ Ordem sugerida (ajustável a qualquer momento):
 4. Atualizar `PRD-GerenteFINA-IA.md` para refletir as 17 rotas reais e o
    estado atual (`AGENTS.md` já corrigido).
 5. Investigar e resolver a dependência de `LOVABLE_API_KEY`.
-6. Vincular `loans` a `transactions`.
-7. Remover `src/services/recurrences.functions.ts` (código morto).
-8. Retomar a limpeza da branch `feature/embed-tarefas-integration` /
+6. Retomar a limpeza da branch `feature/embed-tarefas-integration` /
    criação do repositório `fluxograma` (pausado, não esquecido).
-9. Validação end-to-end do PDF import — inclui confirmar se
+7. Validação end-to-end do PDF import — inclui confirmar se
    `extractPdfStatement` (chamada única de IA, não chunked pela GF-001)
    precisa do mesmo tratamento se se confirmar timeout em PDFs grandes.
-10. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
-    já instalados como devDependency (GF-002); falta configurar a suíte
-    de verdade (login real, fixtures, CI).
-11. Testar manualmente no browser o fluxo de import com a barra de
-    progresso/chunking da GF-001 (implementado e com `tsc`/lint/testes
-    limpos, mas sem validação visual em uso real ainda).
-12. Restore de backup > 5MB (hoje carrega tudo em memória).
+8. Testes E2E (Playwright) para fluxos críticos — Playwright + Chromium
+   já instalados como devDependency (GF-002); falta configurar a suíte
+   de verdade (login real, fixtures, CI).
+9. Testar manualmente no browser o fluxo de import com a barra de
+   progresso/chunking da GF-001 (implementado e com `tsc`/lint/testes
+   limpos, mas sem validação visual em uso real ainda).
+10. Restore de backup > 5MB (hoje carrega tudo em memória).
+11. Testar manualmente no browser o botão "Pagar parcela" de loans
+    (GF-005) — lógica já validada direto no banco, falta só o clique real.
+12. Considerar expor cadastro (criação) de loans pela UI — hoje ainda é
+    manual/fora do app, fora do escopo da GF-005.
 
 ---
 
