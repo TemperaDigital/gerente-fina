@@ -36,3 +36,10 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 2. Use `detect_changes_tool` for code review.
 3. Use `get_affected_flows_tool` to understand impact.
 4. Use `query_graph_tool` pattern="tests_for" to check coverage.
+
+### Ao iniciar qualquer tarefa neste repositório
+
+Antes de tocar em qualquer arquivo, rode `get_architecture_overview_tool`
+(ou `get_minimal_context_tool` para uma checagem rápida) para carregar
+contexto estrutural do projeto — não pule direto para a implementação
+sem entender onde a mudança se encaixa.
