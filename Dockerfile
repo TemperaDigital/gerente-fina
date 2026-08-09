@@ -8,8 +8,10 @@ FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
 # Instala dependencias primeiro (cache). O postinstall roda patch-package
-# (ver patches/nf3+0.3.18.patch — corrige bug de build do preset node-server).
+# (ver patches/nf3+0.3.18.patch — corrige bug de build do preset node-server),
+# entao a pasta patches/ precisa existir ANTES do npm ci.
 COPY package.json package-lock.json ./
+COPY patches ./patches
 RUN npm ci
 
 # Copia o restante e builda o TanStack Start no preset node-server.
