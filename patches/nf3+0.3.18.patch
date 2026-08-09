@@ -1,0 +1,13 @@
+diff --git a/node_modules/nf3/dist/_chunks/trace.mjs b/node_modules/nf3/dist/_chunks/trace.mjs
+index f4bd237..9131044 100644
+--- a/node_modules/nf3/dist/_chunks/trace.mjs
++++ b/node_modules/nf3/dist/_chunks/trace.mjs
+@@ -3,7 +3,7 @@ import { resolveModulePath } from "./libs/exsolve.mjs";
+ import { createRequire } from "node:module";
+ import * as fsp from "node:fs/promises";
+ import { access, readFile, writeFile } from "node:fs/promises";
+-import { nodeFileTrace } from "@vercel/nft";
++import pkg from "@vercel/nft"; const { nodeFileTrace } = pkg;
+ import semver from "semver";
+ var __defProp = Object.defineProperty;
+ var __exportAll = (all, no_symbols) => {
