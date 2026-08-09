@@ -699,6 +699,79 @@ lendo os 3 secrets configurados e rodando a suíte completa contra um
 
 ---
 
+### GF-008 — Clone local (ZimaOS), code-review-graph e deploy self-hosted
+**Status:** ✅ Concluído (09/08/2026, Claude Code via container SSH no ZimaOS)
+
+**Contexto:** usuário queria clonar o projeto no seu ZimaOS pessoal
+(self-hosted, fora da infraestrutura da Lovable) para trabalhar no
+repositório com apoio do Claude Code rodando localmente num container
+Docker dedicado.
+
+**Decisões tomadas com o usuário antes de codar:**
+- Projeto Supabase estava pausado (`INACTIVE`, plano free) — restaurado via
+  API mediante confirmação explícita antes de tocar em infraestrutura de
+  produção.
+- `LOVABLE_API_KEY` deixada **intencionalmente vazia** no `.env` local — o
+  usuário não tem acesso a essa chave e confirmou que é para ficar de fora
+  por ora (alinhado ao item 9 da fila de pendências abaixo).
+- Chave SSH de deploy do GitHub trocada: a chave em uso
+  (`github_deploy`, compartilhada com outro repositório,
+  `descentralizandotarefas`) só tinha permissão de leitura. Em vez de
+  habilitar escrita nela (o que daria escopo amplo demais), foi gerada uma
+  chave dedicada só para `gerente-fina` (`deploy_gerente_finna`, com
+  "Allow write access"), e outra equivalente para o `spc-deploy`
+  (`deploy_spc_1gpte_eb`) — revogação isolada por repositório.
+- Domínio da instância self-hosted decidido com o usuário para não colidir
+  com a produção: `gerentefina-dev.fguerra.ia.br` (produção real continua
+  em `gerentefina.fguerra.ia.br`, servida pela Lovable/Cloudflare Workers,
+  DNS gerenciado por ela).
+
+**O que foi feito:**
+- Container `claude-code` (o próprio ambiente do Claude Code no ZimaOS)
+  ganhou Python 3 + `pip` no `Dockerfile`, permanentemente, para suportar
+  o `code-review-graph`.
+- `code-review-graph` (CRG) instalado e commitado neste repositório e no
+  `spc-deploy` — grafo estrutural do código (Tree-sitter) exposto via MCP,
+  usado pelo Claude Code para navegação e revisão sem reler o repo inteiro
+  a cada tarefa. Testado de ponta a ponta nos dois projetos via VS Code
+  Remote-SSH (`get_architecture_overview_tool` respondendo com dados reais
+  do grafo).
+- **Bug de build corrigido:** o preset `node-server` do Nitro falhava com
+  `SyntaxError: Named export 'nodeFileTrace' not found` — bug de interop
+  CJS/ESM em `nf3` (dependência interna do Nitro) → `@vercel/nft`, cujo
+  export usa `Object.defineProperty` de um jeito que o `cjs-module-lexer`
+  do Node não detecta estaticamente. Corrigido com `patch-package`
+  (`patches/nf3+0.3.18.patch`), aplicado automaticamente via script
+  `postinstall` — necessário porque o preset padrão do
+  `@lovable.dev/vite-tanstack-config` é `cloudflare`, e o deploy
+  self-hosted precisa do preset `node-server`.
+- `Dockerfile` (multi-stage) + `docker-compose.yml` novos, para deploy
+  self-hosted independente da Lovable — container `gerente-finna-app` na
+  porta `3020`, sem banco local (Supabase continua 100% externo, projeto
+  `paxfjesglnaxaolvpgup`).
+- Publicado externamente via túnel Cloudflared já existente do usuário —
+  novo Public Hostname `gerentefina-dev.fguerra.ia.br` → `192.168.1.153:3020`
+  (mesmo padrão dos outros subdomínios self-hosted do usuário, sem passar
+  pelo Nginx Proxy Manager).
+
+**Verificação:** `HTTP 200` tanto localmente (`192.168.1.153:3020`) quanto
+publicamente (`https://gerentefina-dev.fguerra.ia.br/`), confirmado com
+`curl` depois do build e do deploy. `code-review-graph` confirmado
+funcional nos dois repositórios com uma consulta real (visão de
+arquitetura do `spc-deploy`, não só status "connected").
+
+**Guardrails observados:**
+- Nenhuma ação em infraestrutura compartilhada (rebuild do container,
+  restauração do Supabase, mudança de DNS/túnel) foi executada sem
+  confirmação explícita do usuário antes.
+- Chaves de deploy dedicadas por repositório em vez de reutilizar uma
+  chave de escopo mais amplo — revogação isolada preservada.
+- Produção (`gerentefina.fguerra.ia.br`, Lovable) não foi tocada; a
+  instância self-hosted vive num subdomínio e numa infraestrutura
+  totalmente separados.
+
+---
+
 ## Pendências conhecidas — fila para virar GF-008, GF-009...
 
 Reorganizada por tipo de trabalho restante, a pedido do usuário
