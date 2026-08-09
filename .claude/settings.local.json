@@ -54,5 +54,8 @@
     "additionalDirectories": [
       "/home/td-fguerra/Documentos/GitHub/gerente-fina/docs/migrations"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "code-review-graph"
+  ]
 }
