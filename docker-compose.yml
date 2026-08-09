@@ -1,0 +1,27 @@
+# =====================================================================
+# Gerente FINA — docker-compose (SOMENTE frontend/API TanStack Start)
+# Banco de dados e 100% externo (Supabase Cloud, projeto paxfjesglnaxaolvpgup).
+# Nao ha banco para subir aqui.
+# =====================================================================
+
+services:
+  gerente-finna:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gerente-finna:latest
+    container_name: gerente-finna-app
+    restart: unless-stopped
+    ports:
+      # host:container — porta 3020 livre conforme levantamento do ZimaOS
+      - "3020:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

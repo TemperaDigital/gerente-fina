@@ -1,0 +1,25 @@
+# Reinstalado dentro da imagem (npm ci roda no build stage)
+node_modules
+
+# Metadados de VCS e artefatos de build locais - nao pertencem ao contexto
+.git
+dist
+dist-ssr
+.output
+.vinxi
+.tanstack
+.nitro
+.wrangler
+.code-review-graph
+
+# Segredos e locais - injetados via env_file em runtime, nunca no build
+.env
+.env.local
+.env.*
+!.env.example
+
+# Logs, backups e residuos do editor
+*.log
+*.bak
+*.bak-*
+.DS_Store
