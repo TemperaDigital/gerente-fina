@@ -1,0 +1,12 @@
+{
+  "testCommand": "npx vitest run --reporter=tap",
+  "reporter": "tap",
+  "testGlobs": [
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts"
+  ],
+  "srcGlobs": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
+}
